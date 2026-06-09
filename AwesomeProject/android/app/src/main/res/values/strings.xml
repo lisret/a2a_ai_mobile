@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">AI助手</string>
+    <string name="accessibility_service_description">AutoGLM需要无障碍权限来执行自动化任务，包括点击、滑动和输入文本等操作。</string>
+</resources>

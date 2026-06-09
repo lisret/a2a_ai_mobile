@@ -1,0 +1,1409 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OpenAutoGLM Full Demo</title>
+    <style>
+        :root {
+            --primary: #2563EB;
+            --primary-dark: #1D4ED8;
+            --primary-light: #EFF6FF;
+            --success: #10B981;
+            --warning: #F59E0B;
+            --error: #EF4444;
+            --text-main: #111827;
+            --text-secondary: #6B7280;
+            --bg-page: #F3F4F6;
+            --bg-card: #FFFFFF;
+            --border: #E5E7EB;
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+        }
+
+        body {
+            background-color: #E5E7EB;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        /* 手机外壳 */
+        .phone-container {
+            width: 375px;
+            height: 812px;
+            background-color: var(--bg-page);
+            border-radius: 40px;
+            border: 8px solid #1F2937;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* 顶部状态栏 */
+        .status-bar {
+            height: 44px;
+            background: var(--bg-card);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 24px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-main);
+            z-index: 100;
+        }
+
+        /* 导航栏 */
+        .nav-header {
+            height: 56px;
+            background: var(--bg-card);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+            border-bottom: 1px solid var(--border);
+            z-index: 99;
+            position: relative;
+        }
+
+        .nav-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+
+        .icon-btn {
+            background: none;
+            border: none;
+            padding: 8px;
+            cursor: pointer;
+            color: var(--text-main);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .icon-btn:active {
+            background-color: var(--bg-page);
+        }
+
+        /* 主内容区域 */
+        .content-area {
+            flex: 1;
+            overflow: hidden;
+            position: relative;
+            background-color: var(--bg-page);
+        }
+
+        .page {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            display: flex;
+            flex-direction: column;
+            opacity: 0;
+            pointer-events: none;
+            transform: scale(0.98);
+            transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+        }
+
+        .page.active {
+            opacity: 1;
+            pointer-events: auto;
+            z-index: 1;
+            transform: scale(1);
+        }
+
+        /* === 页面1: 首页 (Home/Launcher) === */
+        .home-container {
+            flex: 1;
+            padding: 24px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            overflow-y: auto;
+        }
+
+        .greeting-section {
+            margin-top: 12px;
+        }
+
+        .greeting-title {
+            font-size: 28px;
+            font-weight: 800;
+            color: var(--text-main);
+            margin-bottom: 8px;
+            line-height: 1.2;
+        }
+
+        .greeting-subtitle {
+            font-size: 15px;
+            color: var(--text-secondary);
+        }
+
+        /* 任务输入卡片 */
+        .task-input-card {
+            background: white;
+            border-radius: 20px;
+            padding: 20px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border);
+            transition: all 0.3s ease;
+        }
+
+        .task-input-area {
+            width: 100%;
+            min-height: 100px;
+            border: none;
+            font-size: 16px;
+            line-height: 1.5;
+            color: var(--text-main);
+            resize: none;
+            outline: none;
+            background: transparent;
+            margin-bottom: 16px;
+        }
+        
+        .task-input-area::placeholder { color: #9CA3AF; }
+
+        .task-action-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .clear-btn {
+            font-size: 13px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 6px;
+        }
+        .clear-btn:hover { background: var(--bg-page); }
+
+        .run-btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 24px;
+            font-weight: 600;
+            font-size: 15px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);
+            transition: all 0.2s;
+        }
+        
+        .run-btn:active { transform: scale(0.96); }
+        .run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* 建议指令 Chips */
+        .suggestions-section {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .suggestion-chip {
+            background: white;
+            border: 1px solid var(--border);
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            color: var(--text-main);
+            cursor: pointer;
+            transition: 0.2s;
+            box-shadow: var(--shadow-sm);
+        }
+        
+        .suggestion-chip:active {
+            background: var(--primary-light);
+            border-color: var(--primary);
+            color: var(--primary);
+        }
+
+        /* 执行状态卡片 (替换输入卡片) */
+        .execution-card {
+            background: white;
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border);
+            display: none; /* 默认隐藏 */
+        }
+        
+        .execution-card.show { display: block; animation: fadeIn 0.3s ease; }
+
+        .exec-header {
+            padding: 16px 20px;
+            background: var(--primary-light);
+            border-bottom: 1px solid #DBEAFE;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .exec-status-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--primary);
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        .exec-body { padding: 20px; }
+
+        .exec-instruction {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-main);
+            margin-bottom: 16px;
+        }
+
+        .steps-timeline {
+            position: relative;
+            padding-left: 16px;
+        }
+
+        .timeline-item {
+            position: relative;
+            padding-bottom: 20px;
+            padding-left: 20px;
+            border-left: 2px solid #E5E7EB;
+        }
+        
+        .timeline-item:last-child { border-left-color: transparent; padding-bottom: 0; }
+
+        .timeline-dot {
+            position: absolute;
+            left: -7px;
+            top: 0;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: white;
+            border: 2px solid #D1D5DB;
+        }
+        
+        .timeline-item.active .timeline-dot { border-color: var(--primary); background: var(--primary); }
+        .timeline-item.done .timeline-dot { border-color: var(--success); background: var(--success); }
+
+        .timeline-content {
+            margin-top: -4px;
+        }
+
+        .t-title { font-size: 14px; font-weight: 500; color: var(--text-main); }
+        .t-desc { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+
+        .exec-footer {
+            padding: 12px 20px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: flex-end;
+        }
+
+        .stop-btn {
+            color: var(--error);
+            font-size: 14px;
+            font-weight: 600;
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 8px 16px;
+            border-radius: 8px;
+        }
+        .stop-btn:hover { background: #FEF2F2; }
+
+
+        /* === 页面2: 模型 (Models) === */
+        .model-list {
+            padding: 16px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding-bottom: 100px;
+        }
+
+        .model-card {
+            background: white;
+            border-radius: 16px;
+            padding: 16px;
+            border: 2px solid transparent;
+            box-shadow: var(--shadow);
+            position: relative;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .model-card.active {
+            border-color: var(--primary);
+            background: var(--primary-light);
+        }
+
+        .model-card:active { transform: scale(0.98); }
+
+        .model-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .model-name { font-weight: 700; font-size: 16px; color: var(--text-main); }
+        
+        .tag {
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: 500;
+        }
+        
+        .tag.primary { background: var(--primary); color: white; }
+        .tag.gray { background: #E5E7EB; color: var(--text-secondary); }
+
+        .model-info-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 4px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .edit-btn {
+            position: absolute;
+            right: 16px;
+            bottom: 16px;
+            opacity: 0.5;
+            padding: 4px;
+        }
+        .edit-btn:hover { opacity: 1; }
+
+        .fab {
+            position: absolute;
+            bottom: 24px;
+            right: 24px;
+            width: 56px;
+            height: 56px;
+            border-radius: 28px;
+            background: var(--primary);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: var(--shadow-lg);
+            cursor: pointer;
+            z-index: 10;
+        }
+        .fab:active { transform: scale(0.95); }
+
+        /* === 页面3: 历史 (History) === */
+        .history-list { padding: 0 16px; overflow-y: auto; }
+        
+        .date-header {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--text-secondary);
+            margin: 20px 0 8px 4px;
+            text-transform: uppercase;
+        }
+
+        .history-item {
+            background: white;
+            border-radius: 16px;
+            padding: 16px;
+            margin-bottom: 12px;
+            box-shadow: var(--shadow-sm);
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            cursor: pointer;
+            position: relative;
+        }
+        
+        .history-item:active { background: #F9FAFB; }
+
+        .h-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            background: var(--primary-light);
+            color: var(--primary);
+        }
+        
+        .h-icon.fail { background: #FEF2F2; color: var(--error); }
+
+        .h-content { flex: 1; overflow: hidden; }
+        
+        .h-title {
+            font-weight: 600;
+            font-size: 15px;
+            color: var(--text-main);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-bottom: 4px;
+        }
+
+        .h-meta { font-size: 12px; color: var(--text-secondary); }
+        
+        .h-actions {
+            position: absolute;
+            right: 16px;
+            display: none;
+        }
+        .history-item:hover .h-actions { display: block; }
+
+        /* === 页面4: 设置 (Settings) === */
+        .settings-scroll { padding: 16px; overflow-y: auto; height: 100%; padding-bottom: 80px; }
+        
+        .settings-group {
+            background: white;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: var(--shadow-sm);
+            margin-bottom: 20px;
+        }
+
+        .settings-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+        }
+        .settings-item:last-child { border-bottom: none; }
+        .settings-item:active { background: #F9FAFB; }
+
+        .s-label { font-size: 15px; color: var(--text-main); font-weight: 500; }
+        .s-desc { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+        
+        .s-value { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 14px; }
+
+        /* 开关组件 */
+        .switch {
+            width: 50px;
+            height: 30px;
+            background: #E5E7EB;
+            border-radius: 15px;
+            position: relative;
+            transition: 0.3s;
+            cursor: pointer;
+        }
+        .switch.checked { background: var(--success); }
+        
+        .switch-knob {
+            width: 26px;
+            height: 26px;
+            background: white;
+            border-radius: 50%;
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            transition: 0.3s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .switch.checked .switch-knob { left: 22px; }
+
+        /* === 底部 Tab 栏 === */
+        .tab-bar {
+            height: 70px; /* 增加一点高度容纳波浪 */
+            background: white;
+            display: flex;
+            justify-content: space-around;
+            align-items: flex-end; /* 底部对齐 */
+            padding-bottom: 10px;
+            position: relative;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
+            z-index: 100;
+        }
+
+        /* 波浪指示器 */
+        .tab-indicator {
+            position: absolute;
+            top: 0; /* 下沉到底部对齐 */
+            bottom: 0; /* 撑满高度 */
+            left: 0;
+            width: 25%;
+            height: 100%; /* 高度设为100%以匹配Tab Bar */
+            pointer-events: none;
+            transition: transform 0.4s cubic-bezier(0.5, 0.0, 0.2, 1.5); 
+            z-index: 0; /* 放在最底层 */
+            display: flex;
+            justify-content: center;
+            align-items: flex-end; /* 底部对齐 */
+            overflow: visible; 
+            filter: drop-shadow(0 -2px 3px rgba(0,0,0,0.05));
+            margin-left: 45px;
+        }
+
+        .wave-svg {
+            width: 300%; 
+            margin-left: -100%; 
+            height: 140%; /* 增加高度比例，让波峰稍微冲出Tab Bar顶部一点点，而不是悬浮 */
+            fill: #0EA5E9; 
+            transform-origin: bottom center;
+            transition: transform 0.3s ease;
+            margin-bottom: -2px; /* 修正底部缝隙 */
+        }
+        
+        /* ... */
+
+        /* 装饰圆点 */
+        .dot-decoration {
+            position:absolute; 
+            bottom: 15px; /* 改为相对于底部定位 */
+            top: auto;
+            width: 40px; 
+            height: 40px; 
+            background: rgba(255, 255, 255, 0.2); 
+            border-radius: 50%; 
+            z-index: -1; 
+            opacity: 0.6;
+            transform: scale(0.8);
+            transition: transform 0.3s;
+        }
+        
+        /* ... */
+
+        .tab-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            color: var(--text-secondary);
+            font-size: 10px;
+            cursor: pointer;
+            width: 25%; /* 均分宽度 */
+            height: 100%;
+            z-index: 11; /* 确保点击和显示在波浪之上 */
+            transition: 0.2s;
+            position: relative;
+            padding-bottom: 16px;
+            justify-content: flex-end;
+        }
+
+        .tab-item.active { color: white; /* 选中图标变白 */ }
+        .tab-item.active .tab-icon {
+            transform: translateY(-4px); /* 图标上浮 */
+            animation: iconBounce 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            filter: drop-shadow(0 2px 2px rgba(0,0,0,0.1));
+        }
+        
+        .tab-item.disabled { 
+            opacity: 0.4; 
+            pointer-events: none; 
+            filter: grayscale(100%);
+        }
+        .tab-icon { width: 24px; height: 24px; stroke-width: 2; transition: transform 0.2s; }
+
+        /* === 模态框 (Modal) === */
+        .modal-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 200;
+            display: flex;
+            align-items: flex-end; /* Bottom sheet style */
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+        
+        .modal-overlay.show { opacity: 1; pointer-events: auto; }
+
+        .modal-sheet {
+            background: white;
+            width: 100%;
+            border-top-left-radius: 24px;
+            border-top-right-radius: 24px;
+            padding: 24px;
+            transform: translateY(100%);
+            transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+            max-height: 90%;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .modal-overlay.show .modal-sheet { transform: translateY(0); }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            flex-shrink: 0;
+        }
+        
+        .modal-title { font-size: 18px; font-weight: 700; color: var(--text-main); }
+
+        .form-group { margin-bottom: 16px; }
+        .form-label { display: block; font-size: 14px; font-weight: 500; color: var(--text-main); margin-bottom: 6px; }
+        .form-input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 14px;
+            background: #F9FAFB;
+            outline: none;
+        }
+        .form-input:focus { border-color: var(--primary); background: white; }
+        
+        .form-helper { font-size: 12px; color: var(--text-secondary); margin-top: 4px; display: flex; align-items: center; gap: 4px; cursor: pointer; }
+
+        .btn-group { display: flex; gap: 12px; margin-top: 24px; flex-shrink: 0;}
+        .btn { flex: 1; padding: 12px; border-radius: 8px; font-size: 15px; font-weight: 600; text-align: center; border: none; cursor: pointer; }
+        .btn-secondary { background: #F3F4F6; color: #374151; }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-danger { background: var(--error); color: white; }
+
+        /* === 全屏页面 (Overlay Page) === */
+        .overlay-page {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: var(--bg-page);
+            z-index: 300;
+            transform: translateX(100%);
+            transition: transform 0.3s ease;
+            display: flex;
+            flex-direction: column;
+        }
+        .overlay-page.show { transform: translateX(0); }
+
+        .log-list {
+            flex: 1;
+            padding: 12px;
+            overflow-y: auto;
+            font-family: monospace;
+            background: white;
+        }
+        .log-entry {
+            margin-bottom: 12px;
+            padding: 12px;
+            background: #F9FAFB;
+            border-left: 3px solid #E5E7EB;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        .log-entry.error { border-left-color: var(--error); }
+        .log-entry.info { border-left-color: var(--primary); }
+        
+        /* Guide Content */
+        .guide-content { padding: 16px; overflow-y: auto; }
+        .guide-card { background: white; border-radius: 12px; padding: 16px; margin-bottom: 16px; border: 1px solid var(--border); }
+
+        /* Toast 提示 */
+        .toast {
+            position: absolute;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 14px;
+            opacity: 0;
+            transition: all 0.3s;
+            pointer-events: none;
+            z-index: 400;
+            white-space: nowrap;
+        }
+        .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+        @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        @keyframes iconBounce { 
+            0% { transform: scale(1); } 
+            50% { transform: scale(1.2); } 
+            100% { transform: scale(1); } 
+        }
+
+    </style>
+</head>
+<body>
+
+<div class="phone-container">
+    <!-- 状态栏 -->
+    <div class="status-bar">
+        <span>9:41</span>
+        <div style="display: flex; gap: 4px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 5-5v-5z"></path></svg>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20"></line></svg>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="2" y="6" width="20" height="11" rx="2" ry="2"></rect></svg>
+        </div>
+    </div>
+
+    <!-- 导航栏 -->
+    <div class="nav-header">
+        <div class="icon-btn" id="back-btn" style="opacity: 0; pointer-events: none;" onclick="goBack()">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+        </div>
+        <span class="nav-title" id="page-title">OpenAutoGLM</span>
+        <div id="nav-actions" style="width: 40px;"></div>
+    </div>
+
+    <!-- 内容区域 -->
+    <div class="content-area">
+        
+        <!-- Page 1: Home (Launcher) -->
+        <div id="page-home" class="page active">
+            <div class="home-container">
+                <div class="greeting-section">
+                    <div class="greeting-title">准备好<br>执行任务了吗？</div>
+                    <div class="greeting-subtitle">输入指令，剩下的交给我。</div>
+                </div>
+
+                <!-- 任务输入卡片 -->
+                <div class="task-input-card" id="input-card">
+                    <textarea class="task-input-area" id="task-textarea" placeholder="例如：打开京东查询 iPhone 价格..."></textarea>
+                    <div class="task-action-bar">
+                        <div class="clear-btn" onclick="document.getElementById('task-textarea').value=''">清空</div>
+                        <button class="run-btn" id="run-btn" onclick="startTask()">
+                            <span>开始执行</span>
+                            <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-width="3" d="M5 12l14 0m-6-6l6 6l-6 6"/></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 执行状态卡片 (默认隐藏) -->
+                <div class="execution-card" id="execution-card">
+                    <div class="exec-header">
+                        <div class="exec-status-title">
+                            <div class="spinner"></div>
+                            <span>正在执行任务...</span>
+                        </div>
+                    </div>
+                    <div class="exec-body">
+                        <div class="exec-instruction" id="exec-instruction-text">...</div>
+                        <div class="steps-timeline" id="exec-steps-list">
+                            <!-- 动态插入步骤 -->
+                        </div>
+                    </div>
+                    <div class="exec-footer">
+                        <button class="stop-btn" onclick="stopTask()">停止任务</button>
+                    </div>
+                </div>
+
+                <!-- 快捷指令建议 -->
+                <div class="suggestions-section" id="suggestions-area">
+                    <div class="suggestion-chip" onclick="fillTask('查询明天北京的天气')">查询明天北京的天气</div>
+                    <div class="suggestion-chip" onclick="fillTask('给妈妈发微信说晚上回家吃饭')">给妈妈发微信</div>
+                    <div class="suggestion-chip" onclick="fillTask('打开设置调整亮度到50%')">调整屏幕亮度</div>
+                    <div class="suggestion-chip" onclick="fillTask('清理手机缓存垃圾')">清理手机缓存</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Page 2: Models -->
+        <div id="page-models" class="page">
+            <div class="model-list" id="model-list-container">
+                <!-- Generated by JS -->
+            </div>
+            <div class="fab" onclick="showModal('model')">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            </div>
+        </div>
+
+        <!-- Page 3: History -->
+        <div id="page-history" class="page">
+            <div class="history-list" id="history-list-container">
+                <!-- Generated by JS -->
+            </div>
+        </div>
+
+        <!-- Page 4: Settings -->
+        <div id="page-settings" class="page">
+            <div class="settings-scroll">
+                <div class="settings-group">
+                    <div class="settings-item">
+                        <div class="s-info">
+                            <div class="s-label">无障碍服务</div>
+                            <div class="s-desc">启用后可以执行自动化任务</div>
+                        </div>
+                        <div class="s-value">
+                            <span style="color: var(--success); font-size:12px;">已开启</span>
+                            <div class="switch checked" onclick="toggleSwitch(this); showToast('无障碍服务设置')"><div class="switch-knob"></div></div>
+                        </div>
+                    </div>
+                    <div class="settings-item" onclick="showModal('searchBox')">
+                        <div class="s-info">
+                            <div class="s-label">手机应用搜索框</div>
+                            <div class="s-desc">设置搜索框位置</div>
+                        </div>
+                        <div class="s-value">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                        </div>
+                    </div>
+                     <div class="settings-item">
+                        <div class="s-info">
+                            <div class="s-label">ADB 兜底运行</div>
+                            <div class="s-desc">无障碍服务失败时使用 ADB</div>
+                        </div>
+                        <div class="s-value">
+                            <div class="switch" onclick="toggleSwitch(this)"><div class="switch-knob"></div></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="settings-group">
+                    <div class="settings-item" onclick="showOverlay('debug')">
+                        <div class="s-info">
+                            <div class="s-label">调试日志</div>
+                            <div class="s-desc">查看应用运行日志</div>
+                        </div>
+                        <div class="s-value">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                        </div>
+                    </div>
+                    <div class="settings-item">
+                        <div class="s-info">
+                            <div class="s-label">自动保存任务历史</div>
+                        </div>
+                        <div class="s-value">
+                            <div class="switch checked" onclick="toggleSwitch(this)"><div class="switch-knob"></div></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="settings-group">
+                    <div class="settings-item">
+                        <div class="s-info">
+                            <div class="s-label">关于</div>
+                        </div>
+                        <div class="s-value">v1.0.2</div>
+                    </div>
+                    <div class="settings-item">
+                        <div class="s-info">
+                            <div class="s-label">作者</div>
+                        </div>
+                        <div class="s-value">李sir</div>
+                    </div>
+                     <div class="settings-item">
+                        <div class="s-info">
+                            <div class="s-label">邮箱</div>
+                        </div>
+                        <div class="s-value" style="font-size: 12px;">1443376351@qq.com</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Overlay: Debug Log -->
+        <div id="overlay-debug" class="overlay-page">
+            <div class="nav-header">
+                <div class="icon-btn" onclick="hideOverlay('debug')">
+                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+                </div>
+                <span class="nav-title">调试日志</span>
+                <div class="icon-btn" onclick="clearLogs()">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </div>
+            </div>
+            <div class="log-list" id="log-container">
+                <div class="log-entry info">[INFO] 应用启动成功</div>
+                <div class="log-entry info">[INFO] 加载模型配置...</div>
+            </div>
+        </div>
+        
+        <!-- Overlay: API Key Guide -->
+        <div id="overlay-guide" class="overlay-page">
+             <div class="nav-header">
+                <div class="icon-btn" onclick="hideOverlay('guide')">
+                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+                </div>
+                <span class="nav-title">API Key 获取指引</span>
+                <div style="width: 40px;"></div>
+            </div>
+            <div class="guide-content">
+                <div class="guide-card">
+                    <h3>OpenAI</h3>
+                    <p style="color:#666; font-size:13px; margin: 8px 0;">需要国外手机号注册</p>
+                    <ol style="font-size: 14px; margin-left: 20px; line-height: 1.6;">
+                        <li>访问 platform.openai.com</li>
+                        <li>注册登录账号</li>
+                        <li>点击 Create new secret key</li>
+                    </ol>
+                </div>
+                <div class="guide-card">
+                    <h3>智谱 AI (GLM)</h3>
+                    <p style="color:#666; font-size:13px; margin: 8px 0;">支持国内手机号</p>
+                    <ol style="font-size: 14px; margin-left: 20px; line-height: 1.6;">
+                        <li>访问 open.bigmodel.cn</li>
+                        <li>注册登录账号</li>
+                        <li>在控制台查看 API Keys</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- 底部 Tab 栏 -->
+    <div class="tab-bar">
+        <div class="tab-indicator">
+            <svg class="wave-svg" viewBox="0 0 100 80" preserveAspectRatio="none">
+                <!-- 调整为底部隆起，波峰不需要太高，关键是宽 -->
+                <path d="M0,80 C25,80 25,20 50,20 C75,20 75,80 100,80 Z" />
+            </svg>
+            <!-- 装饰圆点 -->
+            <div class="dot-decoration"></div>
+        </div>
+        <div class="tab-item active" id="tab-home" onclick="switchTab('home')">
+            <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+            <span>首页</span>
+        </div>
+        <div class="tab-item" id="tab-models" onclick="switchTab('models')">
+            <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+            <span>模型</span>
+        </div>
+        <div class="tab-item" id="tab-history" onclick="switchTab('history')">
+            <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            <span>历史</span>
+        </div>
+        <div class="tab-item" id="tab-settings" onclick="switchTab('settings')">
+            <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+            <span>设置</span>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <!-- Add/Edit Model Modal -->
+    <div id="modal-model" class="modal-overlay">
+        <div class="modal-sheet">
+            <div class="modal-header">
+                <div class="modal-title" id="model-modal-title">新增模型</div>
+                <div class="icon-btn" onclick="hideModal('model')">✕</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">昵称</label>
+                <input type="text" class="form-input" placeholder="例如：我的 GPT-4" id="model-name">
+            </div>
+            <div class="form-group">
+                <label class="form-label">提供商</label>
+                <select class="form-input" id="model-provider" onchange="updateProviderSettings()">
+                    <option value="openai">OpenAI</option>
+                    <option value="zhipu">智谱 AI (GLM)</option>
+                    <option value="custom">自定义</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">API 地址</label>
+                <input type="text" class="form-input" value="https://api.openai.com/v1" id="model-url">
+            </div>
+            <div class="form-group">
+                <label class="form-label">API 密钥</label>
+                <input type="password" class="form-input" placeholder="sk-..." id="model-key">
+                <div class="form-helper" onclick="showOverlay('guide')">
+                    <svg width="12" height="12" fill="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 17h.01M12 14v-4"/></svg>
+                    <span style="color: var(--primary);">如何获取 API 密钥？</span>
+                </div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">模型名称</label>
+                <input type="text" class="form-input" placeholder="gpt-4o" id="model-id">
+            </div>
+            <div class="form-group">
+                <label class="form-label">最大执行步数 (默认99)</label>
+                <input type="number" class="form-input" placeholder="99" id="model-max-steps">
+            </div>
+            <div class="btn-group">
+                <button class="btn btn-secondary" onclick="hideModal('model')">取消</button>
+                <button class="btn btn-primary" onclick="saveModel()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search Box Position Modal -->
+    <div id="modal-searchBox" class="modal-overlay">
+        <div class="modal-sheet">
+            <div class="modal-header">
+                <div class="modal-title">搜索框位置</div>
+                <div class="icon-btn" onclick="hideModal('searchBox')">✕</div>
+            </div>
+            <div class="form-group">
+                <label class="form-label">位置描述</label>
+                <textarea class="form-input" style="height: 100px; resize: none;" placeholder="例如：首页顶部，带有'搜索'字样..."></textarea>
+                <div class="form-helper">准确的描述有助于 AI 快速定位搜索入口</div>
+            </div>
+            <div class="btn-group">
+                <button class="btn btn-secondary" onclick="hideModal('searchBox')">取消</button>
+                <button class="btn btn-primary" onclick="hideModal('searchBox'); showToast('已保存')">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast">操作成功</div>
+
+</div>
+
+<script>
+    // === Data ===
+    let models = [
+        { id: 1, name: 'GLM-4-Flash', provider: '智谱 AI', active: true, maxSteps: 99 },
+        { id: 2, name: 'GPT-4o', provider: 'OpenAI', active: false, maxSteps: 50 },
+    ];
+
+    let history = [
+        { id: 1, title: '查询明天北京的天气', time: '14:30', status: 'success', steps: 5 },
+        { id: 2, title: '给妈妈发微信', time: '12:15', status: 'success', steps: 3 },
+        { id: 3, title: '预订火车票', time: '昨天 09:00', status: 'fail', steps: 0, error: '网络超时' }
+    ];
+
+    // === Navigation ===
+    function switchTab(tabId) {
+        document.querySelectorAll('.tab-item').forEach(el => el.classList.remove('active'));
+        event.currentTarget.classList.add('active');
+
+        document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
+        document.getElementById('page-' + tabId).classList.add('active');
+
+        const titles = {
+            'home': 'OpenAutoGLM',
+            'models': '模型管理',
+            'history': '任务历史',
+            'settings': '系统设置'
+        };
+        document.getElementById('page-title').innerText = titles[tabId];
+        
+        // Update indicator
+        const tabs = ['home', 'models', 'history', 'settings'];
+        const index = tabs.indexOf(tabId);
+        const indicator = document.querySelector('.tab-indicator');
+        if(indicator) {
+            indicator.style.transform = `translateX(${index * 100}%)`;
+            
+            // 触发形变动画
+            indicator.classList.remove('moving');
+            void indicator.offsetWidth; // 触发重绘
+            indicator.classList.add('moving');
+        }
+        
+        // Hide Back Button logic for tabs
+        
+        if (tabId === 'models') renderModels();
+        if (tabId === 'history') renderHistory();
+    }
+
+    function checkTabStatus() {
+        const hasActive = models.some(m => m.active);
+        const disabledTabs = ['tab-home', 'tab-history']; // Changed chat to home
+        
+        disabledTabs.forEach(id => {
+            const el = document.getElementById(id);
+            if (hasActive) {
+                el.classList.remove('disabled');
+            } else {
+                el.classList.add('disabled');
+            }
+        });
+        
+        // 如果当前停留在需要模型但无模型的页面，强制跳转
+        if (!hasActive) {
+            const activePage = document.querySelector('.page.active');
+            if(activePage && (activePage.id === 'page-home' || activePage.id === 'page-history')) {
+                switchTab('models');
+                // 延迟一点显示toast，避免页面切换太快看不清
+                setTimeout(() => showToast('请先配置并选择一个模型'), 300);
+            }
+        }
+    }
+
+    // === Models Logic ===
+    function renderModels() {
+        const container = document.getElementById('model-list-container');
+        container.innerHTML = models.map(m => `
+            <div class="model-card ${m.active ? 'active' : ''}" onclick="selectModel(${m.id})">
+                <div class="model-header">
+                    <span class="model-name">${m.name}</span>
+                    <span class="tag ${m.active ? 'primary' : 'gray'}">${m.active ? '当前使用' : '未激活'}</span>
+                </div>
+                <div class="model-info-row">
+                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/></svg>
+                    <span>${m.provider}</span>
+                </div>
+                <div class="edit-btn" onclick="event.stopPropagation(); editModel(${m.id})">
+                   <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                </div>
+                <div class="edit-btn" style="right: 48px;" onclick="event.stopPropagation(); deleteModel(${m.id})">
+                   <svg width="20" height="20" fill="none" stroke="#EF4444" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                </div>
+            </div>
+        `).join('');
+        checkTabStatus();
+    }
+
+    function selectModel(id) {
+        models.forEach(m => m.active = (m.id === id));
+        renderModels();
+        showToast(`已切换至 ${models.find(m => m.id === id).name}`);
+    }
+
+    function deleteModel(id) {
+        //event.stopPropagation(); // Handled inline
+        if(confirm('确认删除此模型吗？')) {
+            models = models.filter(m => m.id !== id);
+            // 如果删除的是当前激活的模型
+            if (!models.some(m => m.active)) {
+               // 保持无激活状态，checkTabStatus 会禁用 tab
+            }
+            renderModels();
+            showToast('模型已删除');
+        }
+    }
+
+    function editModel(id) {
+        const model = models.find(m => m.id === id);
+        document.getElementById('model-modal-title').innerText = '编辑模型';
+        document.getElementById('model-name').value = model.name;
+        document.getElementById('model-max-steps').value = model.maxSteps || 99;
+        showModal('model');
+    }
+
+    function saveModel() {
+        const name = document.getElementById('model-name').value;
+        if(name) {
+            models.push({ id: Date.now(), name: name, provider: 'Custom', active: false, maxSteps: 99 });
+            renderModels();
+            hideModal('model');
+            showToast('模型已保存');
+        }
+    }
+    
+    function updateProviderSettings() {
+        const provider = document.getElementById('model-provider').value;
+        const urlInput = document.getElementById('model-url');
+        if (provider === 'openai') urlInput.value = 'https://api.openai.com/v1';
+        else if (provider === 'zhipu') urlInput.value = 'https://open.bigmodel.cn/api/paas/v4';
+        else urlInput.value = '';
+    }
+
+    // === History Logic ===
+    function renderHistory() {
+        const container = document.getElementById('history-list-container');
+        let html = '<div class="date-header">今天</div>';
+        
+        history.forEach(h => {
+            html += `
+            <div class="history-item">
+                <div class="h-icon ${h.status === 'fail' ? 'fail' : ''}">
+                    ${h.status === 'fail' 
+                        ? '<svg width="20" height="20" stroke="currentColor" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>'
+                        : '<svg width="20" height="20" stroke="currentColor" fill="none" viewBox="0 0 24 24"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>'
+                    }
+                </div>
+                <div class="h-content" onclick="viewHistoryDetail(${h.id})">
+                    <div class="h-title">${h.title}</div>
+                    <div class="h-meta">
+                        ${h.time} • ${h.status === 'fail' ? h.error : h.steps + ' 步'}
+                    </div>
+                </div>
+                <div class="h-actions">
+                     <div class="icon-btn" style="color: #EF4444;" onclick="deleteTask(${h.id})">
+                        <svg width="20" height="20" stroke="currentColor" fill="none" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                     </div>
+                </div>
+            </div>
+            `;
+        });
+        container.innerHTML = html;
+    }
+    
+    function deleteTask(id) {
+        if(confirm('确认删除该任务历史吗？')) {
+            history = history.filter(h => h.id !== id);
+            renderHistory();
+            showToast('已删除');
+        }
+    }
+
+    function viewHistoryDetail(id) {
+        // Reuse Home page for details view in this simple demo
+        // Ideally should be a separate view, but "Home" now supports "Execution state"
+        // Let's just simulate filling the input for now
+        switchTab('home');
+        const item = history.find(h => h.id === id);
+        fillTask(item.title);
+    }
+
+    // === Home Logic ===
+    function fillTask(text) {
+        document.getElementById('task-textarea').value = text;
+    }
+
+    function startTask() {
+        const text = document.getElementById('task-textarea').value;
+        if(!text.trim()) {
+            showToast('请输入任务指令');
+            return;
+        }
+
+        // Switch to execution view
+        document.getElementById('input-card').style.display = 'none';
+        document.getElementById('suggestions-area').style.display = 'none';
+        document.getElementById('execution-card').classList.add('show');
+        
+        document.getElementById('exec-instruction-text').innerText = text;
+        const list = document.getElementById('exec-steps-list');
+        list.innerHTML = ''; // clear previous
+
+        logToDebug(`[INFO] 任务开始: ${text}`);
+
+        // Simulate steps
+        let step = 0;
+        const steps = [
+            { title: '打开应用', desc: '已启动目标应用' },
+            { title: '点击搜索框', desc: '定位坐标 (120, 85)' },
+            { title: '输入内容', desc: `输入 "${text.substring(0, 5)}..."` },
+            { title: '完成', desc: '任务执行完毕' }
+        ];
+
+        const interval = setInterval(() => {
+            if(step >= steps.length) {
+                clearInterval(interval);
+                logToDebug('[INFO] 任务完成');
+                showToast('任务执行完成');
+                // save history
+                history.unshift({ id: Date.now(), title: text, time: '刚刚', status: 'success', steps: steps.length });
+                renderHistory(); // update history list background
+                return;
+            }
+
+            const s = steps[step];
+            const item = document.createElement('div');
+            item.className = 'timeline-item active'; // animate nicely
+            item.innerHTML = `
+                <div class="timeline-dot"></div>
+                <div class="timeline-content">
+                    <div class="t-title">${s.title}</div>
+                    <div class="t-desc">${s.desc}</div>
+                </div>
+            `;
+            list.appendChild(item);
+            
+            // Mark previous as done
+            if(step > 0) {
+                list.children[step-1].classList.remove('active');
+                list.children[step-1].classList.add('done');
+            }
+
+            logToDebug(`[INFO] 执行步骤 ${step+1}: ${s.title}`);
+            step++;
+        }, 1000);
+        
+        // Store interval to stop later
+        window.currentTaskInterval = interval;
+    }
+
+    function stopTask() {
+        if(window.currentTaskInterval) {
+            clearInterval(window.currentTaskInterval);
+            logToDebug('[WARN] 任务被用户手动停止');
+            showToast('任务已停止');
+        }
+        resetHomeView();
+    }
+
+    function resetHomeView() {
+        document.getElementById('input-card').style.display = 'block';
+        document.getElementById('suggestions-area').style.display = 'flex';
+        document.getElementById('execution-card').classList.remove('show');
+        document.getElementById('task-textarea').value = '';
+    }
+    
+    // === Debug Log ===
+    function logToDebug(msg) {
+        const container = document.getElementById('log-container');
+        const entry = document.createElement('div');
+        entry.className = 'log-entry info';
+        entry.innerText = msg;
+        container.appendChild(entry);
+    }
+    
+    function clearLogs() {
+        document.getElementById('log-container').innerHTML = '';
+        showToast('日志已清空');
+    }
+
+    // === UI Utils ===
+    function showModal(id) {
+        document.getElementById('modal-' + id).classList.add('show');
+    }
+    
+    function hideModal(id) {
+        document.getElementById('modal-' + id).classList.remove('show');
+    }
+    
+    function showOverlay(id) {
+        document.getElementById('overlay-' + id).classList.add('show');
+    }
+    
+    function hideOverlay(id) {
+        document.getElementById('overlay-' + id).classList.remove('show');
+    }
+
+    function toggleSwitch(el) {
+        el.classList.toggle('checked');
+    }
+
+    function showToast(msg) {
+        const toast = document.getElementById('toast');
+        toast.innerText = msg;
+        toast.classList.add('show');
+        setTimeout(() => toast.classList.remove('show'), 2000);
+    }
+
+    // Init
+    checkTabStatus();
+    if(!models.some(m => m.active)) {
+         switchTab('models');
+    } else {
+        renderModels();
+        renderHistory();
+    }
+</script>
+
+</body>
+</html>

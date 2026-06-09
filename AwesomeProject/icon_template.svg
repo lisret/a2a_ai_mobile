@@ -1,0 +1,40 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- 背景渐变 -->
+  <defs>
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#2563eb;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1e40af;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="iconGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#e0e7ff;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- 圆角矩形背景 -->
+  <rect width="1024" height="1024" rx="200" ry="200" fill="url(#bgGradient)"/>
+  
+  <!-- AI 机器人头部（圆形） -->
+  <circle cx="512" cy="380" r="180" fill="url(#iconGradient)"/>
+  
+  <!-- 机器人眼睛（左） -->
+  <circle cx="462" cy="360" r="35" fill="#2563eb"/>
+  <circle cx="462" cy="360" r="20" fill="#ffffff"/>
+  
+  <!-- 机器人眼睛（右） -->
+  <circle cx="562" cy="360" r="35" fill="#2563eb"/>
+  <circle cx="562" cy="360" r="20" fill="#ffffff"/>
+  
+  <!-- 机器人嘴巴（对话气泡形状） -->
+  <path d="M 512 420 Q 480 450 450 440 L 450 480 Q 480 490 512 480 Q 544 490 574 480 L 574 440 Q 544 450 512 420 Z" fill="#2563eb"/>
+  
+  <!-- AI 符号（底部装饰） -->
+  <text x="512" y="720" font-family="Arial, sans-serif" font-size="200" font-weight="bold" fill="url(#iconGradient)" text-anchor="middle" opacity="0.3">AI</text>
+  
+  <!-- 装饰性圆点 -->
+  <circle cx="300" cy="300" r="15" fill="#ffffff" opacity="0.3"/>
+  <circle cx="724" cy="300" r="15" fill="#ffffff" opacity="0.3"/>
+  <circle cx="300" cy="724" r="15" fill="#ffffff" opacity="0.3"/>
+  <circle cx="724" cy="724" r="15" fill="#ffffff" opacity="0.3"/>
+</svg>
+

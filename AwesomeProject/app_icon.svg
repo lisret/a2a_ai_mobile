@@ -1,0 +1,87 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- 背景渐变 - 蓝色科技感 -->
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#165DFF;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#2563eb;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1e40af;stop-opacity:1" />
+    </linearGradient>
+    <!-- 图标渐变 -->
+    <linearGradient id="iconGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#e0e7ff;stop-opacity:0.9" />
+    </linearGradient>
+    <!-- 阴影效果 -->
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="20"/>
+      <feOffset dx="0" dy="10" result="offsetblur"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.3"/>
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  
+  <!-- 圆角矩形背景 -->
+  <rect width="1024" height="1024" rx="220" ry="220" fill="url(#bgGradient)"/>
+  
+  <!-- 手机轮廓（底部） -->
+  <rect x="200" y="600" width="624" height="300" rx="40" ry="40" fill="url(#iconGradient)" opacity="0.95" filter="url(#shadow)"/>
+  
+  <!-- 手机屏幕 -->
+  <rect x="240" y="640" width="544" height="220" rx="20" ry="20" fill="#1e40af" opacity="0.3"/>
+  
+  <!-- AI 机器人头部（圆形，位于手机上方） -->
+  <circle cx="512" cy="380" r="160" fill="url(#iconGradient)" filter="url(#shadow)"/>
+  
+  <!-- 机器人头部装饰环 -->
+  <circle cx="512" cy="380" r="160" fill="none" stroke="#ffffff" stroke-width="8" opacity="0.3"/>
+  
+  <!-- 机器人眼睛（左） -->
+  <circle cx="472" cy="360" r="32" fill="#165DFF"/>
+  <circle cx="472" cy="360" r="18" fill="#ffffff"/>
+  <circle cx="468" cy="356" r="8" fill="#165DFF"/>
+  
+  <!-- 机器人眼睛（右） -->
+  <circle cx="552" cy="360" r="32" fill="#165DFF"/>
+  <circle cx="552" cy="360" r="18" fill="#ffffff"/>
+  <circle cx="548" cy="356" r="8" fill="#165DFF"/>
+  
+  <!-- 机器人嘴巴（微笑弧线） -->
+  <path d="M 472 420 Q 512 450 552 420" stroke="#165DFF" stroke-width="12" fill="none" stroke-linecap="round"/>
+  
+  <!-- 自动化齿轮图标（机器人头部左侧） -->
+  <g transform="translate(300, 280)">
+    <circle cx="0" cy="0" r="45" fill="none" stroke="url(#iconGradient)" stroke-width="6" opacity="0.8"/>
+    <circle cx="0" cy="0" r="30" fill="none" stroke="url(#iconGradient)" stroke-width="4" opacity="0.6"/>
+    <line x1="0" y1="-45" x2="0" y2="-30" stroke="url(#iconGradient)" stroke-width="6" stroke-linecap="round" opacity="0.8"/>
+    <line x1="0" y1="45" x2="0" y2="30" stroke="url(#iconGradient)" stroke-width="6" stroke-linecap="round" opacity="0.8"/>
+    <line x1="-45" y1="0" x2="-30" y2="0" stroke="url(#iconGradient)" stroke-width="6" stroke-linecap="round" opacity="0.8"/>
+    <line x1="45" y1="0" x2="30" y2="0" stroke="url(#iconGradient)" stroke-width="6" stroke-linecap="round" opacity="0.8"/>
+  </g>
+  
+  <!-- 自动化齿轮图标（机器人头部右侧） -->
+  <g transform="translate(724, 280)">
+    <circle cx="0" cy="0" r="45" fill="none" stroke="url(#iconGradient)" stroke-width="6" opacity="0.8"/>
+    <circle cx="0" cy="0" r="30" fill="none" stroke="url(#iconGradient)" stroke-width="4" opacity="0.6"/>
+    <line x1="0" y1="-45" x2="0" y2="-30" stroke="url(#iconGradient)" stroke-width="6" stroke-linecap="round" opacity="0.8"/>
+    <line x1="0" y1="45" x2="0" y2="30" stroke="url(#iconGradient)" stroke-width="6" stroke-linecap="round" opacity="0.8"/>
+    <line x1="-45" y1="0" x2="-30" y2="0" stroke="url(#iconGradient)" stroke-width="6" stroke-linecap="round" opacity="0.8"/>
+    <line x1="45" y1="0" x2="30" y2="0" stroke="url(#iconGradient)" stroke-width="6" stroke-linecap="round" opacity="0.8"/>
+  </g>
+  
+  <!-- 手机屏幕上的自动化指示器（小点） -->
+  <circle cx="380" cy="750" r="12" fill="url(#iconGradient)" opacity="0.9"/>
+  <circle cx="512" cy="750" r="12" fill="url(#iconGradient)" opacity="0.9"/>
+  <circle cx="644" cy="750" r="12" fill="url(#iconGradient)" opacity="0.9"/>
+  
+  <!-- 装饰性光点 -->
+  <circle cx="200" cy="200" r="20" fill="#ffffff" opacity="0.2"/>
+  <circle cx="824" cy="200" r="20" fill="#ffffff" opacity="0.2"/>
+  <circle cx="200" cy="824" r="20" fill="#ffffff" opacity="0.2"/>
+  <circle cx="824" cy="824" r="20" fill="#ffffff" opacity="0.2"/>
+</svg>
+

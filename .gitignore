@@ -1,0 +1,29 @@
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Code graph index
+.codegraph/
+
+# Zip archives
+*.zip
+*.rar
+*.7z
+
+# Temporary files
+*.tmp
+*.log
+
+# Sensitive data (do NOT commit)
+test.json
+1.md
+*.bat
+
+# Keep AwesomeProject's own .gitignore for its contents
+# See AwesomeProject/.gitignore for node_modules, build, etc.

@@ -1,120 +1,281 @@
-# a2a_ai_mobile / AI 驱动移动端自动化执行框架
+# 📱 Open-AutoGLM ReactNative — 让低端手机也能跑 AI 助手
 
-基于 Open-AutoGLM 的 AI 驱动移动端自动化框架。用自然语言描述用例，AI 智能体自动分析屏幕并执行触控操作，无需编写脚本。
+> **让每台闲置的旧手机都变成 AI 劳动力** — 用自然语言驱动手机自动干活，单机辅助日常操作，多机集群合力完成复杂任务。无需脚本，无需连电脑，Android 7.0 就能跑。
 
-支持 Android 7.0+。
-
-AI-driven mobile automation framework based on Open-AutoGLM. Describe test cases in natural language, and the AI agent automatically analyzes the screen and executes touch operations — no scripting required. Supports Android 7.0+.
-
-## 架构 / Architecture
-
-```
-自然语言 → 截图 → 视觉模型 → 结构化操作指令 → 无障碍服务/ADB 执行
-Natural Language → Screenshot → Vision Model → Structured Action → Accessibility/ADB Execute
-```
-
-## 特性 / Features
-
-- **多模型支持** — 7 家大模型厂商（智谱、ModelScope、OpenAI、Claude、DeepSeek、Moonshot、自定义），支持同时配置多个模型并指定驱动模型，随时切换对比效果
-- **双通道执行** — 无障碍服务 + ADB 降级兜底，覆盖点击、滑动、输入、长按、双击等全手势操作
-- **单任务最大 100 步** — 支持长流程复杂用例，步数上限随模型上下文窗口可继续上调
-- **三轨执行** — 悬浮窗实时进度展示 + 前台服务 + 后台无界面执行，熄屏/切后台不中断
-- **语音指令** — 默认集成开源离线语音识别，支持切换配置为云端语音接口，语音口述用例直接触发执行
-- **OpenClaw 集成** — WebSocket 协议接入 OpenClaw 网关，设备注册为远程 Agent 节点，支持集群调度
-- **应用映射** — 内置 200+ 国产应用包名映射
+[![Platform](https://img.shields.io/badge/platform-Android%207.0%2B-green)](https://developer.android.com/)
+[![React Native](https://img.shields.io/badge/React%20Native-0.73-blue)](https://reactnative.dev/)
+[![License](https://img.shields.io/badge/license-MIT-brightgreen)](./LICENSE)
 
 ---
 
-- **Multi-Model Support** — 7 LLM providers with hot-swappable driver model selection
-- **Dual-Channel Execution** — AccessibilityService + ADB fallback, all gesture types
-- **100 Steps Per Task** — Scales with model context window
-- **Triple Execution Mode** — Floating window + Foreground Service + Headless background
-- **Voice Commands** — Offline ASR by default, configurable to cloud APIs
-- **OpenClaw Integration** — WebSocket gateway, device as remote Agent node for cluster scheduling
-- **App Mapping** — 200+ Chinese app package name mappings built-in
+## 🤔 这是什么？
 
-## 技术栈 / Tech Stack
+**Open-AutoGLM ReactNative** 是一个运行在 Android 手机上的 **AI 自动化助手**。
 
-| 层级 | 技术 |
+核心理念就两点：
+
+1. **让低端/老旧手机用上 AI** — 最低支持 Android 7.0，运算靠云端模型，手机只负责截图+执行触控，处理器不挑、内存不挑。
+2. **多台低端机 = 一个集群** — 通过 OpenClaw 网关把多台廉价设备组成 Agent 集群，分工协作干大事（批量养号、群控测试、数据采集等等）。
+
+比如你对着手机说一句话：
+
+> *"帮我打开微信，找到张三，给他发消息说明天见"*
+
+手机上的 AI 就会自动截图 → 理解屏幕内容 → 模拟手指点击滑动 → 完成任务。
+
+如果接上 10 台旧手机组成集群，就可以同时操作 10 台设备执行不同任务，一个人管一个机群。
+
+### 和普通自动化工具有什么区别？
+
+| | 传统脚本/录制回放 | Open-AutoGLM |
+|---|---|---|
+| **编写方式** | 手工编写坐标、步骤 | 自然语言描述意图 |
+| **界面变化** | 坐标偏移就失败 | AI 理解语义，自适应 |
+| **复杂流程** | 需要大量 if/else | 一句话描述 |
+| **硬件门槛** | 通常需电脑+特定机型 | Android 7.0+ 任意机型 |
+| **多机协作** | 几乎不可能 | 原生集群支持 |
+
+---
+
+## 🎯 核心特性
+
+### 🧠 AI 视觉驱动
+- 接入 **7 家大模型厂商**（智谱、ModelScope、OpenAI、Claude、DeepSeek、Moonshot + 自定义兼容接口）
+- 支持**热切换**驱动模型，随时对比不同模型效果
+- OpenAI 兼容 Vision API 协议，**SSE 流式解析**实时返回执行动作
+
+### 🖐️ 双通道触控执行（三级降级）
+
+| 优先级 | 通道 | 速度 | 适用条件 |
+|--------|------|------|---------|
+| **Level 1** | 无障碍服务 (AccessibilityService) | 快（直接注入事件） | 服务已开启、控件树可获取 |
+| **Level 2** | ADB (`adb shell input`) | 中等（shell 转发 ~200ms 额外延迟） | 无障碍被杀/控件树为空/手势超时 |
+| **Level 3** | 通知用户 | — | 双通道均不可用 |
+
+覆盖全手势：点击、长按、双击、滑动、文字输入、返回、Home、最近任务。
+
+### 📱 三轨执行模式 — 真正的移动端体验
+| 模式 | 说明 | 适用场景 |
+|------|------|---------|
+| 🔵 **悬浮窗** | 半透明悬浮窗实时展示步骤和截图进度 | 日常使用，边看边管 |
+| 🟢 **前台服务** | 通知栏常驻，可切后台运行（⚠️ 熄屏会中断） | 长时间任务，保持亮屏 |
+| ⚫ **无界面** | Headless JS 静默执行，无 UI 开销 | 定时/触发式后台任务 |
+
+### 🎤 语音指令
+- 默认集成**开源离线语音识别**，无需联网即可口述任务
+- 支持配置切换为云端语音 API 获得更高精度
+
+### 🌐 低端机集群 — 把旧手机变成 AI 机群
+
+这是项目的**核心亮点**：与其让旧手机吃灰，不如把它们变成一支 AI 军队。
+
+**胖服务端 + 瘦客户端** 架构，让低端机只用干最轻的活：
+
+```
+网关下发指令 → 手机执行 tap/swipe → 截图传回网关验证 → 网关下发下一步
+```
+
+- 手机端不需要运行模型、不需要管理上下文窗口、不需要存 API Key
+- 更新策略只改网关，不用更新每台设备
+- **一台电脑/服务器 → N 台低端手机 → 并行执行 → 结果汇总**
+
+**集群调度逻辑**：
+1. **能力匹配**：任务需要"已安装美团" → 过滤装有美团的设备
+2. **状态筛选**：空闲优先、电量 > 20%、WiFi 优先
+3. **评分排序**：`score = 电量×0.3 + 空闲时长×0.1 - 活跃任务数×0.6`
+4. **原子分配**：CAS 锁定设备 idle → busy
+
+**容灾处理**：
+- 设备失联 30s → 任务自动转移其他设备
+- 断连半执行保护：Action 带幂等 ID，重连后协商进度防重复执行
+
+**典型场景**：批量账号操作、多设备兼容性测试、数据采集清洗、群控自动化
+
+### 📦 内置应用映射
+- 200+ 国产应用包名映射，说"打开抖音"即可自动匹配 `com.ss.android.ugc.aweme`
+
+### 🔌 低门槛硬件兼容
+- 最低支持 **Android 7.0**，不挑处理器、不挑 GPU
+- **云端模型推理**，手机本地仅做截图和触控执行，内存占用低
+- 从旗舰机到百元机、从新机到淘汰旧机，只要能亮屏就能加入集群干活
+
+### 🛡️ 长任务稳定性保障
+
+100 步长链任务的核心挑战是上下文窗口管理。本项目的分层策略：
+
+| 层级 | 策略 | 效果 |
+|------|------|------|
+| **截图去重** | 感知哈希 (pHash) 对比前后帧，相似度 > 95% 丢弃 | 100 步 → 仅保留 15-25 张关键帧 |
+| **历史压缩** | 最近 5 步完整保留，更早的压缩为结构化状态摘要 | 大幅降低文本 token 消耗 |
+| **模型输出容错** | 6 层防御：Prompt 约束 → 正则提取 → Markdown 剥离 → Schema 校验 → 别名映射 → 重试 | 解析成功率 85% → 98% |
+| **超限接力** | 100 步时生成任务状态摘要，启动新会话继续执行 | 理论上可无限延长 |
+
+> OpenClaw 远程模式下客户端完全不用管上下文——全部由网关在云端管理，这是远程模式的核心优势之一。
+
+---
+
+## 🏗️ 架构
+
+项目设计了**两套 Agent 执行模式**，分别应对不同场景：
+
+| 模式 | 范式 | 决策位置 | 适合场景 |
+|------|------|---------|---------|
+| 🔵 **本地 Agent** | ReAct（感知→推理→行动→观察，逐步循环） | 手机端完整闭环 | 单设备日常使用、实时交互 |
+| 🟣 **OpenClaw 远程** | Plan-Execute 变体（网关规划 → 客户端执行 → 截图验证） | 云端网关集中决策 | 集群调度、批量任务、企业集成 |
+
+### 本地 Agent 模式 (ReAct)
+
+```
+┌──────────────────────────────────────────────────────┐
+│              用户输入 (App 界面 / 悬浮窗 / 语音)        │
+└─────────────────────┬────────────────────────────────┘
+                      ▼
+┌──────────────────────────────────────────────────────┐
+│              React Native (TypeScript)                │
+│  ┌────────────┬──────────────┬────────────────────┐  │
+│  │  UI 导航层  │  任务执行引擎  │   AI 对话 / 解析   │  │
+│  │ (BottomTab) │ (状态机+模块) │ (SSE Stream Parse) │  │
+│  └────────────┴──────────────┴────────────────────┘  │
+└─────────────────────┬────────────────────────────────┘
+                      │ React Native Bridge
+                      ▼
+┌──────────────────────────────────────────────────────┐
+│                 Kotlin (Android Native)               │
+│  ┌────────────┬──────────────┬────────────────────┐  │
+│  │ 无障碍服务   │  ADB 执行器   │   悬浮窗 / 通知栏   │  │
+│  │ (手势注入)  │  (降级兜底)   │   (Foreground)     │  │
+│  └────────────┴──────────────┴────────────────────┘  │
+└─────────────────────┬────────────────────────────────┘
+                      ▼
+┌──────────────────────────────────────────────────────┐
+│                    AI Vision API                      │
+│     截图 → 视觉模型分析 → 结构化操作指令 (JSON)        │
+│     每一步都重新观察 → 再决定下一步（ReAct Loop）      │
+└──────────────────────────────────────────────────────┘
+```
+
+### OpenClaw 远程模式 — "胖服务端 + 瘦客户端"
+
+```
+┌───────────────────────┐
+│   OpenClaw 网关 (大脑)  │
+│  - 任务规划与决策       │
+│  - 上下文窗口管理       │
+│  - 多设备集群调度       │
+│  - API Key 集中保管    │
+└──────┬────────────────┘
+       │ WebSocket (每步: 下发 Action → 回传截图验证)
+       ▼
+┌───────────────────────┐
+│  客户端 (手脚) — N 台   │
+│  只做两件事：           │
+│  ① 执行 tap/swipe/input │
+│  ② 截图并压缩回传       │
+│  不需要管模型/上下文     │
+└───────────────────────┘
+```
+
+两套模式的设计取舍：**本地模式灵活、不依赖网络；远程模式可统一管控、更新策略只需改网关不用更新每个客户端。**
+
+---
+
+## 🚀 快速开始
+
+### 📋 环境要求
+
+| 依赖 | 版本 |
 |------|------|
-| 界面 | React Native 0.73 + TypeScript |
-| 执行引擎 | Kotlin（Android AccessibilityService + ADB） |
-| AI 管线 | OpenAI 兼容 Vision API、SSE 流式解析、结构化指令提取 |
-| 语音 | 开源离线语音识别（默认），可配置云端语音接口 |
-| 集群 | WebSocket（OpenClaw 协议） |
+| Node.js | ≥ 18 |
+| JDK | 17 |
+| Android SDK | API 21–34 |
+| Android 设备 | 7.0+ |
 
-## 快速开始 / Quick Start
-
-### 环境要求
-
-- Node.js >= 18
-- JDK 17
-- Android SDK（API 21–34）
-- Android 设备或模拟器（7.0+）
-
-### 安装
+### 📲 安装运行
 
 ```bash
-cd AwesomeProject
+# 1. 克隆项目
+git clone https://github.com/lisret/a2a_ai_mobile.git
+cd a2a_ai_mobile/AwesomeProject
+
+# 2. 安装依赖
 npm install
-```
 
-### 配置 Android SDK
+# 3. 配置 Android SDK 路径
+#    编辑 android/local.properties，添加：
+#    sdk.dir=/your/path/to/Android/sdk
 
-编辑 `AwesomeProject/android/local.properties`：
-
-```
-sdk.dir=/path/to/Android/sdk
-```
-
-### 运行
-
-```bash
-# 终端 1：启动 Metro 打包器
-cd AwesomeProject
+# 4. 启动 Metro
 npm start
 
-# 终端 2：编译并运行
+# 5. 编译并安装到手机（新终端）
 npm run android
 ```
 
-## 项目结构 / Project Structure
+### ⚙️ 首次配置
+
+1. 在手机上安装 APK 后，进入 **设置 → 无障碍**，开启 **AutoGLM Accessibility Service**
+2. 打开 App，进入 **模型设置**，配置至少一个 AI 模型（API Key + 终端地址）
+3. 在首页输入框输入你想做的事情，或点击 🎤 用语音说出指令
+4. App 会请求**屏幕录制权限**（用于截图分析），请允许
+
+---
+
+## 📂 项目结构
 
 ```
-.
-├── AwesomeProject/          # React Native 项目
-│   ├── src/                 # TypeScript 源码
-│   │   ├── core/            # 引擎、对话、能力层
-│   │   ├── features/        # 功能模块（任务、模型、设置）
-│   │   ├── navigation/      # 导航
-│   │   └── shared/          # 类型、常量、工具
-│   └── android/             # Kotlin 原生层
+a2a_ai_mobile/
+├── AwesomeProject/              # React Native 项目主体
+│   ├── App.tsx                  # 根组件 — 初始化日志服务 & 挂载导航
+│   ├── index.js                 # 入口 — 注册主组件 & Headless JS 后台任务
+│   ├── src/
+│   │   ├── core/
+│   │   │   ├── ability/         # 能力层：无障碍服务、ADB、悬浮窗的 TS 封装
+│   │   │   └── engine/
+│   │   │       ├── dialogue/    # AI 对话：提示词工程、SSE 流解析、指令提取
+│   │   │       └── taskEngine/  # 任务引擎：状态机 + 模块化 pipeline
+│   │   ├── features/
+│   │   │   ├── task/            # 任务模块：首页、执行、历史记录、对话 UI
+│   │   │   ├── model/           # 模型管理：7 家厂商驱动、API 配置
+│   │   │   ├── settings/        # 设置：API Key、悬浮窗位置、语音等
+│   │   │   └── debug/           # 调试日志查看器
+│   │   ├── navigation/          # React Navigation 配置 + 自定义底部 TabBar
+│   │   └── shared/              # 共享类型、常量、工具函数、通用组件
+│   └── android/                 # Kotlin 原生层
 │       └── app/src/main/java/com/awesomeproject/
-│           ├── bridge/      # Native Modules（无障碍、ADB、悬浮窗）
-│           ├── service/     # 服务（无障碍、任务执行）
-│           └── accessibility/  # 手势 & 截图处理
-├── doc/                     # 开发文档
-├── src/                     # 部署文档
-└── design_demo.html         # UI 设计稿
+│           ├── bridge/          # RN Native Modules (Accessibility, ADB, FloatingWindow)
+│           ├── service/         # Android Service (无障碍服务, 后台任务执行, Headless)
+│           ├── accessibility/   # 手势处理 & 截图处理
+│           ├── ui/              # 悬浮窗管理, 通知管理, 系统弹窗
+│           └── utils/           # 截图管理, 服务管理, 唤醒锁, 音频
+├── doc/                         # 100+ 开发技术文档（中文）
+├── src/                         # 部署说明文档
+└── design_demo.html             # UI 设计稿
 ```
 
-## 支持的模型厂商 / Supported Model Providers
+---
 
-| 厂商 | 模型示例 |
-|------|---------|
-| 智谱 AI / Zhipu AI | AutoGLM-Phone-9B, GLM-4V |
-| ModelScope | AutoGLM-Phone-9B |
-| OpenAI | gpt-4o, gpt-4-vision-preview |
-| Anthropic | claude-3-opus, claude-3-sonnet |
-| DeepSeek | deepseek-vl2 |
-| Moonshot | moonshot-v1-8k-vision |
-| 自定义 / Custom | 任意 OpenAI 兼容接口 |
+## 🤖 支持的 AI 模型
 
-## 相关链接 / Related
+| 厂商 | 推荐模型 | 说明 |
+|------|---------|------|
+| 🔵 **智谱 AI** | AutoGLM-Phone-9B, GLM-4V | 官方推荐，对中文场景优化最佳 |
+| 🟣 **ModelScope** | AutoGLM-Phone-9B | 魔搭社区托管 |
+| 🟢 **OpenAI** | gpt-4o, gpt-4-vision-preview | 通用视觉能力强 |
+| 🟡 **Anthropic** | claude-3-opus, claude-3-sonnet | 长上下文理解 |
+| 🔴 **DeepSeek** | deepseek-vl2 | 高性价比 |
+| ⚫ **Moonshot** | moonshot-v1-8k-vision | 月之暗面 |
+| ⚪ **自定义** | 任意 OpenAI 兼容接口 | 自部署模型 / 代理 |
 
-- [Open-AutoGLM](https://github.com/zai-org/Open-AutoGLM) — 上游框架
+---
+
+## 🔗 相关链接
+
+- [Open-AutoGLM](https://github.com/zai-org/Open-AutoGLM) — 上游 AI 手机自动化框架
 - [a2a_ai_mobile_skill_market](https://github.com/lisret/a2a_ai_moblie_skill_market) — 移动测试场景 AI 技能共享平台
+- [React Native 文档](https://reactnative.dev/)
 
-## 开源协议 / License
+---
 
-MIT
+## 📝 开源协议
+
+[MIT License](./LICENSE)

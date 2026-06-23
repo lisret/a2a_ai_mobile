@@ -73,6 +73,17 @@ export async function getSystemPrompt(): Promise<string> {
     appListText = '获取失败，请忽略此信息';
   }
 
+  // ================================================================
+  //  系统提示词模板 (System Prompt Template)
+  //  参考上游 Open-AutoGLM 的 prompts_zh.py 适配移动端场景
+  //
+  //  结构：
+  //    1. 日期与角色定义 → 输出格式要求
+  //    2. Action Schema（Launch / Tap / Type / Swipe / Long Press / 
+  //       Double Tap / Back / Home / Wait / Take_over / finish）
+  //    3. 动态注入：搜索框位置 + 当前手机 app 列表
+  //    4. 规则列表（21 条执行规则，覆盖异常处理、重试、死循环检测等）
+  // ================================================================
   const prompt = `今天的日期是: ${formattedDate}
 你是一个智能体分析专家，可以根据对话历史（包含之前的操作指令和截图）和当前状态图执行一系列操作来完成任务。
 你必须严格按照要求输出以下格式：

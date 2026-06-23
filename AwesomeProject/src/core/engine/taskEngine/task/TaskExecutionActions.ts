@@ -34,6 +34,7 @@ export async function executeAction(
 
   try {
     switch (action.type) {
+      // === 基础触控操作 (Basic Touch Actions) ===
       case 'click':
         if (action.x !== undefined && action.y !== undefined) {
           await accessibilityService.performClick(action.x, action.y);
@@ -55,6 +56,7 @@ export async function executeAction(
           throw new Error('双击操作缺少坐标参数');
         }
         break;
+      // === 滑动手势 (Swipe Gesture) ===
       case 'swipe':
         if (
           action.startX !== undefined &&
@@ -72,6 +74,7 @@ export async function executeAction(
           throw new Error('滑动操作缺少坐标参数');
         }
         break;
+      // === 文本输入 (Text Input) ===
       case 'input':
         if (action.text) {
           console.info(`[任务执行] 执行输入操作: "${action.text}"`);
@@ -88,12 +91,14 @@ export async function executeAction(
           throw new Error('输入操作缺少文本参数');
         }
         break;
+      // === 系统导航 (System Navigation) ===
       case 'back':
         await accessibilityService.performBack();
         break;
       case 'home':
         await accessibilityService.performHome();
         break;
+      // === 应用启动 (App Launch) ===
       case 'launch':
         if (action.app) {
           await handleLaunchAction(action.app, taskId, step, modelResponse);
@@ -101,6 +106,7 @@ export async function executeAction(
           throw new Error('Launch操作缺少app参数');
         }
         break;
+      // === 用户接管 (Manual Takeover) ===
       case 'take_over':
         await handleTakeOverAction(action, taskId, step, modelResponse);
         return {
@@ -113,6 +119,7 @@ export async function executeAction(
           },
           shouldContinue: true,
         };
+      // === 等待 / 记录 (Wait & Record) ===
       case 'wait':
         const duration = action.duration || 500;
         await new Promise((resolve) => setTimeout(resolve, duration));

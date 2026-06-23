@@ -2,7 +2,15 @@ import { saveModels, getModels, saveSelectedModelId, getSelectedModelId } from '
 import type { AIModel, AIModelFormData } from '@shared/types/Model';
 
 /**
- * 模型管理服务
+ * 模型管理服务 (Model Service)
+ *
+ * 管理 AI 模型的 CRUD 操作与选中状态，数据持久化到 AsyncStorage。
+ *
+ * 验证规则：
+ *   - name / modelName / apiUrl / apiKey 均为必填，空字符串会被拒绝
+ *   - ID 生成格式：model_{timestamp}_{random9}
+ *   - maxSteps 默认 99（与模型上下文窗口上限对应）
+ *   - 删除已选中模型时，自动清除选中状态
  */
 class ModelService {
   /**

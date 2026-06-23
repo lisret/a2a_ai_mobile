@@ -337,7 +337,11 @@ export class TaskExecutionEngine {
   }
 
   /**
-   * 构建完成的任务
+   * 构建成功完成的任务结果
+   * @param taskId 任务 ID
+   * @param modelId 使用的模型 ID
+   * @param instruction 原始用户指令
+   * @returns 包含完整步骤记录的 Task 对象，状态为 'success'
    */
   private buildCompletedTask(
     taskId: string,
@@ -359,7 +363,12 @@ export class TaskExecutionEngine {
   }
 
   /**
-   * 构建失败的任务
+   * 构建失败的任务结果
+   * @param taskId 任务 ID
+   * @param modelId 使用的模型 ID
+   * @param instruction 原始用户指令
+   * @param error 失败原因描述
+   * @returns 包含错误信息和已执行步骤记录的 Task 对象，状态为 'failed'
    */
   private buildFailedTask(
     taskId: string,
@@ -384,6 +393,13 @@ export class TaskExecutionEngine {
 
   /**
    * 清理资源
+   *
+   * 任务结束/取消后调用，重置所有模块状态：
+   *   - 注销取消标记（防止内存泄漏）
+   *   - 重置任务状态（清空当前 taskId、instruction 等）
+   *
+   * Called after task completes or is cancelled. Resets cancellation flags
+   * and clears the in-memory task state to prevent cross-task contamination.
    */
   private cleanup(): void {
     this.cancellation.cleanup();

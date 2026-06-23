@@ -1,5 +1,19 @@
 /**
- * 无障碍服务能力实现
+ * 无障碍服务能力实现 (Accessibility Capability)
+ *
+ * 实现 ICapability 接口，封装 Android AccessibilityService 的所有操作：
+ * - 截图 (captureScreen)
+ * - 手势注入 (click / longPress / doubleTap / swipe)
+ * - 文本输入 (textInput)
+ * - 系统导航 (back / home)
+ * - 应用启动 (launchApp)
+ *
+ * 作为双通道执行的 Level-1 主力通道，由 CapabilityManager 统一调度。
+ * 当无障碍服务不可用时，系统自动降级到 ADBCapability (Level-2)。
+ *
+ * Wraps Android AccessibilityService operations as an ICapability.
+ * Primary execution channel (Level-1) in the dual-channel architecture.
+ * Falls back to ADBCapability when this service is unavailable.
  */
 
 import type {

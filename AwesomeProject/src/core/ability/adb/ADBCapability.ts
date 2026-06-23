@@ -1,5 +1,17 @@
 /**
- * ADB 服务能力实现
+ * ADB 服务能力实现 (ADB Fallback Capability)
+ *
+ * 实现 ICapability 接口，封装 ADB shell 命令的所有操作。
+ * 作为双通道执行的 Level-2 降级通道：
+ *   - 默认不启用，由用户在设置中开启 "ADB 回退" 开关
+ *   - 当 AccessibilityService 被系统杀死 / 控件树为空 / 手势超时时自动接管
+ *   - 每个操作通过 adb shell input 转发，约 200-500ms 额外延迟
+ *
+ * 注意：getScreenSize() 优先从无障碍服务获取，ADB 无原生分辨率接口。
+ *
+ * Level-2 fallback in the dual-channel execution architecture.
+ * Activated when AccessibilityService is unavailable or times out.
+ * Operations go through adb shell input with ~200-500ms extra latency.
  */
 
 import type {

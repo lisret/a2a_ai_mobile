@@ -1,79 +1,61 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# Open-AutoGLM ReactNative 开发文档索引
 
-# Getting Started
+本目录包含项目的完整技术文档，覆盖架构设计、模块说明、开发指南等方面。
 
->**Note**: Make sure you have completed the [React Native - Environment Setup](https://reactnative.dev/docs/environment-setup) instructions till "Creating a new application" step, before proceeding.
+## 📚 文档导航
 
-## Step 1: Start the Metro Server
+### 🏗️ 架构与设计
 
-First, you will need to start **Metro**, the JavaScript _bundler_ that ships _with_ React Native.
+| 文档 | 说明 |
+|------|------|
+| 架构总览 | 系统整体架构、数据流与模块关系 |
+| 任务执行引擎 | 状态机设计、模块化 Pipeline、Step 管理 |
+| AI 对话系统 | 提示词工程、SSE 流式解析、结构化指令提取 |
+| 双通道执行 | AccessibilityService vs ADB 的通道选择与降级策略 |
 
-To start Metro, run the following command from the _root_ of your React Native project:
+### 📱 Native 层
 
-```bash
-# using npm
-npm start
+| 文档 | 说明 |
+|------|------|
+| 无障碍服务 | AutoGLMAccessibilityService 注册与手势注入 |
+| 悬浮窗管理 | FloatingWindow 生命周期与权限管理 |
+| 前台服务 | TaskExecutionService 通知栏常驻机制 |
+| Headless 模式 | 后台无界面执行的实现原理 |
+| ADB 集成 | shell 命令执行、截图获取、Input tap/swipe |
 
-# OR using Yarn
-yarn start
-```
+### 🎨 UI 层
 
-## Step 2: Start your Application
+| 文档 | 说明 |
+|------|------|
+| 导航系统 | React Navigation 配置、自定义 TabBar |
+| 任务界面 | 首页输入、执行进度、历史记录 UI |
+| 模型配置 | 多厂商模型管理界面 |
+| 设置面板 | API Key、悬浮窗位置、语音等配置 |
+| 调试日志 | DebugLogService 与日志查看器 |
 
-Let Metro Bundler run in its _own_ terminal. Open a _new_ terminal from the _root_ of your React Native project. Run the following command to start your _Android_ or _iOS_ app:
+### 🔧 开发指南
 
-### For Android
+| 文档 | 说明 |
+|------|------|
+| 环境搭建 | 开发环境配置完整流程 |
+| 构建与打包 | APK 签名、Release 构建 |
+| 添加新模型厂商 | Model Provider 驱动扩展指南 |
+| 添加新手势类型 | 手势动作扩展指南 |
+| 常见问题 | 开发中的常见报错与解决方案 |
 
-```bash
-# using npm
-npm run android
+## 🚀 快速导航
 
-# OR using Yarn
-yarn android
-```
+- **新人上手** → 先看 `环境搭建` 和 `架构总览`
+- **加功能** → 根据功能模块定位对应文档
+- **调 Bug** → 看 `常见问题`，配合 DebugLogService 日志
+- **了解原理** → 按文档导航由上往下读
 
-### For iOS
+## 📝 文档规范
 
-```bash
-# using npm
-npm run ios
+- 文档使用 Markdown 格式
+- 中英文术语混用时，优先使用中文描述 + 英文原词注释
+- 涉及代码的地方附带关键代码片段和文件路径
 
-# OR using Yarn
-yarn ios
-```
+---
 
-If everything is set up _correctly_, you should see your new app running in your _Android Emulator_ or _iOS Simulator_ shortly provided you have set up your emulator/simulator correctly.
-
-This is one way to run your app — you can also run it directly from within Android Studio and Xcode respectively.
-
-## Step 3: Modifying your App
-
-Now that you have successfully run the app, let's modify it.
-
-1. Open `App.tsx` in your text editor of choice and edit some lines.
-2. For **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Developer Menu** (<kbd>Ctrl</kbd> + <kbd>M</kbd> (on Window and Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (on macOS)) to see your changes!
-
-   For **iOS**: Hit <kbd>Cmd ⌘</kbd> + <kbd>R</kbd> in your iOS Simulator to reload the app and see your changes!
-
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [Introduction to React Native](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you can't get this to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+*文档持续更新中 — 欢迎补充和修正。*

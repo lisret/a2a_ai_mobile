@@ -123,17 +123,18 @@ class AutoGLMAccessibilityService : AccessibilityService() {
             
             if (focusedNode != null) {
                 Log.d(TAG, "找到焦点输入框节点，类名: ${focusedNode.className}")
-                
+
+                var setTextSuccess = false
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     Log.d(TAG, "尝试使用 ACTION_SET_TEXT 直接设置文本...")
                     val arguments = android.os.Bundle().apply {
                         putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
                     }
-                    val success = focusedNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
-                    focusedNode.recycle()
-                    rootNode.recycle()
-                    if (success) {
+                    setTextSuccess = focusedNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, arguments)
+                    if (setTextSuccess) {
                         Log.d(TAG, "文本输入成功（直接设置）: \"$text\"")
+                        focusedNode.recycle()
+                        rootNode.recycle()
                         return true
                     } else {
                         Log.w(TAG, "ACTION_SET_TEXT 操作返回 false，尝试粘贴操作...")
@@ -141,7 +142,7 @@ class AutoGLMAccessibilityService : AccessibilityService() {
                 } else {
                     Log.d(TAG, "Android 版本低于 6.0，跳过 ACTION_SET_TEXT，直接尝试粘贴")
                 }
-                
+
                 Log.d(TAG, "尝试使用 ACTION_PASTE 粘贴文本...")
                 val pasteSuccess = focusedNode.performAction(AccessibilityNodeInfo.ACTION_PASTE)
                 focusedNode.recycle()

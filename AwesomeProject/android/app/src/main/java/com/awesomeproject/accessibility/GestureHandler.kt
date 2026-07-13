@@ -186,16 +186,39 @@ class GestureHandler(private val service: AccessibilityService) {
                 .addStroke(GestureDescription.StrokeDescription(path, 0, duration))
                 .build()
             
-            service.dispatchGesture(gesture, object : AccessibilityService.GestureResultCallback() {
+            val latch = CountDownLatch(1)
+            var success = false
+
+            val dispatched = service.dispatchGesture(gesture, object : AccessibilityService.GestureResultCallback() {
                 override fun onCompleted(gestureDescription: GestureDescription?) {
                     Log.d("GestureHandler", "滑动完成: ($startX, $startY) -> ($endX, $endY)")
+                    success = true
+                    latch.countDown()
                 }
 
                 override fun onCancelled(gestureDescription: GestureDescription?) {
                     Log.w("GestureHandler", "滑动取消: ($startX, $startY) -> ($endX, $endY)")
+                    success = false
+                    latch.countDown()
                 }
             }, null)
-            true
+
+            if (!dispatched) {
+                Log.e("GestureHandler", "滑动手势分发失败: ($startX, $startY) -> ($endX, $endY)")
+                return false
+            }
+
+            try {
+                val completed = latch.await(duration + 500, TimeUnit.MILLISECONDS)
+                if (!completed) {
+                    Log.w("GestureHandler", "滑动超时: ($startX, $startY) -> ($endX, $endY)")
+                    return false
+                }
+                return success
+            } catch (e: InterruptedException) {
+                Log.e("GestureHandler", "等待滑动完成时被中断", e)
+                return false
+            }
         } else {
             Log.w("GestureHandler", "Android版本过低，不支持手势操作")
             false

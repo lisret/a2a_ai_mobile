@@ -145,7 +145,7 @@ class ScreenshotHandler(private val service: AccessibilityService) {
 
             Log.d("ScreenshotHandler", "准备截图，屏幕尺寸: ${width}x${height}, DPI: $density")
 
-            val imageReader = ImageReader.newInstance(width, height, android.graphics.PixelFormat.RGBA_8888, 1)
+            val imageReader = ImageReader.newInstance(width, height, android.graphics.PixelFormat.RGBA_8888, 2)
             val surface = imageReader.surface
 
             val virtualDisplay = projection.createVirtualDisplay(
@@ -174,16 +174,36 @@ class ScreenshotHandler(private val service: AccessibilityService) {
                             Bitmap.Config.ARGB_8888
                         )
                         bitmap.copyPixelsFromBuffer(buffer)
-                        
-                        val finalBitmap = if (rowPadding == 0) {
-                            bitmap
+
+                        // Convert RGBA to ARGB if needed
+                        val convertedBitmap = if (pixelStride == 4) {
+                            // RGBA_8888 → ARGB_8888: swap R and B channels
+                            val pixels = IntArray(bitmap.width * bitmap.height)
+                            bitmap.getPixels(pixels, 0, bitmap.width, 0, 0, bitmap.width, bitmap.height)
+                            for (i in pixels.indices) {
+                                val pixel = pixels[i]
+                                // RGBA -> ARGB: (R<<24)|(G<<16)|(B<<8)|A -> (B<<24)|(G<<16)|(R<<8)|A
+                                pixels[i] = (pixel and 0xFF000000.toInt()) or
+                                        ((pixel and 0x00FF0000) shr 16) or
+                                        (pixel and 0x0000FF00) or
+                                        ((pixel and 0x000000FF) shl 16)
+                            }
+                            val result = Bitmap.createBitmap(pixels, bitmap.width, bitmap.height, Bitmap.Config.ARGB_8888)
+                            if (result != bitmap) bitmap.recycle()
+                            result
                         } else {
-                            Bitmap.createBitmap(bitmap, 0, 0, width, height)
+                            bitmap
                         }
                         
+                        val finalBitmap = if (rowPadding == 0) {
+                            convertedBitmap
+                        } else {
+                            Bitmap.createBitmap(convertedBitmap, 0, 0, width, height)
+                        }
+
                         bitmapRef[0] = finalBitmap
                         image.close()
-                        Log.d("ScreenshotHandler", "MediaProjection 截图成功，尺寸: ${finalBitmap.width}x${finalBitmap.height}")
+                        Log.d("ScreenshotHandler", "MediaProjection 截图成功，尺寸: ${convertedBitmap.width}x${convertedBitmap.height}")
                     }
                 } catch (e: Exception) {
                     Log.e("ScreenshotHandler", "处理 MediaProjection 图像失败", e)

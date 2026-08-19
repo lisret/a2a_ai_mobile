@@ -240,9 +240,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 12,
-    backgroundColor: '#ffffff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    backgroundColor: 'rgba(255,255,255,0.84)',
   },
   stats: {
     flex: 1,
@@ -265,7 +263,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#ef4444',
   },
   activeButton: {
-    backgroundColor: '#2563eb',
+    backgroundColor: '#1b1d30',
   },
   inactiveButton: {
     backgroundColor: '#e5e7eb',
@@ -277,19 +275,17 @@ const styles = StyleSheet.create({
   },
   filterBar: {
     padding: 12,
-    backgroundColor: '#f9fafb',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    backgroundColor: '#f8f7f3',
   },
   filterInput: {
     backgroundColor: '#ffffff',
-    borderRadius: 6,
-    padding: 8,
+    borderRadius: 14,
+    padding: 12,
     fontSize: 14,
-    color: '#111827',
+    color: '#202231',
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
+    borderColor: '#e8e7ed',
   },
   levelFilter: {
     flexDirection: 'row',
@@ -305,8 +301,8 @@ const styles = StyleSheet.create({
     borderColor: '#e5e7eb',
   },
   levelButtonActive: {
-    backgroundColor: '#2563eb',
-    borderColor: '#2563eb',
+    backgroundColor: '#1b1d30',
+    borderColor: '#1b1d30',
   },
   levelButtonText: {
     fontSize: 11,
@@ -318,7 +314,7 @@ const styles = StyleSheet.create({
   },
   logContainer: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#f8f7f3',
   },
   logContent: {
     padding: 12,
@@ -327,10 +323,10 @@ const styles = StyleSheet.create({
   logEntry: {
     marginBottom: 12,
     padding: 12,
-    backgroundColor: '#f9fafb',
-    borderRadius: 6,
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
     borderLeftWidth: 3,
-    borderLeftColor: '#e5e7eb',
+    borderLeftColor: '#756bf0',
   },
   logHeader: {
     flexDirection: 'row',
@@ -355,7 +351,7 @@ const styles = StyleSheet.create({
   },
   logMessage: {
     fontSize: 13,
-    color: '#111827',
+    color: '#202231',
     fontFamily: 'monospace',
     lineHeight: 18,
   },

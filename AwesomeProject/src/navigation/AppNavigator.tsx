@@ -58,6 +58,12 @@ const MainTabs = () => {
       tabBar={(props) => <CustomTabBar {...props} />}
       screenOptions={{
         headerShown: false,
+        tabBarStyle: {
+          position: 'absolute',
+          backgroundColor: 'transparent',
+          borderTopWidth: 0,
+          elevation: 0,
+        },
       }}>
       <Tab.Screen
         name="Home"
@@ -93,7 +99,7 @@ const MainTabs = () => {
         name="History"
         component={TaskHistoryScreenTab}
         options={{
-          tabBarLabel: '历史',
+          tabBarLabel: '活动',
           tabBarIcon: ({ color }) => (
             <HistoryIcon color={color} size={24} />
           ),

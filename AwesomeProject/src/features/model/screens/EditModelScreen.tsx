@@ -296,7 +296,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background.light,
     borderWidth: 1,
     borderColor: COLORS.border.medium,
-    borderRadius: 8,
+    borderRadius: 14,
     padding: 12,
     fontSize: 14,
     color: COLORS.text.primary,
@@ -342,7 +342,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background.light,
   },
   saveButton: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.ink,
     ...SHADOWS.default,
   },
   cancelButtonText: {

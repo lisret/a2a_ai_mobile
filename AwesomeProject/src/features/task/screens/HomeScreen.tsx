@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ScrollView,
   Alert,
+  TouchableOpacity,
 } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -20,8 +21,12 @@ import { modelService } from '@features/model/services/ModelService';
 import { settingsService } from '@features/settings/services/SettingsService';
 import { accessibilityService, appMappingService, floatingWindowService } from '@core/ability';
 import { taskHistoryService } from '../services/TaskHistoryService';
-import { COLORS, HOME_SUGGESTIONS } from '@shared/constants';
+import { COLORS, HOME_SUGGESTIONS, HOME_QUICK_TASKS } from '@shared/constants';
+import { NoNoMascot } from '@shared/components/NoNoMascot';
+import { AppMark } from '@shared/components/AppMark';
 import type { AIModel } from '@shared/types/Model';
+
+const QUICK_TASK_COLORS = ['#ddd9ff', '#ffe0d6', '#d9efeb', '#efe4ff'];
 import type { Task, TaskStep } from '@core/engine/taskEngine';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
@@ -341,18 +346,24 @@ export const HomeScreen: React.FC = () => {
 
   return (
     <PageLayout
-      title={model ? model.name : 'OpenAutoGLM'}
+      title={executing ? '任务执行' : 'NoNo'}
+      kicker={executing ? 'LIVE TASK' : 'YOUR AI COMPANION'}
+      headerAccessory={executing ? <AppMark size={48} /> : <NoNoMascot size={54} />}
       backgroundColor={COLORS.background.default}>
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}>
-        <View style={styles.greetingSection}>
-          <Text style={styles.greetingTitle}>
-            准备好{'\n'}执行任务了吗？
-          </Text>
-          <Text style={styles.greetingSubtitle}>输入指令，剩下的交给我。</Text>
-        </View>
+        {!executing && (
+          <View style={styles.greetingSection}>
+            <Text style={styles.greetingTitle}>
+              今天想让手机{'\n'}替你完成什么？
+            </Text>
+            <Text style={styles.greetingSubtitle}>
+              NoNo 会先理解目标，再在关键操作前向你确认。
+            </Text>
+          </View>
+        )}
 
         {executing ? (
           <ExecutionCard
@@ -372,17 +383,37 @@ export const HomeScreen: React.FC = () => {
         )}
 
         {!executing && (
-          <View style={styles.suggestionsSection}>
+          <>
+            <View style={styles.sectionHeading}>
+              <Text style={styles.sectionTitle}>试试这样说</Text>
+              <Text style={styles.sectionHint}>点击即可填入</Text>
+            </View>
             <SuggestionChips suggestions={HOME_SUGGESTIONS} onSelect={handleSuggestionSelect} />
-          </View>
+            <View style={styles.sectionHeading}>
+              <Text style={styles.sectionTitle}>快捷任务</Text>
+              <Text style={styles.sectionHint}>安全演示</Text>
+            </View>
+            <View style={styles.quickGrid}>
+              {HOME_QUICK_TASKS.map((item, index) => (
+                <TouchableOpacity
+                  key={item.label}
+                  style={[styles.quickTask, {backgroundColor: QUICK_TASK_COLORS[index]}]}
+                  onPress={() => handleSuggestionSelect(item.value)}
+                  activeOpacity={0.85}>
+                  <Text style={styles.quickTitle}>{item.label}</Text>
+                  <Text style={styles.quickBody}>{item.value.split('：')[1]}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
         )}
       </ScrollView>
 
       <ConfirmModal
         visible={stopConfirmVisible}
-        title="确认中断"
-        message="确定要中断当前任务吗？"
-        confirmText="中断"
+        title="确定终止当前任务？"
+        message="NoNo 会停止后续操作；已经在其他应用中完成的操作无法自动撤销。"
+        confirmText="确认终止"
         cancelText="取消"
         onConfirm={confirmStopTask}
         onCancel={() => setStopConfirmVisible(false)}
@@ -397,26 +428,64 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    padding: 20,
-    paddingTop: 24,
-    gap: 24,
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    paddingBottom: 120,
   },
   greetingSection: {
-    marginTop: 12,
+    paddingTop: 10,
   },
   greetingTitle: {
-    fontSize: 28,
+    maxWidth: 310,
+    fontSize: 31,
     fontWeight: '800',
     color: COLORS.text.primary,
-    marginBottom: 8,
     lineHeight: 34,
+    letterSpacing: -1,
   },
   greetingSubtitle: {
-    fontSize: 15,
+    marginTop: 10,
+    fontSize: 13,
+    lineHeight: 20,
     color: COLORS.text.secondary,
   },
-  suggestionsSection: {
-    marginTop: 0,
+  sectionHeading: {
+    marginTop: 24,
+    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+  },
+  sectionHint: {
+    fontSize: 10,
+    color: COLORS.text.secondary,
+  },
+  quickGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  quickTask: {
+    width: '48%',
+    minHeight: 86,
+    padding: 14,
+    overflow: 'hidden',
+    borderRadius: 19,
+  },
+  quickTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.text.primary,
+  },
+  quickBody: {
+    marginTop: 7,
+    fontSize: 10,
+    color: '#676a78',
   },
 });
 

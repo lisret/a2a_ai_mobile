@@ -196,7 +196,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   switchButtonActive: {
-    backgroundColor: '#2563eb',
+    backgroundColor: '#1b1d30',
   },
   switchButtonText: {
     fontSize: 12,

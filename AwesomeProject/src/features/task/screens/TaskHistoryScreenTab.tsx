@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, {useState, useCallback} from 'react';
 import {
   View,
   Text,
@@ -8,21 +8,21 @@ import {
   RefreshControl,
   Alert,
 } from 'react-native';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { RootStackParamList } from '@shared/types/navigation';
-import { PageLayout } from '@shared/components/PageLayout';
-import { HistoryPanel } from '../components/HistoryPanel';
-import { taskHistoryService } from '../services/TaskHistoryService';
-import { modelService } from '@features/model/services/ModelService';
-import { COLORS, SHADOWS } from '@shared/constants';
-import { AppIcon, IconNames } from '@shared/components/Icon';
-import { ConfirmModal } from '@shared/components/ConfirmModal';
-import { getTaskTitle } from '@shared/utils/taskHelpers';
-import type { Task } from '@core/engine/taskEngine';
-import type { AIModel } from '@shared/types/Model';
+import {useNavigation, useFocusEffect} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import type {RootStackParamList} from '@shared/types/navigation';
+import {PageLayout} from '@shared/components/PageLayout';
+import {NoNoMascot} from '@shared/components/NoNoMascot';
+import {taskHistoryService} from '../services/TaskHistoryService';
+import {modelService} from '@features/model/services/ModelService';
+import {COLORS} from '@shared/constants';
+import {ConfirmModal} from '@shared/components/ConfirmModal';
+import {getTaskTitle} from '@shared/utils/taskHelpers';
+import type {Task} from '@core/engine/taskEngine';
+import type {AIModel} from '@shared/types/Model';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
+type ActivityFilter = 'all' | 'success' | 'failed';
 
 export const TaskHistoryScreenTab: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
@@ -30,20 +30,16 @@ export const TaskHistoryScreenTab: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [deleteTaskId, setDeleteTaskId] = useState<string | null>(null);
+  const [filter, setFilter] = useState<ActivityFilter>('all');
 
-  // 加载当前选中的模型和任务
   const loadData = useCallback(async () => {
     try {
       const selectedModel = await modelService.getSelectedModel();
       setModel(selectedModel);
-      
       if (selectedModel) {
-        const taskList = await taskHistoryService.getTasksByModelId(selectedModel.id);
-        setTasks(taskList);
+        setTasks(await taskHistoryService.getTasksByModelId(selectedModel.id));
       } else {
-        // 如果没有选中模型，显示所有任务
-        const allTasks = await taskHistoryService.getAllTasks();
-        setTasks(allTasks);
+        setTasks(await taskHistoryService.getAllTasks());
       }
     } catch (error) {
       console.error('加载数据失败:', error);
@@ -53,7 +49,7 @@ export const TaskHistoryScreenTab: React.FC = () => {
   useFocusEffect(
     useCallback(() => {
       loadData();
-    }, [loadData])
+    }, [loadData]),
   );
 
   const handleRefresh = useCallback(async () => {
@@ -62,18 +58,8 @@ export const TaskHistoryScreenTab: React.FC = () => {
     setRefreshing(false);
   }, [loadData]);
 
-  const handleTaskPress = (task: Task) => {
-    // 跳转到任务详情页面
-    navigation.navigate('TaskDetail', { taskId: task.id });
-  };
-
-  const handleDelete = (task: Task) => {
-    setDeleteTaskId(task.id);
-  };
-
   const confirmDelete = async () => {
     if (!deleteTaskId) return;
-    
     try {
       await taskHistoryService.deleteTask(deleteTaskId);
       setDeleteTaskId(null);
@@ -85,121 +71,74 @@ export const TaskHistoryScreenTab: React.FC = () => {
     }
   };
 
-  const formatDate = (timestamp: number): string => {
+  const formatDemoTime = (timestamp: number): string => {
     const date = new Date(timestamp);
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const taskDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-    
-    if (taskDate.getTime() === today.getTime()) {
-      return '今天';
-    } else if (taskDate.getTime() === today.getTime() - 86400000) {
-      return '昨天';
-    } else {
-      if (date.getFullYear() === now.getFullYear()) {
-        return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
-      } else {
-        return date.toLocaleDateString('zh-CN', { year: 'numeric', month: 'short', day: 'numeric' });
-      }
-    }
+    return `${date.getMonth() + 1}月${date.getDate()}日 ${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
   };
 
-  const groupTasksByDate = (tasks: Task[]) => {
-    const groups: { [key: string]: Task[] } = {};
-    tasks.forEach(task => {
-      const dateKey = formatDate(task.createdAt);
-      if (!groups[dateKey]) {
-        groups[dateKey] = [];
-      }
-      groups[dateKey].push(task);
-    });
-    return groups;
-  };
-
-  const renderTaskItem = ({ item }: { item: Task }) => {
-    const isSuccess = item.status === 'success';
-    const isFailed = item.status === 'failed';
-    
-    return (
-      <TouchableOpacity
-        style={styles.taskItem}
-        onPress={() => handleTaskPress(item)}
-        activeOpacity={0.7}>
-        <View style={[styles.iconBox, isFailed && styles.iconBoxFail]}>
-          <AppIcon
-            name={isFailed ? IconNames.error : IconNames.success}
-            size={20}
-            color={isFailed ? COLORS.error : COLORS.success}
-          />
-        </View>
-        <View style={styles.content}>
-          <Text style={styles.title} numberOfLines={2}>
-            {getTaskTitle(item)}
-          </Text>
-          <Text style={styles.meta}>
-            {new Date(item.createdAt).toLocaleTimeString('zh-CN', {
-              hour: '2-digit',
-              minute: '2-digit',
-            })}
-            {' • '}
-            {isFailed
-              ? item.error || '执行失败'
-              : `${item.output?.steps?.length || 0} 步`}
-          </Text>
-        </View>
-        <TouchableOpacity
-          style={styles.deleteBtn}
-          onPress={() => handleDelete(item)}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <AppIcon name={IconNames.delete} size={20} color="#EF4444" />
-        </TouchableOpacity>
-      </TouchableOpacity>
-    );
-  };
-
-  const groupedTasks = groupTasksByDate(tasks);
-  const sections = Object.keys(groupedTasks).sort((a, b) => {
-    // 今天 > 昨天 > 其他日期
-    if (a === '今天') return -1;
-    if (b === '今天') return 1;
-    if (a === '昨天') return -1;
-    if (b === '昨天') return 1;
-    return b.localeCompare(a);
-  });
-
-  if (tasks.length === 0) {
-    return (
-      <PageLayout title="任务历史" backgroundColor={COLORS.background.default}>
-        <View style={styles.emptyContainer}>
-          <AppIcon name={IconNames.empty} size={48} color={COLORS.text.secondary} />
-          <Text style={styles.emptyText}>暂无任务历史</Text>
-          <Text style={styles.emptySubtext}>
-            {model ? '开始执行任务后，历史记录会显示在这里' : '请先选择一个模型'}
-          </Text>
-        </View>
-      </PageLayout>
-    );
-  }
+  const filteredTasks = tasks.filter(task => filter === 'all' || task.status === filter);
 
   return (
-    <PageLayout title="任务历史" backgroundColor={COLORS.background.default}>
+    <PageLayout
+      title="活动"
+      kicker="TASK TIMELINE"
+      headerAccessory={<NoNoMascot size={50} />}
+      backgroundColor={COLORS.background.default}>
       <FlatList
-        data={sections}
-        keyExtractor={item => item}
-        renderItem={({ item: dateKey }) => (
-          <View>
-            <Text style={styles.dateHeader}>{dateKey}</Text>
-            {groupedTasks[dateKey].map(task => (
-              <View key={task.id}>
-                {renderTaskItem({ item: task })}
-              </View>
-            ))}
+        data={filteredTasks}
+        keyExtractor={item => item.id}
+        ListHeaderComponent={
+          <View style={styles.filterRow}>
+            {([['all', '全部'], ['success', '已完成'], ['failed', '失败']] as const).map(
+              ([key, label]) => (
+                <TouchableOpacity
+                  key={key}
+                  style={[styles.filterChip, filter === key && styles.filterChipActive]}
+                  onPress={() => setFilter(key)}>
+                  <Text style={[styles.filterText, filter === key && styles.filterTextActive]}>
+                    {label}
+                  </Text>
+                </TouchableOpacity>
+              ),
+            )}
           </View>
-        )}
-        contentContainerStyle={styles.listContent}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
         }
+        ListEmptyComponent={
+          <View style={styles.emptyCard}>
+            <Text style={styles.emptyTitle}>暂无匹配记录</Text>
+            <Text style={styles.emptyBody}>
+              {model ? '完成一个任务后会出现在这里。' : '请先选择一个模型。'}
+            </Text>
+          </View>
+        }
+        renderItem={({item}) => {
+          const isFailed = item.status === 'failed';
+          return (
+            <TouchableOpacity
+              style={styles.taskItem}
+              onPress={() => navigation.navigate('TaskDetail', {taskId: item.id})}
+              onLongPress={() => setDeleteTaskId(item.id)}
+              activeOpacity={0.8}>
+              <View style={styles.metaRow}>
+                <Text style={styles.metaText}>{formatDemoTime(item.createdAt)}</Text>
+                <View style={[styles.badge, isFailed && styles.badgeDanger]}>
+                  <Text style={[styles.badgeText, isFailed && styles.badgeDangerText]}>
+                    {isFailed ? '失败' : item.status === 'success' ? '已完成' : '执行中'}
+                  </Text>
+                </View>
+              </View>
+              <Text style={styles.title} numberOfLines={2}>
+                {getTaskTitle(item, 40)}
+              </Text>
+              <View style={styles.metaRow}>
+                <Text style={styles.metaText}>{item.output?.steps?.length || 0} 个步骤</Text>
+                <Text style={styles.metaText}>查看详情 ›</Text>
+              </View>
+            </TouchableOpacity>
+          );
+        }}
+        contentContainerStyle={styles.listContent}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       />
 
       <ConfirmModal
@@ -217,80 +156,49 @@ export const TaskHistoryScreenTab: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  listContent: {
-    padding: 16,
+  listContent: {paddingHorizontal: 18, paddingBottom: 120},
+  filterRow: {flexDirection: 'row', gap: 8, marginBottom: 13},
+  filterChip: {
+    minHeight: 34,
+    paddingHorizontal: 13,
+    borderRadius: 999,
+    backgroundColor: '#ffffff',
+    justifyContent: 'center',
   },
-  dateHeader: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#6B7280', // var(--text-secondary)
-    marginTop: 20,
-    marginBottom: 8,
-    marginLeft: 4,
-    textTransform: 'uppercase',
-  },
+  filterChipActive: {backgroundColor: COLORS.ink},
+  filterText: {color: COLORS.text.secondary, fontSize: 10, fontWeight: '700'},
+  filterTextActive: {color: '#ffffff'},
   taskItem: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05, // var(--shadow-sm)
-    shadowRadius: 2,
-    elevation: 2, // Android shadow
+    padding: 15,
+    marginBottom: 10,
+    borderRadius: 21,
+    backgroundColor: 'rgba(255,255,255,0.84)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.92)',
   },
-  iconBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    backgroundColor: '#EFF6FF', // var(--primary-light)
-    justifyContent: 'center',
-    alignItems: 'center',
-    flexShrink: 0,
-  },
-  iconBoxFail: {
-    backgroundColor: '#FEF2F2', // fail bg
-  },
-  content: {
-    flex: 1,
-    overflow: 'hidden',
-  },
+  metaRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'},
+  metaText: {color: COLORS.text.secondary, fontSize: 9},
   title: {
+    marginVertical: 10,
+    color: COLORS.text.primary,
+    fontSize: 13,
+    lineHeight: 18,
     fontWeight: '600',
-    fontSize: 15,
-    color: '#111827', // var(--text-main)
-    marginBottom: 4,
-    lineHeight: 20,
   },
-  meta: {
-    fontSize: 12,
-    color: '#6B7280', // var(--text-secondary)
+  badge: {
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: '#dcf2ec',
   },
-  deleteBtn: {
-    padding: 4,
+  badgeText: {color: COLORS.success, fontSize: 8, fontWeight: '800'},
+  badgeDanger: {backgroundColor: '#ffebe5'},
+  badgeDangerText: {color: COLORS.error},
+  emptyCard: {
+    padding: 15,
+    borderRadius: 21,
+    backgroundColor: 'rgba(255,255,255,0.84)',
   },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 60,
-  },
-  emptyText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#111827',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  emptySubtext: {
-    fontSize: 14,
-    color: '#6B7280',
-    textAlign: 'center',
-    paddingHorizontal: 40,
-  },
+  emptyTitle: {color: COLORS.text.primary, fontSize: 13, fontWeight: '700'},
+  emptyBody: {marginTop: 4, color: COLORS.text.secondary, fontSize: 10, lineHeight: 14},
 });
-

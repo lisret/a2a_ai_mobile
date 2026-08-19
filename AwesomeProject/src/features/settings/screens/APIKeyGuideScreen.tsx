@@ -287,7 +287,7 @@ const styles = StyleSheet.create({
   },
   introCard: {
     backgroundColor: COLORS.background.card,
-    borderRadius: 12,
+    borderRadius: 21,
     padding: 16,
     marginBottom: 16,
     borderLeftWidth: 4,
@@ -309,7 +309,7 @@ const styles = StyleSheet.create({
   },
   guideCard: {
     backgroundColor: COLORS.background.card,
-    borderRadius: 12,
+    borderRadius: 21,
     padding: 16,
     marginBottom: 16,
     borderWidth: 1,
@@ -317,7 +317,7 @@ const styles = StyleSheet.create({
   },
   emptyCard: {
     backgroundColor: COLORS.background.card,
-    borderRadius: 12,
+    borderRadius: 21,
     padding: 32,
     marginBottom: 16,
     alignItems: 'center',
@@ -371,7 +371,7 @@ const styles = StyleSheet.create({
   stepNumber: {
     width: 24,
     height: 24,
-    borderRadius: 12,
+    borderRadius: 21,
     backgroundColor: COLORS.primary,
     justifyContent: 'center',
     alignItems: 'center',
@@ -436,7 +436,7 @@ const styles = StyleSheet.create({
   },
   footerCard: {
     backgroundColor: COLORS.background.light,
-    borderRadius: 12,
+    borderRadius: 21,
     padding: 16,
     marginTop: 8,
     marginBottom: 32,

@@ -16,7 +16,8 @@ import type { RootStackParamList } from '@shared/types/navigation';
 import { settingsService } from '../services/SettingsService';
 import { searchBoxPositionService } from '../services/SearchBoxPositionService';
 import { PageLayout } from '@shared/components/PageLayout';
-import { COLORS, SHADOWS } from '@shared/constants';
+import { AppMark } from '@shared/components/AppMark';
+import { COLORS } from '@shared/constants';
 import { AppIcon, IconNames } from '@shared/components/Icon';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
@@ -98,109 +99,73 @@ export const SettingsScreen: React.FC = () => {
   };
 
   return (
-    <PageLayout title="设置" backgroundColor={COLORS.background.default}>
+    <PageLayout
+      title="设置"
+      kicker="PREFERENCES & SAFETY"
+      headerAccessory={<AppMark size={48} />}
+      backgroundColor={COLORS.background.default}>
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
-        {/* 功能介绍 */}
-        <View style={styles.infoSection}>
-          <Text style={styles.infoTitle}>功能介绍</Text>
-          <View style={styles.infoCard}>
-            <Text style={styles.infoText}>
-              • 任务执行时会自动切换到后台运行，不影响您使用其他应用{'\n'}
-              • 通过通知栏和悬浮窗实时查看任务执行状态{'\n'}
-              • 支持随时中断任务执行{'\n'}
-              • 所有任务历史自动保存，方便查看和回顾
+        <View style={styles.sectionHeading}>
+          <Text style={styles.sectionTitle}>执行偏好</Text>
+          <Text style={styles.sectionHint}>本机设置</Text>
+        </View>
+        <View style={styles.settingRow}>
+          <View style={styles.settingInfo}>
+            <Text style={styles.settingLabel}>完成提示音</Text>
+            <Text style={styles.settingDescription}>任务结束时轻声提醒</Text>
+          </View>
+          <Switch
+            value={taskCompletionSoundEnabled}
+            onValueChange={handleTaskCompletionSoundToggle}
+            trackColor={{false: '#d8d7df', true: COLORS.violet}}
+            thumbColor="#ffffff"
+          />
+        </View>
+        <View style={styles.settingRow}>
+          <View style={styles.settingInfo}>
+            <Text style={styles.settingLabel}>自动保存活动</Text>
+            <Text style={styles.settingDescription}>只保存经过清理的任务摘要</Text>
+          </View>
+          <Switch
+            value={true}
+            onValueChange={() => {}}
+            trackColor={{false: '#d8d7df', true: COLORS.violet}}
+            thumbColor="#ffffff"
+          />
+        </View>
+        <View style={styles.settingRow}>
+          <View style={styles.settingInfo}>
+            <Text style={styles.settingLabel}>ADB 兜底</Text>
+            <Text style={styles.settingDescription}>仅在明确开启且设备可用时尝试</Text>
+          </View>
+          <Switch
+            value={adbFallbackEnabled}
+            onValueChange={handleADBFallbackToggle}
+            trackColor={{false: '#d8d7df', true: COLORS.violet}}
+            thumbColor="#ffffff"
+          />
+        </View>
+        <TouchableOpacity style={styles.settingRow} onPress={handleOpenSearchBoxModal}>
+          <View style={styles.settingInfo}>
+            <Text style={styles.settingLabel}>搜索框位置</Text>
+            <Text style={styles.settingDescription}>
+              {searchBoxPosition || '设置搜索框位置描述'}
             </Text>
           </View>
+          <AppIcon name={IconNames.arrowRight} size={16} color={COLORS.text.secondary} />
+        </TouchableOpacity>
+
+        <View style={styles.sectionHeading}>
+          <Text style={styles.sectionTitle}>支持</Text>
+          <Text style={styles.sectionHint}>本地诊断</Text>
         </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>应用设置</Text>
-          
-          <View style={styles.settingsGroup}>
-            <TouchableOpacity
-              style={styles.settingItem}
-              onPress={handleOpenSearchBoxModal}>
-              <View style={styles.settingInfo}>
-                <Text style={styles.settingLabel}>手机应用搜索框</Text>
-                <Text style={styles.settingDescription}>
-                  设置搜索框位置
-                </Text>
-              </View>
-              <AppIcon name={IconNames.arrowRight} size={16} color={COLORS.text.secondary} />
-            </TouchableOpacity>
-
-            <View style={styles.settingItem}>
-              <View style={styles.settingInfo}>
-                <Text style={styles.settingLabel}>ADB 兜底运行</Text>
-                <Text style={styles.settingDescription}>
-                  无障碍服务失败时使用 ADB
-                </Text>
-              </View>
-              <Switch
-                value={adbFallbackEnabled}
-                onValueChange={handleADBFallbackToggle}
-                trackColor={{ false: '#E5E7EB', true: COLORS.success }}
-              />
-            </View>
-
-            <View style={styles.settingItem}>
-              <View style={styles.settingInfo}>
-                <Text style={styles.settingLabel}>任务完成提示音</Text>
-                <Text style={styles.settingDescription}>
-                  任务完成时播放提示音
-                </Text>
-              </View>
-              <Switch
-                value={taskCompletionSoundEnabled}
-                onValueChange={handleTaskCompletionSoundToggle}
-                trackColor={{ false: '#E5E7EB', true: COLORS.success }}
-              />
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <View style={styles.settingsGroup}>
-            <TouchableOpacity
-              style={styles.settingItem}
-              onPress={() => navigation.navigate('DebugLog')}>
-              <View style={styles.settingInfo}>
-                <Text style={styles.settingLabel}>调试日志</Text>
-                <Text style={styles.settingDescription}>
-                  查看应用运行日志
-                </Text>
-              </View>
-              <AppIcon name={IconNames.arrowRight} size={16} color={COLORS.text.secondary} />
-            </TouchableOpacity>
-
-            <View style={[styles.settingItem, { borderBottomWidth: 0 }]}>
-              <View style={styles.settingInfo}>
-                <Text style={styles.settingLabel}>自动保存任务历史</Text>
-              </View>
-              <Switch
-                value={true}
-                onValueChange={() => {}}
-                trackColor={{ false: '#E5E7EB', true: COLORS.success }}
-              />
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <View style={styles.settingsGroup}>
-            <View style={styles.settingItem}>
-              <Text style={styles.settingLabel}>关于</Text>
-              <Text style={styles.settingValue}>v0.0.12</Text>
-            </View>
-            <View style={styles.settingItem}>
-              <Text style={styles.settingLabel}>作者</Text>
-              <Text style={styles.settingValue}>LiZheng</Text>
-            </View>
-            <View style={[styles.settingItem, { borderBottomWidth: 0 }]}>
-              <Text style={styles.settingLabel}>邮箱</Text>
-              <Text style={[styles.settingValue, { fontSize: 12 }]}>1443376351@qq.com</Text>
-            </View>
-          </View>
+        <TouchableOpacity style={styles.linkRow} onPress={() => navigation.navigate('DebugLog')}>
+          <Text style={styles.linkText}>调试日志</Text>
+          <Text style={styles.linkChevron}>›</Text>
+        </TouchableOpacity>
+        <View style={styles.linkRow}>
+          <Text style={styles.linkText}>关于 NoNo</Text>
+          <Text style={styles.settingValue}>v0.0.12</Text>
         </View>
 
         {/* 搜索框位置设置弹窗 */}
@@ -262,78 +227,73 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   contentContainer: {
-    padding: 16,
-    paddingBottom: 80,
+    paddingHorizontal: 18,
+    paddingBottom: 120,
   },
-  infoSection: {
-    marginBottom: 20,
-  },
-  infoTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text.primary,
+  sectionHeading: {
+    marginTop: 24,
     marginBottom: 12,
-  },
-  infoCard: {
-    backgroundColor: COLORS.background.blue,
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#DBEAFE',
-  },
-  infoText: {
-    fontSize: 14,
-    color: '#1E40AF',
-    lineHeight: 22,
-  },
-  section: {
-    marginBottom: 20,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
   },
   sectionTitle: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: COLORS.text.primary, // Demo uses text-main for group labels? No, uses label inside.
-    // Actually Demo doesn't have explicit section titles outside groups except for "应用设置" implied context
-    // But let's keep it clean
-    marginBottom: 8,
-    marginLeft: 4,
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.text.primary,
   },
-  settingsGroup: {
-    backgroundColor: COLORS.background.card,
-    borderRadius: 12,
-    overflow: 'hidden',
-    ...SHADOWS.sm,
+  sectionHint: {
+    color: COLORS.text.secondary,
+    fontSize: 10,
   },
-  settingItem: {
+  settingRow: {
+    minHeight: 64,
+    marginBottom: 10,
+    padding: 15,
+    borderRadius: 21,
+    backgroundColor: 'rgba(255,255,255,0.84)',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border.medium,
+    gap: 10,
   },
   settingInfo: {
     flex: 1,
-    paddingRight: 16,
+    paddingRight: 12,
   },
   settingLabel: {
-    fontSize: 15,
-    fontWeight: '500',
+    fontSize: 13,
+    fontWeight: '700',
     color: COLORS.text.primary,
   },
   settingDescription: {
-    fontSize: 12,
+    marginTop: 4,
+    fontSize: 10,
+    lineHeight: 14,
     color: COLORS.text.secondary,
-    marginTop: 2,
-  },
-  settingValueContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
   },
   settingValue: {
-    fontSize: 14,
+    fontSize: 12,
     color: COLORS.text.secondary,
+  },
+  linkRow: {
+    minHeight: 62,
+    marginBottom: 10,
+    paddingHorizontal: 15,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255,255,255,0.84)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  linkText: {
+    color: COLORS.text.primary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  linkChevron: {
+    color: '#9a9ca7',
+    fontSize: 18,
   },
   // Modal styles
   modalOverlay: {

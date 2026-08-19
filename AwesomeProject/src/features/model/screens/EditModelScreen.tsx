@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
-  TouchableWithoutFeedback,
   ScrollView,
   Alert,
 } from 'react-native';
@@ -16,8 +15,8 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '@shared/types/navigation';
 import { modelService } from '../services/ModelService';
-import { COLORS, SHADOWS } from '@shared/constants';
-import { AppIcon, IconNames } from '@shared/components/Icon';
+import { COLORS } from '@shared/constants';
+import { PageLayout } from '@shared/components/PageLayout';
 import type { AIModelFormData } from '@shared/types/Model';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
@@ -124,25 +123,27 @@ export const EditModelScreen: React.FC = () => {
     }
   };
 
-  return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={styles.container}>
-      <TouchableWithoutFeedback onPress={() => navigation.goBack()}>
-        <View style={styles.overlay} />
-      </TouchableWithoutFeedback>
-
-      <View style={styles.sheetContainer}>
-        <View style={styles.header}>
-          <Text style={styles.title}>编辑模型</Text>
-          <TouchableOpacity 
-            onPress={() => navigation.goBack()}
-            style={styles.closeButton}>
-            <AppIcon name={IconNames.close} size={20} color={COLORS.text.secondary} />
-          </TouchableOpacity>
+  if (loading) {
+    return (
+      <PageLayout title="编辑模型" showBackButton backgroundColor={COLORS.background.default}>
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>加载中...</Text>
         </View>
+      </PageLayout>
+    );
+  }
 
+  return (
+    <PageLayout title="编辑模型" showBackButton backgroundColor={COLORS.background.default}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.container}>
         <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+          <View style={styles.introCard}>
+            <Text style={styles.introKicker}>EDIT MODEL</Text>
+            <Text style={styles.introTitle}>更新当前大脑配置</Text>
+            <Text style={styles.introBody}>修改后会立即用于下一次任务，不会自动重跑历史活动。</Text>
+          </View>
           <View style={styles.formGroup}>
             <Text style={styles.label}>昵称</Text>
             <TextInput
@@ -243,45 +244,52 @@ export const EditModelScreen: React.FC = () => {
           </View>
           <View style={{ height: 40 }} /> 
         </ScrollView>
-      </View>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </PageLayout>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: 'flex-end',
   },
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-  },
-  sheetContainer: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: '90%',
-    ...SHADOWS.lg,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  loadingContainer: {
+    flex: 1,
     alignItems: 'center',
-    padding: 24,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.border.light,
+    justifyContent: 'center',
   },
-  title: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: COLORS.text.primary,
-  },
-  closeButton: {
-    padding: 4,
+  loadingText: {
+    fontSize: 14,
+    color: COLORS.text.secondary,
   },
   content: {
-    padding: 24,
+    paddingHorizontal: 18,
+    paddingTop: 8,
+  },
+  introCard: {
+    marginBottom: 20,
+    padding: 20,
+    borderRadius: 28,
+    backgroundColor: COLORS.ink,
+  },
+  introKicker: {
+    color: '#aca7ea',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  introTitle: {
+    marginTop: 6,
+    color: '#ffffff',
+    fontSize: 23,
+    lineHeight: 26,
+    fontWeight: '800',
+  },
+  introBody: {
+    marginTop: 8,
+    color: '#c9cad4',
+    fontSize: 11,
+    lineHeight: 16,
   },
   formGroup: {
     marginBottom: 20,
@@ -296,7 +304,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background.light,
     borderWidth: 1,
     borderColor: COLORS.border.medium,
-    borderRadius: 8,
+    borderRadius: 14,
     padding: 12,
     fontSize: 14,
     color: COLORS.text.primary,
@@ -334,7 +342,7 @@ const styles = StyleSheet.create({
   button: {
     flex: 1,
     paddingVertical: 14,
-    borderRadius: 8,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -342,8 +350,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background.light,
   },
   saveButton: {
-    backgroundColor: COLORS.primary,
-    ...SHADOWS.default,
+    backgroundColor: COLORS.ink,
   },
   cancelButtonText: {
     fontSize: 15,

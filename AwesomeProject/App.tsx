@@ -16,7 +16,7 @@
  */
 
 import React, {useEffect} from 'react';
-import {Alert} from 'react-native';
+import {SafeAreaProvider} from 'react-native-safe-area-context';
 import {AppNavigator} from './src/navigation/AppNavigator';
 import {debugLogService} from './src/features/debug/services/DebugLogService';
 
@@ -31,7 +31,11 @@ function App(): React.JSX.Element {
       });
   }, []);
 
-  return <AppNavigator />;
+  return (
+    <SafeAreaProvider>
+      <AppNavigator />
+    </SafeAreaProvider>
+  );
 }
 
 export default App;

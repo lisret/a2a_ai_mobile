@@ -65,9 +65,9 @@
 | NoNo 设计系统 + View 拆分 | 85% | 四主页已拆；Agent 配置页缺运行时契约 |
 | 自定义 Tab | 80% | 已接入 App；缺 navigator 集成测试 |
 | Elel 选型 / 授权 / 调研 | 100% | 正选 Elel，备选 Holy；模之屋不打进包 |
-| Elel 首页第一期（旧壳上） | 90% | PR #2 已在旧 Home 接 **3D Elel** + Dock；尚未接到 NoNo 壳 |
-| Elel 3D VRM（WebView） | 90% | Android 打进 `android/app/src/main/assets/vrm/`；VRM 0.x 转正面对镜头；失败回退半身图。真机 WebGL 仍建议复测 |
-| 融合首页（NoNo 壳 + Elel 脸） | 0% | 本计划的下一项 |
+| Elel 首页第一期（旧壳上） | 完成 | 已迁出旧蓝灰 Home，逻辑进 `HomeScreen` adapter |
+| Elel 3D VRM（WebView） | 90% | 播放器已在仓库；**首页先关 3D 对齐 NoNo 布局**，确认后再打开 |
+| 融合首页（NoNo 壳 + Elel 脸） | 90% | `NoNoHomeView` 已用 Elel 舞台 + Dock + 珍珠底；问候大标题已去掉 |
 | 语音听写 / 悬浮窗头像 | 0% | 后置 |
 | Agent 配置车道 | 0% | 等 `AgentConfigController` |
 | 真机 / Android 验收 | 0% | 两轨都没编 debug 包 |
@@ -79,7 +79,7 @@
 | 1. Tokens 与基础组件 | 完成 | 保持。首页 Elel 必须吃 `NONO_COLORS` / `Surface`，不要再用全局蓝 `#2563EB` 当主色 |
 | 2. Tab 转场状态机 | 完成 | 保持 |
 | 3. 双图层 TabNavigator | 基本完成 | 保持；补集成测试 |
-| 4. 首页 / 活动纯 View | 完成（旧首页结构） | **重做首页 View**：Elel 舞台 + Dock；活动页不动 |
+| 4. 首页 / 活动纯 View | 完成 | 首页已是 Elel 舞台 + Dock；活动页不动 |
 | 5. 设置 / Agent 纯 View | 部分完成 | 保持；Agent 配置仍等契约 |
 | 6. 底栏动效 + 布局解耦 | 基本完成 | 保持；底栏继续用 NoNo 标，不是 Elel |
 | 7. Screen / Navigator 集成 | 部分完成 | `HomeScreen` 继续只做 adapter；render 改为新 `NoNoHomeView` |
@@ -96,7 +96,7 @@
 | 点角色 = 聚焦输入 | 完成 | 语音仍未接，文案保持诚实 |
 | 执行时缩小让路 | 完成（旧壳） | 迁到 `NoNoHomeView` 后复测，避免和 `paddingBottom: 120` 底栏抢空间 |
 | HTML 原型 `design_demo_avatar.html` | 完成 | 视觉参考；正式 UI 以 NoNo 珍珠底为准 |
-| 接到 NoNoHomeView | **未做** | 融合第一优先 |
+| 接到 NoNoHomeView | 完成 | Elel 占主舞台；输入 Dock；执行时缩小 |
 | 导入本地 VRM / 用户换装 | 未做 | 当前只内置 Elel |
 | 语音听写 / 悬浮窗头像 | 未做 | 后置 |
 | 悬浮窗头像 | 未做 | 与 NoNo「第二阶段悬浮球」合并规划，不塞进这一轨 |
@@ -105,16 +105,16 @@
 
 ## 下一步（按阻塞排序）
 
-1. **融合首页（马上做）**  
-   以 PR #1 为底 rebase PR #2 的 Elel 文件 → 改 `NoNoHomeView`：Elel 占 50–60% 屏，问候改气泡，输入 Dock 贴底栏上方，快捷任务/chip 保留但降为配角。更新 `NoNoHomeView.test.tsx`。
+1. **打开 3D（下一刀）**  
+   `NoNoHomeView` 里把 `AvatarStage` 的 `enable3d` 改为 `true`，并把播放器背景改成珍珠底 `#F8F7F3`。布局已按 NoNo 对齐。
 2. **可马上做（NoNo 债）**  
    `NoNoTabNavigator` / `CustomTabBar` 集成测试；`tsc` + 全量 Jest。
 3. **等契约**  
    `AgentConfigController` 就位后再做 Agent 配置 View，Tab 用户文案「模型」→「Agent」。
 4. **要真机**  
-   debug 包；连点 Tab；减少动画；键盘 + Elel Dock + 深紫底栏三件套是否互挡。
-5. **后置（不要和融合搅在一起）**  
-   语音听写、悬浮球/通知里的 Elel 头像。3D 已是首页默认（WebView + 本地 VRM），真机再确认一次拖转/回退。
+   debug 包；连点 Tab；键盘 + Elel Dock + 深紫底栏三件套是否互挡。
+5. **后置**  
+   语音听写、悬浮球/通知里的 Elel 头像。
 
 ---
 

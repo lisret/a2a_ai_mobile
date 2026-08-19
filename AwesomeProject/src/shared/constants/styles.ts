@@ -5,28 +5,28 @@
 
 // 颜色主题（从 index.ts 复制以避免循环依赖）
 const COLORS = {
-  primary: '#165DFF',
-  primaryLight: '#2563eb',
-  success: '#10b981',
-  error: '#dc2626',
-  warning: '#f59e0b',
+  primary: '#756bf0',
+  primaryLight: '#ebe8ff',
+  success: '#267568',
+  error: '#a94e40',
+  warning: '#ff9b79',
   text: {
-    primary: '#1d1d1f',
-    secondary: '#86868b',
-    disabled: '#9ca3af',
+    primary: '#202231',
+    secondary: '#777a88',
+    disabled: '#a2a4ad',
   },
   background: {
-    default: '#f5f5f5',
+    default: '#f8f7f3',
     white: '#ffffff',
     card: '#ffffff',
-    light: '#f9fafb',
-    blue: '#f0f7ff',
-    red: '#fef2f2',
+    light: '#f1effa',
+    blue: '#ebe8ff',
+    red: '#fff0ec',
   },
   border: {
-    light: '#eee',
-    medium: '#e5e7eb',
-    dark: '#d1d5db',
+    light: '#f1effa',
+    medium: '#e8e7ed',
+    dark: '#d8d7df',
   },
 } as const;
 

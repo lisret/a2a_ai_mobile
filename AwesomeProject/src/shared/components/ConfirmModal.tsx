@@ -1,11 +1,6 @@
 import React from 'react';
-import {
-  Modal,
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-} from 'react-native';
+import {Modal, View, Text, TouchableOpacity, StyleSheet} from 'react-native';
+import {COLORS} from '@shared/constants';
 
 interface ConfirmModalProps {
   visible: boolean;
@@ -26,43 +21,24 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
   cancelText = '取消',
   onConfirm,
   onCancel,
-  danger = false,
 }) => {
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onCancel}>
-      <View style={styles.overlay}>
-        <View style={styles.content}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
+      <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={onCancel}>
+        <View style={styles.sheet}>
+          <View style={styles.grab} />
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.message}>{message}</Text>
           <View style={styles.buttonGroup}>
-            <TouchableOpacity
-              style={[styles.button, styles.cancelButton]}
-              onPress={onCancel}
-              activeOpacity={0.8}>
+            <TouchableOpacity style={styles.cancelButton} onPress={onCancel} activeOpacity={0.8}>
               <Text style={styles.cancelButtonText}>{cancelText}</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.button,
-                danger ? styles.dangerButton : styles.confirmButton,
-              ]}
-              onPress={onConfirm}
-              activeOpacity={0.8}>
-              <Text
-                style={[
-                  styles.confirmButtonText,
-                  danger && styles.dangerButtonText,
-                ]}>
-                {confirmText}
-              </Text>
+            <TouchableOpacity style={styles.confirmButton} onPress={onConfirm} activeOpacity={0.8}>
+              <Text style={styles.confirmButtonText}>{confirmText}</Text>
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </TouchableOpacity>
     </Modal>
   );
 };
@@ -70,72 +46,64 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
+    backgroundColor: 'rgba(19,20,34,0.42)',
+    justifyContent: 'flex-end',
+    padding: 14,
   },
-  content: {
-    backgroundColor: '#ffffff',
-    borderRadius: 20,
-    padding: 24,
+  sheet: {
     width: '100%',
-    maxWidth: 320,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
+    padding: 20,
+    borderRadius: 26,
+    backgroundColor: COLORS.ink,
+  },
+  grab: {
+    width: 38,
+    height: 4,
+    borderRadius: 99,
+    backgroundColor: '#555869',
+    alignSelf: 'center',
+    marginBottom: 16,
   },
   title: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#111827',
-    marginBottom: 12,
-    textAlign: 'center',
+    color: '#ffffff',
+    marginBottom: 8,
   },
   message: {
-    fontSize: 15,
-    color: '#6B7280',
-    marginBottom: 24,
-    textAlign: 'center',
-    lineHeight: 22,
+    fontSize: 12,
+    color: '#c4c6d0',
+    lineHeight: 18,
+    marginBottom: 18,
   },
   buttonGroup: {
     flexDirection: 'row',
-    gap: 12,
-  },
-  button: {
-    flex: 1,
-    paddingVertical: 12,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
+    gap: 9,
   },
   cancelButton: {
-    backgroundColor: '#F3F4F6',
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
   },
   confirmButton: {
-    backgroundColor: '#2563EB',
-  },
-  dangerButton: {
-    backgroundColor: '#EF4444',
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.coral,
   },
   cancelButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#374151',
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#ffffff',
   },
   confirmButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#ffffff',
-  },
-  dangerButtonText: {
-    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#4c271f',
   },
 });
-

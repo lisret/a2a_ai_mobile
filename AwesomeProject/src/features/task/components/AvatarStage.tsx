@@ -8,7 +8,8 @@ import {
   Animated,
   Alert,
 } from 'react-native';
-import {COLORS, SHADOWS} from '@shared/constants';
+import {COLORS} from '@shared/constants';
+import {NONO_COLORS, NONO_RADII} from '@shared/ui/nono';
 import {DEFAULT_AVATAR} from '../../../assets/avatars';
 import {AvatarVrmView} from './AvatarVrmView';
 import type {AvatarMood} from './avatarTypes';
@@ -19,6 +20,8 @@ interface AvatarStageProps {
   bubble: string;
   mood?: AvatarMood;
   compact?: boolean;
+  /** UI 对齐阶段默认关 3D，确认布局后再打开。 */
+  enable3d?: boolean;
   onPress?: () => void;
 }
 
@@ -26,13 +29,24 @@ export const AvatarStage: React.FC<AvatarStageProps> = ({
   bubble,
   mood = 'idle',
   compact = false,
+  enable3d = false,
   onPress,
 }) => {
-  const [use3d, setUse3d] = useState(true);
+  const [use3d, setUse3d] = useState(enable3d);
   const [ready3d, setReady3d] = useState(false);
   const float = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    setUse3d(enable3d);
+    if (!enable3d) {
+      setReady3d(false);
+    }
+  }, [enable3d]);
+
+  useEffect(() => {
+    if (process.env.JEST_WORKER_ID) {
+      return;
+    }
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(float, {toValue: 1, duration: 1800, useNativeDriver: true}),
@@ -88,12 +102,13 @@ export const AvatarStage: React.FC<AvatarStageProps> = ({
               onLongPress={handleLongPress}
               delayLongPress={450}
               disabled={compact || !showFallback}
-              style={styles.hit}>
+              style={styles.hit}
+              accessibilityRole="button"
+              accessibilityLabel={DEFAULT_AVATAR.name}>
               <Image
                 source={DEFAULT_AVATAR.bust}
                 style={[styles.photo, mood === 'error' && styles.photoDim]}
                 resizeMode="cover"
-                accessibilityLabel={DEFAULT_AVATAR.name}
               />
             </TouchableOpacity>
           </Animated.View>
@@ -108,29 +123,35 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'flex-end',
-    minHeight: 220,
-    paddingHorizontal: 16,
+    minHeight: 200,
+    paddingHorizontal: 18,
   },
   stageCompact: {
     flex: 0,
     flexGrow: 0,
     flexShrink: 0,
     minHeight: 0,
-    height: 120,
+    height: 108,
     alignItems: 'flex-end',
     justifyContent: 'center',
-    paddingRight: 12,
+    paddingRight: 18,
     paddingTop: 4,
   },
   bubble: {
     maxWidth: 300,
-    backgroundColor: COLORS.background.card,
-    borderRadius: 18,
-    borderBottomLeftRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.84)',
+    borderRadius: NONO_RADII.md,
+    borderBottomLeftRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.92)',
     paddingVertical: 12,
     paddingHorizontal: 16,
     marginBottom: 8,
-    ...SHADOWS.sm,
+    shadowColor: '#1e1f32',
+    shadowOffset: {width: 0, height: 8},
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 2,
   },
   bubbleText: {
     fontSize: 15,
@@ -138,16 +159,16 @@ const styles = StyleSheet.create({
     color: COLORS.text.primary,
   },
   avatarWrap: {
-    width: 260,
-    height: 320,
-    borderRadius: 24,
+    width: 240,
+    height: 292,
+    borderRadius: NONO_RADII.lg,
     overflow: 'hidden',
-    backgroundColor: 'transparent',
+    backgroundColor: NONO_COLORS.pearl,
   },
   avatarWrapCompact: {
-    width: 96,
-    height: 118,
-    borderRadius: 16,
+    width: 84,
+    height: 100,
+    borderRadius: NONO_RADII.sm,
   },
   fallback: {
     ...StyleSheet.absoluteFillObject,

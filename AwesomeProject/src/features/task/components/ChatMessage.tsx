@@ -22,7 +22,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
     <View style={[styles.message, isUser ? styles.messageUser : styles.messageAI]}>
       {!isUser && (
         <View style={[styles.avatar, styles.aiAvatar]}>
-          <AppIcon name={IconNames.robot} size={18} color="#2563eb" />
+          <AppIcon name={IconNames.robot} size={18} color="#756bf0" />
         </View>
       )}
       <View style={[styles.messageContent, isUser ? styles.userMessageContent : styles.aiMessageContent]}>
@@ -58,7 +58,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   userAvatar: {
-    backgroundColor: '#165DFF',
+    backgroundColor: '#756bf0',
     marginLeft: 8,
   },
   aiAvatar: {
@@ -74,7 +74,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
   },
   userMessageContent: {
-    backgroundColor: '#165DFF',
+    backgroundColor: '#756bf0',
     borderBottomRightRadius: 4,
   },
   aiMessageContent: {

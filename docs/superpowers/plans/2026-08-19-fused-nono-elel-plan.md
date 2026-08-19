@@ -23,7 +23,7 @@
 - 全 App 视觉、底栏、模型/活动/设置：走 PR #1 的 NoNo 设计系统（珍珠底 `#F8F7F3`、墨色 `#1B1D30`、紫 `#756BF0`、薄荷、珊瑚）。
 - 首页「伴侣」不再是顶栏 54px 的 CSS 机器人 `NoNoMascot`，也不再是蓝灰工具风大输入卡。首页舞台用 **Elel Silverbell**（Xmas Chibis，CC0）。
 - `NoNoMascot` / `NoNoMark` / `AppMark` 留作品牌标：底栏选中态、非首页顶栏、执行中小标。不要和 Elel 在首页抢同一块主视觉。
-- 低端机（Android 7）默认仍是半身静图 + 气泡；完整 VRM 不打进 APK。
+- 低端机（Android 7 WebGL 失败）回退半身静图 + 气泡；**默认首页是 Elel 3D VRM**，模型已打进 APK（约 3.2MB）。
 
 两套首页不能并存：
 
@@ -48,7 +48,7 @@
 
 | 任务状态 | Elel `AvatarMood` | NoNo `NoNoMood` | 首页表现 |
 | --- | --- | --- | --- |
-| 待机 | `idle` | `idle` | Elel 半身 + 气泡；底栏 NoNo 标 idle |
+| 待机 | `idle` | `idle` | Elel 3D 慢转 + 气泡；底栏 NoNo 标 idle |
 | 思考 / 执行 | `work` | `thinking` | Elel 缩小；执行卡；顶栏可改 AppMark |
 | 成功 | `done` | `success` | 气泡「搞定了」 |
 | 失败 / 要权限 | `error` | `error` / `confirm` | 气泡指设置；确认终止仍用 NoNo 弹层 |
@@ -65,8 +65,8 @@
 | NoNo 设计系统 + View 拆分 | 85% | 四主页已拆；Agent 配置页缺运行时契约 |
 | 自定义 Tab | 80% | 已接入 App；缺 navigator 集成测试 |
 | Elel 选型 / 授权 / 调研 | 100% | 正选 Elel，备选 Holy；模之屋不打进包 |
-| Elel 首页第一期（旧壳上） | 70% | PR #2 已在旧 Home 接半身图 + Dock；**尚未接到 NoNo 壳** |
-| Elel 3D VRM（WebView） | 80% | Android 打进 `android/app/src/main/assets/vrm/`；失败回退半身图。真机 WebGL 未验收 |
+| Elel 首页第一期（旧壳上） | 90% | PR #2 已在旧 Home 接 **3D Elel** + Dock；尚未接到 NoNo 壳 |
+| Elel 3D VRM（WebView） | 90% | Android 打进 `android/app/src/main/assets/vrm/`；VRM 0.x 转正面对镜头；失败回退半身图。真机 WebGL 仍建议复测 |
 | 融合首页（NoNo 壳 + Elel 脸） | 0% | 本计划的下一项 |
 | 语音听写 / 悬浮窗头像 | 0% | 后置 |
 | Agent 配置车道 | 0% | 等 `AgentConfigController` |
@@ -114,7 +114,7 @@
 4. **要真机**  
    debug 包；连点 Tab；减少动画；键盘 + Elel Dock + 深紫底栏三件套是否互挡。
 5. **后置（不要和融合搅在一起）**  
-   语音听写、悬浮球/通知里的 Elel 头像。3D 已在首页 WebView 接入，真机验收仍缺。
+   语音听写、悬浮球/通知里的 Elel 头像。3D 已是首页默认（WebView + 本地 VRM），真机再确认一次拖转/回退。
 
 ---
 
@@ -127,3 +127,4 @@
 - 长按 Elel 能看到 CC0 出处。
 - 不新增 3D 引擎 npm 包；WebView + 本地 UMD three/three-vrm。新增 `react-native-webview`。
 - `.vrm` 已打进 Android assets（约 3.2MB），不是 4200 个模型。
+- 打开首页应看到可转动的 3D Elel（自动慢转 + 手指拖转），不是一张不会动的半身静图。

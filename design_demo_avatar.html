@@ -603,7 +603,7 @@
             <li><b>VTubeMe</b> 四套写实：<code>CC BY 4.0</code>，要署名</li>
             <li><b>模之屋</b>：不要打进 APK，只允许用户自己导入</li>
         </ul>
-        <p class="note">完整调研见 <code>doc/虚拟角色首页调研.md</code>。本项目目标机是 Android 7.0 低端机，默认首页不要上完整 3D VRM。</p>
+        <p class="note">完整调研见 <code>doc/虚拟角色首页调研.md</code>。首页默认是 Elel 3D VRM；Android 7 WebGL 失败才回退半身图。</p>
     </aside>
 
     <div class="phone-container">
@@ -675,7 +675,7 @@
             <h4>换形象</h4>
             <div class="pack on" data-pack="elel">
                 <img class="mini" src="doc/assets/avatars/elel-bust.jpg" alt="" style="object-fit:cover;">
-                <div><b>Elel Silverbell · 正选</b><span>Xmas Chibis · CC0 · 低端机先用半身图</span></div>
+                <div><b>Elel Silverbell · 正选</b><span>Xmas Chibis · CC0 · 默认 3D VRM</span></div>
             </div>
             <div class="pack" data-pack="holy">
                 <img class="mini" src="doc/assets/avatars/holy-bust.jpg" alt="" style="object-fit:cover;">
@@ -923,6 +923,9 @@
     controls.enablePan = false;
     controls.enableZoom = false;
     controls.target.set(0, 0.78, 0);
+    controls.enableDamping = true;
+    controls.autoRotate = true;
+    controls.autoRotateSpeed = 1.4;
     controls.update();
     var clock = new THREE.Clock();
     var vrmObj = null;
@@ -938,18 +941,20 @@
     };
     var loader = new THREE.GLTFLoader();
     loader.crossOrigin = 'anonymous';
-    loader.load(
-        'https://ipfs.io/ipfs/QmSpb8jZRtwDhpp7zjpfvU47GZyapmh8GvQApmzTxFcaLz/Avatar01_Neutral.vrm',
-        function (gltf) {
+    var localVrm = 'AwesomeProject/android/app/src/main/assets/vrm/elel.vrm';
+    var remoteVrm = 'https://ipfs.io/ipfs/QmSpb8jZRtwDhpp7zjpfvU47GZyapmh8GvQApmzTxFcaLz/Avatar01_Neutral.vrm';
+    function mountVrm(gltf) {
             THREE_VRM.VRM.from(gltf).then(function (vrm) {
                 vrmObj = vrm;
-                if (THREE_VRM.VRMUtils && THREE_VRM.VRMUtils.rotateVRM0) THREE_VRM.VRMUtils.rotateVRM0(vrm);
+                vrm.scene.rotation.y = Math.PI;
                 scene.add(vrm.scene);
                 if (vrm.lookAt) vrm.lookAt.target = camera;
                 canvas.classList.add('is-live');
             });
-        }
-    );
+    }
+    loader.load(localVrm, mountVrm, undefined, function () {
+        loader.load(remoteVrm, mountVrm);
+    });
     (function animate() {
         requestAnimationFrame(animate);
         var dt = clock.getDelta();

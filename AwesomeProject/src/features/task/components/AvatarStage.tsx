@@ -1,4 +1,4 @@
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   View,
   Text,
@@ -52,6 +52,11 @@ export const AvatarStage: React.FC<AvatarStageProps> = ({
     Alert.alert(DEFAULT_AVATAR.name, DEFAULT_AVATAR.credit);
   };
 
+  const handleVrmError = useCallback(() => {
+    setUse3d(false);
+    setReady3d(false);
+  }, []);
+
   const showFallback = !use3d;
   const showPlaceholder = use3d && !ready3d;
 
@@ -66,11 +71,9 @@ export const AvatarStage: React.FC<AvatarStageProps> = ({
         {use3d && (
           <AvatarVrmView
             mood={mood}
+            compact={compact}
             onReady={() => setReady3d(true)}
-            onError={() => {
-              setUse3d(false);
-              setReady3d(false);
-            }}
+            onError={handleVrmError}
             onPress={compact ? undefined : onPress}
             onLongPress={handleLongPress}
           />

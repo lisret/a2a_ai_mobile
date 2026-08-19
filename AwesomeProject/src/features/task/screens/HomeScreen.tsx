@@ -25,9 +25,9 @@ import { COLORS, HOME_SUGGESTIONS, HOME_QUICK_TASKS } from '@shared/constants';
 import { NoNoMascot } from '@shared/components/NoNoMascot';
 import { AppMark } from '@shared/components/AppMark';
 import type { AIModel } from '@shared/types/Model';
+import type { Task, TaskStep } from '@core/engine/taskEngine';
 
 const QUICK_TASK_COLORS = ['#ddd9ff', '#ffe0d6', '#d9efeb', '#efe4ff'];
-import type { Task, TaskStep } from '@core/engine/taskEngine';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 

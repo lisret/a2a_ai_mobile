@@ -14,7 +14,7 @@ import { PageLayout } from '@shared/components/PageLayout';
 import { taskHistoryService } from '../services/TaskHistoryService';
 import { COLORS } from '@shared/constants';
 import { TaskStepDetail } from '../components/TaskStepDetail';
-import type { Task, TaskStep } from '@core/engine/taskEngine';
+import type { Task } from '@core/engine/taskEngine';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 type RoutePropType = RouteProp<RootStackParamList, 'TaskDetail'>;
@@ -112,13 +112,12 @@ export const TaskDetailScreen: React.FC = () => {
         {steps.length > 0 && (
           <View style={styles.stepsSection}>
             <Text style={styles.sectionTitle}>执行过程</Text>
-            {steps.map((step, index) => (
+            {steps.map(step => (
               <TaskStepDetail
                 key={step.step}
                 step={step}
                 isExpanded={expandedSteps.has(step.step)}
                 onToggle={() => toggleStep(step.step)}
-                isLast={index === steps.length - 1}
               />
             ))}
           </View>
@@ -139,7 +138,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    padding: 16,
+    paddingHorizontal: 18,
+    paddingBottom: 40,
   },
   loadingContainer: {
     flex: 1,

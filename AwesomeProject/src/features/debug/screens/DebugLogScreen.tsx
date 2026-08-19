@@ -136,22 +136,19 @@ export const DebugLogScreen: React.FC = () => {
       backgroundColor={COLORS.background.default}
       showBackButton={true}>
       <View style={styles.container}>
-        {/* 统计信息和控制栏 */}
+        <View style={styles.hero}>
+          <Text style={styles.heroKicker}>LOCAL DIAGNOSTICS</Text>
+          <Text style={styles.heroTitle}>本机运行日志</Text>
+          <Text style={styles.heroBody}>
+            总计 {stats.total} 条 · 错误 {stats.byLevel.error || 0} · 警告 {stats.byLevel.warn || 0}
+          </Text>
+        </View>
         <View style={styles.controlBar}>
-          <View style={styles.stats}>
-            <Text style={styles.statsText}>
-              总计: {stats.total} | 
-              错误: {stats.byLevel.error || 0} | 
-              警告: {stats.byLevel.warn || 0}
-            </Text>
-          </View>
-          <View style={styles.controls}>
-            <TouchableOpacity
-              style={[styles.button, styles.clearButton]}
-              onPress={handleClear}>
-              <Text style={styles.buttonText}>清空</Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            style={styles.clearButton}
+            onPress={handleClear}>
+            <Text style={styles.clearButtonText}>清空日志</Text>
+          </TouchableOpacity>
         </View>
 
         {/* 过滤栏 */}
@@ -235,98 +232,103 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  hero: {
+    marginHorizontal: 18,
+    marginTop: 8,
+    marginBottom: 12,
+    padding: 20,
+    borderRadius: 28,
+    backgroundColor: COLORS.ink,
+  },
+  heroKicker: {
+    color: '#aca7ea',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  heroTitle: {
+    marginTop: 6,
+    color: '#ffffff',
+    fontSize: 23,
+    lineHeight: 26,
+    fontWeight: '800',
+  },
+  heroBody: {
+    marginTop: 8,
+    color: '#c9cad4',
+    fontSize: 11,
+    lineHeight: 16,
+  },
   controlBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 12,
-    backgroundColor: 'rgba(255,255,255,0.84)',
-  },
-  stats: {
-    flex: 1,
-  },
-  statsText: {
-    fontSize: 12,
-    color: '#6b7280',
-  },
-  controls: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  button: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
-    backgroundColor: '#e5e7eb',
+    paddingHorizontal: 18,
+    marginBottom: 4,
+    alignItems: 'flex-start',
   },
   clearButton: {
-    backgroundColor: '#ef4444',
+    minHeight: 36,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: '#fff0ec',
+    justifyContent: 'center',
   },
-  activeButton: {
-    backgroundColor: '#1b1d30',
-  },
-  inactiveButton: {
-    backgroundColor: '#e5e7eb',
-  },
-  buttonText: {
+  clearButtonText: {
     fontSize: 12,
-    fontWeight: '500',
-    color: '#ffffff',
+    fontWeight: '700',
+    color: COLORS.error,
   },
   filterBar: {
-    padding: 12,
-    backgroundColor: '#f8f7f3',
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    backgroundColor: COLORS.pearl,
   },
   filterInput: {
-    backgroundColor: '#ffffff',
-    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.84)',
+    borderRadius: 16,
     padding: 12,
     fontSize: 14,
-    color: '#202231',
+    color: COLORS.text.primary,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: '#e8e7ed',
+    borderColor: 'rgba(255,255,255,0.92)',
   },
   levelFilter: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
+    gap: 8,
   },
   levelButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 4,
+    minHeight: 34,
+    paddingHorizontal: 13,
+    borderRadius: 999,
     backgroundColor: '#ffffff',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
+    justifyContent: 'center',
   },
   levelButtonActive: {
-    backgroundColor: '#1b1d30',
-    borderColor: '#1b1d30',
+    backgroundColor: COLORS.ink,
   },
   levelButtonText: {
-    fontSize: 11,
-    color: '#6b7280',
-    fontWeight: '500',
+    fontSize: 10,
+    color: COLORS.text.secondary,
+    fontWeight: '700',
   },
   levelButtonTextActive: {
     color: '#ffffff',
   },
   logContainer: {
     flex: 1,
-    backgroundColor: '#f8f7f3',
+    backgroundColor: COLORS.pearl,
   },
   logContent: {
-    padding: 12,
+    paddingHorizontal: 18,
     paddingBottom: 20,
   },
   logEntry: {
-    marginBottom: 12,
-    padding: 12,
-    backgroundColor: '#ffffff',
-    borderRadius: 14,
-    borderLeftWidth: 3,
-    borderLeftColor: '#756bf0',
+    marginBottom: 10,
+    padding: 15,
+    backgroundColor: 'rgba(255,255,255,0.84)',
+    borderRadius: 21,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.92)',
   },
   logHeader: {
     flexDirection: 'row',

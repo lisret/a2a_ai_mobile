@@ -406,20 +406,10 @@ export const AppNavigator: React.FC = () => {
         <Stack.Screen
           name="AddModel"
           component={AddModelScreen}
-          options={{ 
-            presentation: 'transparentModal',
-            animation: 'slide_from_bottom',
-            headerShown: false 
-          }}
         />
         <Stack.Screen
           name="EditModel"
           component={EditModelScreen}
-          options={{ 
-            presentation: 'transparentModal',
-            animation: 'slide_from_bottom',
-            headerShown: false 
-          }}
         />
         <Stack.Screen
           name="TaskHistory"

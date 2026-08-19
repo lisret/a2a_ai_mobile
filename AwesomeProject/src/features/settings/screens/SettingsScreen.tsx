@@ -19,13 +19,11 @@ import { PageLayout } from '@shared/components/PageLayout';
 import { AppMark } from '@shared/components/AppMark';
 import { COLORS } from '@shared/constants';
 import { AppIcon, IconNames } from '@shared/components/Icon';
+import { accessibilityService, floatingWindowService } from '@core/ability';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
-// ... (rest of the component logic remains the same, focusing on styles)
-
 export const SettingsScreen: React.FC = () => {
-  // ... (state and handlers remain the same)
   const navigation = useNavigation<NavigationProp>();
   const [adbFallbackEnabled, setAdbFallbackEnabled] = useState(false);
   const [taskCompletionSoundEnabled, setTaskCompletionSoundEnabled] = useState(false);
@@ -156,6 +154,38 @@ export const SettingsScreen: React.FC = () => {
         </TouchableOpacity>
 
         <View style={styles.sectionHeading}>
+          <Text style={styles.sectionTitle}>权限中心</Text>
+          <Text style={styles.sectionHint}>跳转系统设置</Text>
+        </View>
+        <TouchableOpacity
+          style={styles.settingRow}
+          onPress={() => floatingWindowService.openOverlayPermissionSettings().catch(() => {})}>
+          <View style={styles.settingInfo}>
+            <Text style={styles.settingLabel}>悬浮窗</Text>
+            <Text style={styles.settingDescription}>在其他应用上显示 NoNo 任务球</Text>
+          </View>
+          <Text style={styles.linkChevron}>›</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.settingRow}
+          onPress={() => accessibilityService.openNotificationSettings().catch(() => {})}>
+          <View style={styles.settingInfo}>
+            <Text style={styles.settingLabel}>前台通知</Text>
+            <Text style={styles.settingDescription}>持续显示任务状态和终止入口</Text>
+          </View>
+          <Text style={styles.linkChevron}>›</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.settingRow}
+          onPress={() => accessibilityService.openSettings().catch(() => {})}>
+          <View style={styles.settingInfo}>
+            <Text style={styles.settingLabel}>无障碍服务</Text>
+            <Text style={styles.settingDescription}>执行跨应用交互所需的核心权限</Text>
+          </View>
+          <Text style={styles.linkChevron}>›</Text>
+        </TouchableOpacity>
+
+        <View style={styles.sectionHeading}>
           <Text style={styles.sectionTitle}>支持</Text>
           <Text style={styles.sectionHint}>本地诊断</Text>
         </View>
@@ -179,29 +209,22 @@ export const SettingsScreen: React.FC = () => {
             activeOpacity={1}
             onPress={handleCancelSearchBoxModal}>
             <View style={styles.modalContent} onStartShouldSetResponder={() => true}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>设置搜索框位置描述</Text>
-                <TouchableOpacity
-                  style={styles.modalCloseButton}
-                  onPress={handleCancelSearchBoxModal}>
-                  <Text style={styles.modalCloseText}>×</Text>
-                </TouchableOpacity>
-              </View>
-              <View style={styles.modalBody}>
-                <Text style={styles.modalHint}>
-                  请输入搜索框位置描述，例如："搜索框在首页左侧页面的顶部"
-                </Text>
-                <TextInput
-                  style={styles.modalTextInput}
-                  value={searchBoxInputValue}
-                  onChangeText={setSearchBoxInputValue}
-                  placeholder="请输入搜索框位置描述..."
-                  placeholderTextColor="#9ca3af"
-                  multiline
-                  numberOfLines={4}
-                  autoFocus
-                />
-              </View>
+              <View style={styles.modalHandle} />
+              <Text style={styles.modalKicker}>SEARCH BOX</Text>
+              <Text style={styles.modalTitle}>设置搜索框位置描述</Text>
+              <Text style={styles.modalHint}>
+                请输入搜索框位置描述，例如：“搜索框在首页左侧页面的顶部”
+              </Text>
+              <TextInput
+                style={styles.modalTextInput}
+                value={searchBoxInputValue}
+                onChangeText={setSearchBoxInputValue}
+                placeholder="请输入搜索框位置描述..."
+                placeholderTextColor="#9ca3af"
+                multiline
+                numberOfLines={4}
+                autoFocus
+              />
               <View style={styles.modalFooter}>
                 <TouchableOpacity
                   style={[styles.modalButton, styles.modalCancelButton]}
@@ -295,84 +318,81 @@ const styles = StyleSheet.create({
     color: '#9a9ca7',
     fontSize: 18,
   },
-  // Modal styles
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end', // Bottom sheet style
+    backgroundColor: 'rgba(19,20,34,0.42)',
+    justifyContent: 'flex-end',
+    padding: 14,
   },
   modalContent: {
-    backgroundColor: COLORS.background.card,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
     width: '100%',
-    padding: 24,
-    maxHeight: '90%',
+    padding: 20,
+    borderRadius: 26,
+    backgroundColor: COLORS.ink,
   },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 24,
+  modalHandle: {
+    width: 38,
+    height: 4,
+    borderRadius: 99,
+    backgroundColor: '#555869',
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  modalKicker: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    color: COLORS.mint,
+    marginBottom: 6,
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: COLORS.text.primary,
-  },
-  modalCloseButton: {
-    padding: 4,
-  },
-  modalCloseText: {
-    fontSize: 20,
-    color: COLORS.text.secondary,
-  },
-  modalBody: {
-    marginBottom: 24,
+    color: '#ffffff',
+    marginBottom: 8,
   },
   modalHint: {
-    fontSize: 14,
-    color: COLORS.text.primary,
-    marginBottom: 8,
-    fontWeight: '500',
+    fontSize: 12,
+    color: '#c4c6d0',
+    lineHeight: 18,
+    marginBottom: 14,
   },
   modalTextInput: {
     fontSize: 14,
-    color: COLORS.text.primary,
+    color: '#ffffff',
     minHeight: 100,
     padding: 12,
-    backgroundColor: COLORS.background.light,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: COLORS.border.medium,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 14,
     textAlignVertical: 'top',
+    marginBottom: 18,
   },
   modalFooter: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 9,
   },
   modalButton: {
     flex: 1,
-    padding: 12,
-    borderRadius: 8,
+    minHeight: 44,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
   modalCancelButton: {
-    backgroundColor: COLORS.background.default,
+    backgroundColor: 'rgba(255,255,255,0.1)',
   },
   modalCancelButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: COLORS.text.primary,
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#ffffff',
   },
   modalConfirmButton: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.coral,
   },
   modalConfirmButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#4c271f',
   },
 });
 

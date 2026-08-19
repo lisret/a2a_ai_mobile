@@ -163,7 +163,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#111827',
+    color: '#202231',
     marginBottom: 12,
     textAlign: 'center',
   },
@@ -196,7 +196,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F3F4F6',
   },
   confirmButton: {
-    backgroundColor: '#2563EB',
+    backgroundColor: '#1b1d30',
   },
   dangerButton: {
     backgroundColor: '#EF4444',

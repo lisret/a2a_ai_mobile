@@ -5,10 +5,9 @@ import {
   StyleSheet,
   TouchableOpacity,
 } from 'react-native';
-import { COLORS, SHADOWS } from '@shared/constants';
+import { COLORS } from '@shared/constants';
 import { AppIcon, IconNames } from '@shared/components/Icon';
-import { getActionDescription } from '@shared/utils/taskHelpers';
-import type { TaskStep, TaskAction } from '@core/engine/taskEngine';
+import type { TaskStep } from '@core/engine/taskEngine';
 
 /**
  * 从模型响应中提取原始坐标（0-999坐标系）
@@ -51,14 +50,12 @@ interface TaskStepDetailProps {
   step: TaskStep;
   isExpanded: boolean;
   onToggle: () => void;
-  isLast: boolean;
 }
 
 export const TaskStepDetail: React.FC<TaskStepDetailProps> = ({
   step,
   isExpanded,
   onToggle,
-  isLast,
 }) => {
   const formatTime = (timestamp: number) => {
     const date = new Date(timestamp);
@@ -91,10 +88,6 @@ export const TaskStepDetail: React.FC<TaskStepDetailProps> = ({
 
   return (
     <View style={styles.container}>
-      {/* 时间轴线条 */}
-      {!isLast && <View style={styles.timelineLine} />}
-
-      {/* 步骤内容 */}
       <View style={styles.stepContent}>
         {/* 步骤头部 */}
         <TouchableOpacity
@@ -196,23 +189,14 @@ export const TaskStepDetail: React.FC<TaskStepDetailProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    position: 'relative',
-    marginBottom: 16,
-    paddingLeft: 20,
-  },
-  timelineLine: {
-    position: 'absolute',
-    left: 7,
-    top: 24,
-    bottom: -16,
-    width: 2,
-    backgroundColor: COLORS.border.medium,
+    marginBottom: 10,
   },
   stepContent: {
-    backgroundColor: COLORS.background.card,
-    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.84)',
+    borderRadius: 16,
     overflow: 'hidden',
-    ...SHADOWS.sm,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.9)',
   },
   stepHeader: {
     flexDirection: 'row',

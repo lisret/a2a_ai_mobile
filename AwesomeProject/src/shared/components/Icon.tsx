@@ -15,7 +15,7 @@ interface CustomIconProps extends Omit<IconProps, 'name'> {
 export const AppIcon: React.FC<CustomIconProps> = ({
   name,
   size = 20,
-  color = '#165DFF',
+  color = '#756bf0',
   ...props
 }) => {
   return <Icon name={name} size={size} color={color} {...props} />;

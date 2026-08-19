@@ -1,7 +1,6 @@
 import React from 'react';
-import { View, TextInput, TouchableOpacity, Text, StyleSheet } from 'react-native';
-import { COLORS, SHADOWS, UI_CONFIG } from '@shared/constants';
-import { AppIcon, IconNames } from '@shared/components/Icon';
+import {View, TextInput, TouchableOpacity, Text, StyleSheet} from 'react-native';
+import {COLORS, UI_CONFIG} from '@shared/constants';
 
 interface TaskInputCardProps {
   value: string;
@@ -18,8 +17,10 @@ export const TaskInputCard: React.FC<TaskInputCardProps> = ({
   onClear,
   onStart,
   disabled = false,
-  placeholder = '例如：打开京东查询 iPhone 价格...',
+  placeholder = '例如：帮我找到周末去苏州的合适车次',
 }) => {
+  const canStart = Boolean(value.trim()) && !disabled;
+
   return (
     <View style={styles.card}>
       <TextInput
@@ -27,7 +28,7 @@ export const TaskInputCard: React.FC<TaskInputCardProps> = ({
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
-        placeholderTextColor="#9CA3AF"
+        placeholderTextColor="#a2a4ad"
         multiline
         maxLength={UI_CONFIG.INPUT_MAX_LENGTH}
         editable={!disabled}
@@ -39,10 +40,9 @@ export const TaskInputCard: React.FC<TaskInputCardProps> = ({
         </TouchableOpacity>
         <TouchableOpacity
           onPress={onStart}
-          disabled={disabled || !value.trim()}
-          style={[styles.runBtn, (!value.trim() || disabled) && styles.runBtnDisabled]}>
-          <Text style={styles.runBtnText}>开始执行</Text>
-          <AppIcon name={IconNames.arrowRight} size={16} color="#FFFFFF" />
+          disabled={!canStart}
+          style={[styles.runBtn, !canStart && styles.runBtnDisabled]}>
+          <Text style={styles.runBtnText}>让 NoNo 开始</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -51,20 +51,24 @@ export const TaskInputCard: React.FC<TaskInputCardProps> = ({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: COLORS.background.card,
-    borderRadius: 24,
-    padding: 24,
+    marginTop: 22,
+    padding: 18,
     borderWidth: 1,
-    borderColor: 'transparent', // Remove border to look cleaner
-    ...SHADOWS.default,
+    borderColor: 'rgba(255,255,255,0.95)',
+    borderRadius: 26,
+    backgroundColor: 'rgba(255,255,255,0.88)',
+    shadowColor: '#222339',
+    shadowOffset: {width: 0, height: 18},
+    shadowOpacity: 0.11,
+    shadowRadius: 19,
+    elevation: 6,
   },
   input: {
-    minHeight: 120,
-    fontSize: 17,
-    lineHeight: 26,
+    minHeight: 110,
+    fontSize: 16,
+    lineHeight: 25,
     color: COLORS.text.primary,
-    marginBottom: 20,
-    fontWeight: '400',
+    marginBottom: 12,
   },
   actionBar: {
     flexDirection: 'row',
@@ -72,36 +76,35 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   clearBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
+    minHeight: 36,
+    paddingHorizontal: 10,
+    justifyContent: 'center',
   },
   clearText: {
-    fontSize: 14,
+    fontSize: 12,
     color: COLORS.text.secondary,
-    fontWeight: '500',
+    fontWeight: '700',
   },
   runBtn: {
-    backgroundColor: COLORS.primary,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 28,
-    borderRadius: 30, // Pill shape
-    ...SHADOWS.default,
-    shadowColor: COLORS.primary, // Colored shadow
-    shadowOpacity: 0.3,
+    minHeight: 42,
+    paddingHorizontal: 18,
+    borderRadius: 999,
+    backgroundColor: COLORS.ink,
+    justifyContent: 'center',
+    shadowColor: '#1b1d30',
+    shadowOffset: {width: 0, height: 11},
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    elevation: 4,
   },
   runBtnDisabled: {
-    opacity: 0.6,
+    opacity: 0.38,
     shadowOpacity: 0,
     elevation: 0,
   },
   runBtnText: {
     color: '#FFFFFF',
-    fontWeight: '600',
-    fontSize: 16,
+    fontWeight: '700',
+    fontSize: 13,
   },
 });
-

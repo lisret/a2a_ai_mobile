@@ -1,0 +1,974 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>虚拟角色首页交互原型 — OpenAutoGLM</title>
+    <style>
+        :root {
+            --primary: #2563EB;
+            --primary-dark: #1D4ED8;
+            --primary-light: #EFF6FF;
+            --success: #10B981;
+            --warning: #F59E0B;
+            --error: #EF4444;
+            --text-main: #111827;
+            --text-secondary: #6B7280;
+            --bg-page: #F3F4F6;
+            --bg-card: #FFFFFF;
+            --border: #E5E7EB;
+            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.06);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            --skin: #f7d7c4;
+            --skin-shadow: #e8b89a;
+            --hair: #1f2937;
+            --hair-hi: #374151;
+            --shirt: #2563EB;
+            --shirt-dark: #1D4ED8;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background: #E5E7EB;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            gap: 32px;
+            padding: 28px 20px 48px;
+            flex-wrap: wrap;
+        }
+
+        .panel {
+            width: min(420px, 100%);
+            background: #fff;
+            border-radius: 20px;
+            padding: 22px 22px 18px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border);
+        }
+
+        .panel h1 {
+            font-size: 20px;
+            margin-bottom: 6px;
+        }
+
+        .panel .lead {
+            color: var(--text-secondary);
+            font-size: 13px;
+            line-height: 1.6;
+            margin-bottom: 16px;
+        }
+
+        .panel h2 {
+            font-size: 13px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin: 16px 0 8px;
+        }
+
+        .panel ul {
+            padding-left: 18px;
+            font-size: 13px;
+            line-height: 1.7;
+            color: var(--text-main);
+        }
+
+        .panel code {
+            font-size: 12px;
+            background: #F3F4F6;
+            padding: 1px 6px;
+            border-radius: 4px;
+        }
+
+        .state-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .state-btn {
+            border: 1px solid var(--border);
+            background: #fff;
+            border-radius: 10px;
+            padding: 8px 10px;
+            font-size: 13px;
+            cursor: pointer;
+            text-align: left;
+        }
+
+        .state-btn.active {
+            border-color: var(--primary);
+            background: var(--primary-light);
+            color: var(--primary-dark);
+            font-weight: 600;
+        }
+
+        .note {
+            margin-top: 14px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            background: #F9FAFB;
+            border-radius: 10px;
+            padding: 10px 12px;
+            line-height: 1.55;
+        }
+
+        .phone-container {
+            width: 375px;
+            height: 812px;
+            background: var(--bg-page);
+            border-radius: 40px;
+            border: 8px solid #1F2937;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            display: flex;
+            flex-direction: column;
+            user-select: none;
+        }
+
+        .status-bar {
+            height: 44px;
+            background: transparent;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 24px 0;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-main);
+            z-index: 20;
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+        }
+
+        .home {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            background:
+                radial-gradient(120% 80% at 50% 0%, #dbeafe 0%, transparent 55%),
+                var(--bg-page);
+            overflow: hidden;
+        }
+
+        .top-meta {
+            margin-top: 48px;
+            padding: 0 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 5;
+        }
+
+        .model-pill {
+            font-size: 12px;
+            background: rgba(255,255,255,0.9);
+            border: 1px solid var(--border);
+            padding: 4px 10px;
+            border-radius: 999px;
+            color: var(--text-secondary);
+        }
+
+        .hint {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        .stage {
+            flex: 1;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-end;
+            min-height: 0;
+            cursor: pointer;
+        }
+
+        .bubble {
+            max-width: 280px;
+            background: #fff;
+            border-radius: 18px 18px 18px 6px;
+            padding: 12px 16px;
+            box-shadow: var(--shadow);
+            font-size: 15px;
+            line-height: 1.45;
+            color: var(--text-main);
+            position: relative;
+            margin-bottom: 8px;
+            z-index: 6;
+            transition: opacity 0.2s;
+        }
+
+        .bubble.confirm {
+            border: 1px solid #BFDBFE;
+            background: #EFF6FF;
+        }
+
+        .bubble-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .bubble-actions button {
+            flex: 1;
+            border: none;
+            border-radius: 10px;
+            padding: 8px 0;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .btn-yes { background: var(--primary); color: #fff; }
+        .btn-no { background: #fff; color: var(--text-secondary); border: 1px solid var(--border) !important; }
+
+        .avatar-wrap {
+            width: 260px;
+            height: 360px;
+            position: relative;
+            transform-origin: 50% 90%;
+            transition: transform 0.45s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.3s;
+            perspective: 700px;
+        }
+
+        .home.compact .avatar-wrap {
+            transform: scale(0.42) translate(140px, 80px);
+        }
+
+        .home.compact .bubble { opacity: 0; pointer-events: none; }
+
+        .avatar {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            animation: breathe 3.6s ease-in-out infinite;
+        }
+
+        @keyframes breathe {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-6px); }
+        }
+
+        .avatar-photo {
+            position: absolute;
+            inset: 0;
+            width: 240px;
+            height: 340px;
+            left: 50%;
+            margin-left: -120px;
+            object-fit: cover;
+            object-position: center 18%;
+            border-radius: 28px 28px 8px 8px;
+            filter: drop-shadow(0 18px 24px rgba(15, 23, 42, 0.28));
+            transform-origin: 50% 70%;
+            pointer-events: none;
+            user-select: none;
+        }
+        #vrm-canvas { pointer-events: auto; background: transparent; }
+        #vrm-canvas.is-live + #avatar-photo { opacity: 0; }
+
+        .home.listen .avatar-photo { transform: scale(1.04); filter: drop-shadow(0 18px 24px rgba(37,99,235,0.35)) brightness(1.06); }
+        .home.think .avatar-photo { filter: drop-shadow(0 18px 24px rgba(15, 23, 42, 0.28)) saturate(0.85); }
+        .home.work .avatar-photo { filter: drop-shadow(0 18px 24px rgba(15, 23, 42, 0.28)) contrast(1.05); }
+        .home.done .avatar-photo { filter: drop-shadow(0 18px 24px rgba(16,185,129,0.28)) brightness(1.08); }
+        .home.error .avatar-photo { filter: drop-shadow(0 18px 24px rgba(239,68,68,0.22)) saturate(0.7); }
+
+        .progress {
+            position: absolute;
+            left: 50%;
+            bottom: 18px;
+            transform: translateX(-50%);
+            width: 120px;
+            height: 6px;
+            background: #e5e7eb;
+            border-radius: 99px;
+            overflow: hidden;
+            opacity: 0;
+            z-index: 8;
+        }
+
+        .home.work .progress { opacity: 1; }
+        .progress > span {
+            display: block;
+            height: 100%;
+            width: 0%;
+            background: var(--primary);
+            transition: width 0.4s;
+        }
+
+        .listen-ring {
+            position: absolute;
+            left: 50%;
+            top: 46%;
+            width: 220px;
+            height: 220px;
+            margin: -110px 0 0 -110px;
+            border-radius: 50%;
+            border: 2px solid rgba(37, 99, 235, 0.25);
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .home.listen .listen-ring {
+            opacity: 1;
+            animation: ping 1.4s ease-out infinite;
+        }
+
+        @keyframes ping {
+            from { transform: scale(0.7); opacity: 0.8; }
+            to { transform: scale(1.15); opacity: 0; }
+        }
+
+        .wave {
+            display: none;
+            gap: 3px;
+            align-items: end;
+            height: 16px;
+            margin-top: 8px;
+        }
+
+        .home.listen .wave { display: flex; }
+        .wave i {
+            width: 3px;
+            background: var(--primary);
+            border-radius: 2px;
+            animation: eq 0.8s ease-in-out infinite;
+        }
+        .wave i:nth-child(1) { height: 6px; animation-delay: 0s; }
+        .wave i:nth-child(2) { height: 14px; animation-delay: 0.1s; }
+        .wave i:nth-child(3) { height: 8px; animation-delay: 0.2s; }
+        .wave i:nth-child(4) { height: 16px; animation-delay: 0.05s; }
+        .wave i:nth-child(5) { height: 7px; animation-delay: 0.15s; }
+
+        @keyframes eq {
+            0%, 100% { transform: scaleY(0.4); }
+            50% { transform: scaleY(1); }
+        }
+
+        .chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 0 16px 10px;
+            z-index: 5;
+        }
+
+        .home.compact .chips { display: none; }
+
+        .chip {
+            background: #fff;
+            border: 1px solid var(--border);
+            padding: 7px 12px;
+            border-radius: 16px;
+            font-size: 12px;
+            cursor: pointer;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+
+        .dock {
+            margin: 0 12px 8px;
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 22px;
+            padding: 8px 8px 8px 14px;
+            display: flex;
+            align-items: flex-end;
+            gap: 8px;
+            box-shadow: var(--shadow);
+            z-index: 8;
+        }
+
+        .dock textarea {
+            flex: 1;
+            border: none;
+            resize: none;
+            outline: none;
+            font-size: 14px;
+            min-height: 22px;
+            max-height: 72px;
+            line-height: 1.4;
+            color: var(--text-main);
+            background: transparent;
+            font-family: inherit;
+        }
+
+        .icon-round {
+            width: 40px;
+            height: 40px;
+            border: none;
+            border-radius: 50%;
+            display: grid;
+            place-items: center;
+            cursor: pointer;
+            background: var(--bg-page);
+            color: var(--text-main);
+            flex-shrink: 0;
+        }
+
+        .icon-round.send {
+            background: var(--primary);
+            color: #fff;
+        }
+
+        .icon-round.send:disabled {
+            opacity: 0.4;
+        }
+
+        .icon-round.mic.live {
+            background: var(--primary-light);
+            color: var(--primary);
+            box-shadow: 0 0 0 4px rgba(37,99,235,0.12);
+        }
+
+        .exec-sheet {
+            position: absolute;
+            left: 12px;
+            right: 12px;
+            top: 96px;
+            background: #fff;
+            border-radius: 18px;
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow);
+            padding: 14px 16px;
+            z-index: 7;
+            display: none;
+        }
+
+        .home.compact .exec-sheet { display: block; }
+
+        .exec-sheet h3 {
+            font-size: 14px;
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .exec-sheet p {
+            font-size: 15px;
+            font-weight: 600;
+            margin: 10px 0 12px;
+        }
+
+        .step {
+            font-size: 13px;
+            color: var(--text-secondary);
+            padding: 6px 0 6px 14px;
+            border-left: 2px solid #E5E7EB;
+        }
+
+        .step.on { color: var(--primary); border-color: var(--primary); font-weight: 600; }
+        .step.ok { color: var(--success); border-color: var(--success); }
+
+        .stop {
+            margin-top: 10px;
+            width: 100%;
+            border: none;
+            background: #FEF2F2;
+            color: var(--error);
+            padding: 10px;
+            border-radius: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .tabbar {
+            height: 72px;
+            background: #fff;
+            display: flex;
+            border-top: 1px solid var(--border);
+        }
+
+        .tab {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            font-size: 11px;
+            color: #6B7280;
+        }
+
+        .tab.active { color: var(--primary); font-weight: 600; }
+
+        .toast {
+            position: absolute;
+            left: 50%;
+            bottom: 160px;
+            transform: translateX(-50%) translateY(12px);
+            background: #111827;
+            color: #fff;
+            font-size: 13px;
+            padding: 8px 14px;
+            border-radius: 99px;
+            opacity: 0;
+            pointer-events: none;
+            transition: 0.25s;
+            z-index: 30;
+        }
+
+        .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+        .sheet {
+            position: absolute;
+            left: 0; right: 0; bottom: 0;
+            background: #fff;
+            border-radius: 20px 20px 0 0;
+            padding: 16px 18px 28px;
+            transform: translateY(110%);
+            transition: 0.3s;
+            z-index: 40;
+            box-shadow: 0 -10px 30px rgba(0,0,0,0.12);
+        }
+
+        .sheet.show { transform: translateY(0); }
+
+        .sheet h4 { font-size: 16px; margin-bottom: 12px; }
+
+        .pack {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            padding: 10px;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            margin-bottom: 8px;
+            cursor: pointer;
+        }
+
+        .pack.on { border-color: var(--primary); background: var(--primary-light); }
+
+        .pack .mini {
+            width: 40px; height: 40px; border-radius: 50%;
+            background: var(--primary);
+        }
+
+        .pack .mini.vrm { background: #8b5cf6; }
+        .pack .mini.real { background: #10B981; }
+        .pack .mini.import { background: #6B7280; }
+
+        .pack b { display: block; font-size: 13px; }
+        .pack span { font-size: 11px; color: var(--text-secondary); }
+    </style>
+</head>
+<body>
+    <aside class="panel">
+        <h1>首页换成虚拟角色</h1>
+        <p class="lead"><b>正选：Elel Silverbell</b>（Open Source Avatars · Xmas Chibis · CC0）。Q 版精灵，青绿外套接近产品主色，可合法打进 APK。右侧手机已换成这个形象。</p>
+        <img src="doc/assets/avatars/elel-full.jpg" alt="Elel Silverbell 全身" style="width:100%;border-radius:14px;margin-bottom:10px;">
+        <p class="lead" style="margin-bottom:8px;"><b>备选：Holy Garland</b> 同系列粉发天使，更偏「小助手」；冬装季节感更弱。</p>
+        <img src="doc/assets/avatars/holy-full.jpg" alt="Holy Garland 全身" style="width:100%;border-radius:14px;margin-bottom:12px;">
+
+        <h2>演示状态</h2>
+        <div class="state-grid" id="state-grid">
+            <button class="state-btn active" data-state="idle">待机 idle</button>
+            <button class="state-btn" data-state="listen">倾听 listen</button>
+            <button class="state-btn" data-state="think">思考 think</button>
+            <button class="state-btn" data-state="work">执行 work</button>
+            <button class="state-btn" data-state="done">完成 done</button>
+            <button class="state-btn" data-state="error">失败 error</button>
+        </div>
+
+        <h2>核心交互</h2>
+        <ul>
+            <li>点角色 / 麦克风 → 听写</li>
+            <li>听完气泡复述，确认后才执行</li>
+            <li>执行时角色缩小让路，步骤走卡片</li>
+            <li>长按角色 → 换形象 / 导入 VRM</li>
+            <li>眼睛跟随指针（LookAt）</li>
+        </ul>
+
+        <h2>免费资源（结论）</h2>
+        <ul>
+            <li><b>Open Source Avatars</b>：大量 <code>CC0</code>，可内置，JSON 直链</li>
+            <li><b>VTubeMe</b> 四套写实：<code>CC BY 4.0</code>，要署名</li>
+            <li><b>模之屋</b>：不要打进 APK，只允许用户自己导入</li>
+        </ul>
+        <p class="note">完整调研见 <code>doc/虚拟角色首页调研.md</code>。首页默认是 Elel 3D VRM；Android 7 WebGL 失败才回退半身图。</p>
+    </aside>
+
+    <div class="phone-container">
+        <div class="status-bar">
+            <span>9:41</span>
+            <span>●●● LTE</span>
+        </div>
+
+        <div class="home idle" id="home">
+            <div class="top-meta">
+                <span class="model-pill">GLM-4V · 本地</span>
+                <span class="hint">长按角色换形象</span>
+            </div>
+
+            <div class="stage" id="stage">
+                <div class="bubble" id="bubble">
+                    说一句，或点我开始听。
+                    <div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+                    <div class="bubble-actions" id="confirm-actions" style="display:none">
+                        <button class="btn-no" type="button">不是</button>
+                        <button class="btn-yes" type="button">去做</button>
+                    </div>
+                </div>
+
+                <div class="avatar-wrap" id="avatar-wrap">
+                    <div class="listen-ring"></div>
+                    <div class="avatar" id="avatar">
+                        <canvas class="avatar-photo" id="vrm-canvas" width="480" height="640"></canvas>
+                        <img class="avatar-photo" id="avatar-photo" src="doc/assets/avatars/elel-bust.jpg" alt="Elel Silverbell">
+                    </div>
+                    <div class="progress"><span id="bar"></span></div>
+                </div>
+            </div>
+
+            <div class="exec-sheet" id="exec-sheet">
+                <h3>正在执行任务…</h3>
+                <p id="exec-title">—</p>
+                <div id="exec-steps"></div>
+                <button class="stop" type="button" id="stop-btn">停止任务</button>
+            </div>
+
+            <div class="chips" id="chips">
+                <button class="chip" type="button" data-text="给我在美团点一份销量最高的汉堡">点外卖</button>
+                <button class="chip" type="button" data-text="给妈妈发微信说晚上回家吃饭">给妈妈发微信</button>
+                <button class="chip" type="button" data-text="给我在天猫超市买一包薯片">买薯片</button>
+            </div>
+
+            <div class="dock">
+                <textarea id="input" rows="1" placeholder="想让我干什么…"></textarea>
+                <button class="icon-round mic" id="mic" type="button" title="语音">
+                    <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="18" x2="12" y2="21"/></svg>
+                </button>
+                <button class="icon-round send" id="send" type="button" disabled title="发送">
+                    <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                </button>
+            </div>
+        </div>
+
+        <div class="tabbar">
+            <div class="tab active">首页</div>
+            <div class="tab">模型</div>
+            <div class="tab">历史</div>
+            <div class="tab">设置</div>
+        </div>
+
+        <div class="toast" id="toast"></div>
+
+        <div class="sheet" id="sheet">
+            <h4>换形象</h4>
+            <div class="pack on" data-pack="elel">
+                <img class="mini" src="doc/assets/avatars/elel-bust.jpg" alt="" style="object-fit:cover;">
+                <div><b>Elel Silverbell · 正选</b><span>Xmas Chibis · CC0 · 默认 3D VRM</span></div>
+            </div>
+            <div class="pack" data-pack="holy">
+                <img class="mini" src="doc/assets/avatars/holy-bust.jpg" alt="" style="object-fit:cover;">
+                <div><b>Holy Garland · 备选</b><span>同系列粉发天使 · CC0</span></div>
+            </div>
+            <div class="pack" data-pack="import">
+                <div class="mini import"></div>
+                <div><b>从文件导入 VRM</b><span>模之屋 / VRoid / 约稿，用户自负授权</span></div>
+            </div>
+            <button class="stop" type="button" id="close-sheet" style="background:#F3F4F6;color:#111827">关闭</button>
+        </div>
+    </div>
+
+<script>
+    const home = document.getElementById('home');
+    const bubble = document.getElementById('bubble');
+    const confirmActions = document.getElementById('confirm-actions');
+    const input = document.getElementById('input');
+    const send = document.getElementById('send');
+    const mic = document.getElementById('mic');
+    const bar = document.getElementById('bar');
+    const toastEl = document.getElementById('toast');
+    const sheet = document.getElementById('sheet');
+
+    const LINES = {
+        idle: '说一句，或点我开始听。',
+        listen: '我在听…',
+        think: '让我想想怎么做…',
+        work: '我去动手，你先看着。',
+        done: '搞定了，还要我做点别的吗？',
+        error: '先去打开无障碍，我才能动手。'
+    };
+
+    let state = 'idle';
+    let pending = '';
+    let timer = null;
+    let listenTimer = null;
+    let pressTimer = null;
+
+    function toast(msg) {
+        toastEl.textContent = msg;
+        toastEl.classList.add('show');
+        setTimeout(() => toastEl.classList.remove('show'), 1800);
+    }
+
+    function setBubbleText(text, isConfirm) {
+        const wave = bubble.querySelector('.wave');
+        bubble.childNodes[0].textContent = text;
+        confirmActions.style.display = isConfirm ? 'flex' : 'none';
+        bubble.classList.toggle('confirm', !!isConfirm);
+        if (wave) wave.style.display = state === 'listen' ? 'flex' : 'none';
+    }
+
+    function setState(next, extraText) {
+        state = next;
+        home.className = 'home ' + next + (next === 'work' ? ' compact' : '');
+        document.querySelectorAll('.state-btn').forEach(b => {
+            b.classList.toggle('active', b.dataset.state === next);
+        });
+        mic.classList.toggle('live', next === 'listen');
+        setBubbleText(extraText || LINES[next], false);
+        if (next !== 'work') {
+            bar.style.width = '0%';
+            document.getElementById('exec-steps').innerHTML = '';
+        }
+        if (window.__elelSetMood) {
+            var map = {idle:'idle', listen:'idle', think:'work', work:'work', done:'done', error:'error'};
+            window.__elelSetMood(map[next] || 'idle');
+        }
+    }
+
+    function syncSend() {
+        send.disabled = !input.value.trim() || state === 'work' || state === 'listen';
+    }
+
+    function startListen() {
+        if (state === 'work') return;
+        clearTimeout(listenTimer);
+        setState('listen');
+        listenTimer = setTimeout(() => {
+            pending = '给妈妈发微信说晚上回家吃饭';
+            input.value = pending;
+            syncSend();
+            setState('idle', '你是说「给妈妈发微信说晚上回家吃饭」吗？');
+            confirmActions.style.display = 'flex';
+            bubble.classList.add('confirm');
+        }, 1600);
+    }
+
+    function runTask(text) {
+        const instruction = (text || input.value).trim();
+        if (!instruction) {
+            toast('请先说一句或输入指令');
+            return;
+        }
+        pending = '';
+        confirmActions.style.display = 'none';
+        setState('think');
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+            setState('work');
+            document.getElementById('exec-title').textContent = instruction;
+            const steps = ['打开应用', '找到入口', '完成操作'];
+            const box = document.getElementById('exec-steps');
+            box.innerHTML = steps.map((s, i) => `<div class="step" id="st${i}">${s}</div>`).join('');
+            let i = 0;
+            const tick = () => {
+                if (state !== 'work') return;
+                if (i > 0) document.getElementById('st' + (i - 1)).className = 'step ok';
+                if (i >= steps.length) {
+                    bar.style.width = '100%';
+                    setState('done');
+                    input.value = '';
+                    syncSend();
+                    return;
+                }
+                document.getElementById('st' + i).className = 'step on';
+                bar.style.width = ((i + 1) / steps.length * 100) + '%';
+                bubble.childNodes[0].textContent = '正在' + steps[i] + '…';
+                i += 1;
+                timer = setTimeout(tick, 900);
+            };
+            tick();
+        }, 900);
+    }
+
+    document.getElementById('state-grid').addEventListener('click', (e) => {
+        const btn = e.target.closest('.state-btn');
+        if (!btn) return;
+        clearTimeout(timer);
+        clearTimeout(listenTimer);
+        if (btn.dataset.state === 'work') {
+            input.value = input.value || '给妈妈发微信说晚上回家吃饭';
+            runTask(input.value);
+            return;
+        }
+        setState(btn.dataset.state);
+        syncSend();
+    });
+
+    document.getElementById('stage').addEventListener('click', (e) => {
+        if (e.target.closest('.bubble-actions')) return;
+        if (state === 'work') return;
+        startListen();
+    });
+
+    document.getElementById('avatar-wrap').addEventListener('pointerdown', () => {
+        pressTimer = setTimeout(() => sheet.classList.add('show'), 520);
+    });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => {
+        document.getElementById('avatar-wrap').addEventListener(ev, () => clearTimeout(pressTimer));
+    });
+
+    mic.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (state === 'listen') {
+            clearTimeout(listenTimer);
+            setState('idle');
+            return;
+        }
+        startListen();
+    });
+
+    send.addEventListener('click', () => runTask());
+
+    confirmActions.querySelector('.btn-yes').addEventListener('click', (e) => {
+        e.stopPropagation();
+        runTask(pending || input.value);
+    });
+    confirmActions.querySelector('.btn-no').addEventListener('click', (e) => {
+        e.stopPropagation();
+        pending = '';
+        input.value = '';
+        setState('idle', '好，那你再说一次。');
+        syncSend();
+    });
+
+    document.getElementById('chips').addEventListener('click', (e) => {
+        const chip = e.target.closest('.chip');
+        if (!chip) return;
+        input.value = chip.dataset.text;
+        setState('idle', '要我去做「' + chip.textContent + '」吗？点发送就开始。');
+        syncSend();
+    });
+
+    input.addEventListener('input', syncSend);
+
+    document.getElementById('stop-btn').addEventListener('click', () => {
+        clearTimeout(timer);
+        setState('error', '好，已经停手了。');
+        syncSend();
+    });
+
+    document.getElementById('close-sheet').addEventListener('click', () => sheet.classList.remove('show'));
+    sheet.querySelectorAll('.pack').forEach(p => {
+        p.addEventListener('click', () => {
+            sheet.querySelectorAll('.pack').forEach(x => x.classList.remove('on'));
+            p.classList.add('on');
+            const photo = document.getElementById('avatar-photo');
+            if (p.dataset.pack === 'elel') {
+                photo.src = 'doc/assets/avatars/elel-bust.jpg';
+                photo.alt = 'Elel Silverbell';
+                toast('已换成正选 Elel Silverbell');
+            } else if (p.dataset.pack === 'holy') {
+                photo.src = 'doc/assets/avatars/holy-bust.jpg';
+                photo.alt = 'Holy Garland';
+                toast('已换成备选 Holy Garland');
+            } else {
+                toast('请选择本机 .vrm（演示不读文件）。');
+            }
+            sheet.classList.remove('show');
+        });
+    });
+
+    document.getElementById('stage').addEventListener('pointermove', (e) => {
+        const rect = document.getElementById('avatar').getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height * 0.38;
+        const dx = Math.max(-1, Math.min(1, (e.clientX - cx) / 80));
+        const dy = Math.max(-1, Math.min(1, (e.clientY - cy) / 80));
+        document.getElementById('avatar-photo').style.transform =
+            `rotateY(${dx * 8}deg) rotateX(${-dy * 5}deg)`;
+    });
+</script>
+<script src="https://unpkg.com/three@0.140.2/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.140.2/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://unpkg.com/three@0.140.2/examples/js/controls/OrbitControls.js"></script>
+<script src="https://unpkg.com/@pixiv/three-vrm@0.6.11/lib/three-vrm.min.js"></script>
+<script>
+(function () {
+    var canvas = document.getElementById('vrm-canvas');
+    if (!canvas || !window.THREE || !window.THREE_VRM) return;
+    var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true });
+    renderer.setClearColor(0x000000, 0);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(240, 340, false);
+    var scene = new THREE.Scene();
+    var camera = new THREE.PerspectiveCamera(32, 240 / 340, 0.05, 30);
+    camera.position.set(0, 0.92, 1.55);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+    var key = new THREE.DirectionalLight(0xfff4e8, 0.9);
+    key.position.set(0.5, 1.6, 1.1);
+    scene.add(key);
+    var controls = new THREE.OrbitControls(camera, canvas);
+    controls.enablePan = false;
+    controls.enableZoom = false;
+    controls.target.set(0, 0.78, 0);
+    controls.enableDamping = true;
+    controls.autoRotate = true;
+    controls.autoRotateSpeed = 1.4;
+    controls.update();
+    var clock = new THREE.Clock();
+    var vrmObj = null;
+    function setBlend(name, value) {
+        if (!vrmObj || !vrmObj.blendShapeProxy) return;
+        try { vrmObj.blendShapeProxy.setValue(name, value); } catch (e) {}
+    }
+    window.__elelSetMood = function (mood) {
+        ['fun', 'joy', 'sorrow', 'a'].forEach(function (n) { setBlend(n, 0); });
+        if (mood === 'done') { setBlend('fun', 0.55); setBlend('joy', 0.4); }
+        else if (mood === 'error') { setBlend('sorrow', 0.75); }
+        else if (mood === 'work' || mood === 'think') { setBlend('a', 0.2); }
+    };
+    var loader = new THREE.GLTFLoader();
+    loader.crossOrigin = 'anonymous';
+    var localVrm = 'AwesomeProject/android/app/src/main/assets/vrm/elel.vrm';
+    var remoteVrm = 'https://ipfs.io/ipfs/QmSpb8jZRtwDhpp7zjpfvU47GZyapmh8GvQApmzTxFcaLz/Avatar01_Neutral.vrm';
+    function mountVrm(gltf) {
+            THREE_VRM.VRM.from(gltf).then(function (vrm) {
+                vrmObj = vrm;
+                vrm.scene.rotation.y = Math.PI;
+                scene.add(vrm.scene);
+                if (vrm.lookAt) vrm.lookAt.target = camera;
+                canvas.classList.add('is-live');
+            });
+    }
+    loader.load(localVrm, mountVrm, undefined, function () {
+        loader.load(remoteVrm, mountVrm);
+    });
+    (function animate() {
+        requestAnimationFrame(animate);
+        var dt = clock.getDelta();
+        var t = clock.elapsedTime;
+        if (vrmObj) {
+            var c = t % 4.4;
+            setBlend('blink', c > 4.15 && c < 4.28 ? 1 : 0);
+            vrmObj.scene.position.y = Math.sin(t * 1.35) * 0.012;
+            if (vrmObj.update) vrmObj.update(dt);
+        }
+        controls.update();
+        renderer.render(scene, camera);
+    })();
+})();
+</script>
+</body>
+</html>

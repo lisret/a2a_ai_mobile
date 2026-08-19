@@ -3,30 +3,36 @@
  * 所有UI展示相关的常量配置
  */
 
-// 颜色主题
+// 颜色主题（对齐 NoNo 原型）
 export const COLORS = {
-  primary: '#2563EB',
-  primaryDark: '#1D4ED8',
-  primaryLight: '#EFF6FF',
-  success: '#10B981',
-  warning: '#F59E0B',
-  error: '#EF4444',
+  primary: '#756bf0',
+  primaryDark: '#1b1d30',
+  primaryLight: '#ebe8ff',
+  ink: '#1b1d30',
+  pearl: '#f8f7f3',
+  cloud: '#f1effa',
+  violet: '#756bf0',
+  mint: '#8df4e2',
+  coral: '#ff9b79',
+  success: '#267568',
+  warning: '#ff9b79',
+  error: '#a94e40',
   text: {
-    primary: '#111827',
-    secondary: '#6B7280',
-    disabled: '#9CA3AF',
+    primary: '#202231',
+    secondary: '#777a88',
+    disabled: '#a2a4ad',
   },
   background: {
-    default: '#F3F4F6',
-    card: '#FFFFFF',
-    light: '#F9FAFB',
-    blue: '#EFF6FF',
-    red: '#FEF2F2',
+    default: '#f8f7f3',
+    card: '#ffffff',
+    light: '#f1effa',
+    blue: '#ebe8ff',
+    red: '#fff0ec',
   },
   border: {
-    light: '#eee',
-    medium: '#E5E7EB',
-    dark: '#D1D5DB',
+    light: '#f1effa',
+    medium: '#e8e7ed',
+    dark: '#d8d7df',
   },
 } as const;
 
@@ -95,9 +101,16 @@ export interface SuggestionItem {
 }
 
 export const HOME_SUGGESTIONS: readonly SuggestionItem[] = [
-  { label: '给我在美团点一份销量最高的汉堡', value: '给我在美团点一份销量最高的汉堡' },
-  { label: '给妈妈发微信说晚上回家吃饭', value: '给妈妈发微信说晚上回家吃饭' },
-  { label: '给我在天猫超市买一包薯片', value: '给我在天猫超市买一包薯片' },
+  { label: '帮我查找附近评分高的咖啡店', value: '帮我查找附近评分高的咖啡店' },
+  { label: '整理今天收到的重要通知', value: '整理今天收到的重要通知' },
+  { label: '比较三个购物平台的耳机价格', value: '比较三个购物平台的耳机价格' },
+] as const;
+
+export const HOME_QUICK_TASKS: readonly SuggestionItem[] = [
+  { label: '智能比价', value: '智能比价：跨应用查找更合适的价格' },
+  { label: '行程助手', value: '行程助手：规划路线并在关键步骤确认' },
+  { label: '信息整理', value: '信息整理：读取页面并提取重点' },
+  { label: '重复操作', value: '重复操作：把固定流程交给 NoNo' },
 ] as const;
 
 // 导出样式规范

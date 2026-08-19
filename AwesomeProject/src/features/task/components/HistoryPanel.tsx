@@ -77,7 +77,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = ({
               </TouchableOpacity>
             )}
             <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-              <AppIcon name={IconNames.close} size={18} color="#165DFF" />
+              <AppIcon name={IconNames.close} size={18} color="#756bf0" />
             </TouchableOpacity>
           </View>
         </View>
@@ -231,7 +231,7 @@ const styles = StyleSheet.create({
   itemActive: {
     backgroundColor: '#f0f7ff',
     borderLeftWidth: 4,
-    borderLeftColor: '#165DFF',
+    borderLeftColor: '#756bf0',
   },
   itemHeader: {
     flexDirection: 'row',

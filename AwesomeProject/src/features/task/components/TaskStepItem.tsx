@@ -70,7 +70,7 @@ const styles = StyleSheet.create({
   stepNumber: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#165DFF',
+    color: '#756bf0',
   },
   expandButton: {
     flexDirection: 'row',
@@ -94,7 +94,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginTop: 6,
     borderLeftWidth: 3,
-    borderLeftColor: '#165DFF',
+    borderLeftColor: '#756bf0',
   },
   modelResponseText: {
     fontSize: 13,

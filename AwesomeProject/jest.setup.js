@@ -2,7 +2,6 @@
  * Jest 测试环境设置
  */
 
-// Mock AsyncStorage
 jest.mock('@react-native-async-storage/async-storage', () => ({
   getItem: jest.fn(),
   setItem: jest.fn(),
@@ -14,27 +13,9 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
   multiRemove: jest.fn(),
 }));
 
-// Mock React Native 模块
-jest.mock('react-native', () => {
-  const RN = jest.requireActual('react-native');
-  RN.DeviceEventEmitter = {
-    addListener: jest.fn(() => ({ remove: jest.fn() })),
-    removeListener: jest.fn(),
-    emit: jest.fn(),
-  };
-  return RN;
-});
-
-// Mock 原生模块
-jest.mock('react-native/Libraries/BatchedBridge/NativeModules', () => ({
-  AccessibilityModule: {},
-  ADBModule: {},
-}));
-
 jest.mock('react-native-svg', () => {
   const React = require('react');
-  const {View} = require('react-native');
-  const Mock = (props) => React.createElement(View, props, props.children);
+  const Mock = props => React.createElement('svg', props, props.children);
   return {
     __esModule: true,
     default: Mock,
@@ -51,3 +32,4 @@ jest.mock('react-native-safe-area-context', () => ({
   SafeAreaProvider: ({children}) => children,
 }));
 
+jest.mock('react-native-vector-icons/FontAwesome', () => 'Icon');

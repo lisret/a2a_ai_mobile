@@ -18,7 +18,9 @@ export const SuggestionChips: React.FC<SuggestionChipsProps> = ({
           key={index}
           onPress={() => onSelect(item.value)}
           style={styles.chip}
-          activeOpacity={0.7}>
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel={item.label}>
           <Text style={styles.chipText}>{item.label}</Text>
         </TouchableOpacity>
       ))}

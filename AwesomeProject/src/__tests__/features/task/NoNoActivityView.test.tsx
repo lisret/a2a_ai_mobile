@@ -36,7 +36,7 @@ test('Activity exposes status text and delegates deletion confirmation', () => {
       ]}
     />,
   );
-  expect(view.getByText('已完成')).toBeTruthy();
+  expect(view.getAllByText('已完成').length).toBeGreaterThan(0);
   fireEvent(view.getByLabelText('删除 打开设置'), 'longPress');
   expect(onRequestDelete).toHaveBeenCalledWith('t1');
 

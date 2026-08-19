@@ -243,6 +243,7 @@
             position: relative;
             transform-origin: 50% 90%;
             transition: transform 0.45s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.3s;
+            perspective: 700px;
         }
 
         .home.compact .avatar-wrap {
@@ -255,6 +256,9 @@
             width: 100%;
             height: 100%;
             position: relative;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
             animation: breathe 3.6s ease-in-out infinite;
         }
 
@@ -263,230 +267,24 @@
             50% { transform: translateY(-6px); }
         }
 
-        .torso {
-            position: absolute;
-            left: 70px;
-            top: 188px;
-            width: 120px;
-            height: 150px;
-            background: linear-gradient(180deg, var(--shirt) 0%, var(--shirt-dark) 100%);
-            border-radius: 40px 40px 18px 18px;
-            box-shadow: inset 0 8px 0 rgba(255,255,255,0.12);
+        .avatar-photo {
+            width: 240px;
+            height: 340px;
+            object-fit: cover;
+            object-position: center 18%;
+            border-radius: 28px 28px 8px 8px;
+            filter: drop-shadow(0 18px 24px rgba(15, 23, 42, 0.28));
+            transform-origin: 50% 70%;
+            transition: filter 0.3s, transform 0.2s;
+            pointer-events: none;
+            user-select: none;
         }
 
-        .collar {
-            position: absolute;
-            left: 88px;
-            top: 182px;
-            width: 84px;
-            height: 28px;
-            background: #fff;
-            border-radius: 0 0 40px 40px;
-            z-index: 2;
-        }
-
-        .arm {
-            position: absolute;
-            top: 200px;
-            width: 34px;
-            height: 110px;
-            background: var(--skin);
-            border-radius: 18px;
-            z-index: 1;
-        }
-
-        .arm.l { left: 48px; transform: rotate(12deg); }
-        .arm.r { right: 48px; transform: rotate(-12deg); }
-
-        .home.listen .arm.l { transform: rotate(-18deg) translateY(-8px); }
-        .home.think .arm.r { transform: rotate(-48deg) translate(-18px, -36px); }
-        .home.work .arm.l, .home.work .arm.r { transform: rotate(0deg) translateY(6px); }
-        .home.done .arm.r { transform: rotate(-70deg) translate(-10px, -50px); }
-        .home.error .arm.l, .home.error .arm.r { transform: rotate(8deg) translateY(12px); }
-
-        .hand {
-            position: absolute;
-            bottom: -8px;
-            left: 2px;
-            width: 30px;
-            height: 24px;
-            background: var(--skin);
-            border-radius: 12px;
-        }
-
-        .head {
-            position: absolute;
-            left: 68px;
-            top: 48px;
-            width: 124px;
-            height: 142px;
-            z-index: 4;
-        }
-
-        .face {
-            position: absolute;
-            left: 8px;
-            top: 28px;
-            width: 108px;
-            height: 118px;
-            background: var(--skin);
-            border-radius: 54px 54px 50px 50px;
-            box-shadow: inset -8px -10px 0 rgba(232, 184, 154, 0.35);
-        }
-
-        .blush {
-            position: absolute;
-            width: 18px;
-            height: 10px;
-            background: rgba(244, 114, 182, 0.35);
-            border-radius: 10px;
-            top: 72px;
-            filter: blur(0.5px);
-        }
-
-        .blush.l { left: 14px; }
-        .blush.r { right: 14px; }
-
-        .eye {
-            position: absolute;
-            top: 48px;
-            width: 22px;
-            height: 24px;
-            background: #fff;
-            border-radius: 50%;
-            overflow: hidden;
-            box-shadow: 0 2px 0 rgba(0,0,0,0.06);
-        }
-
-        .eye.l { left: 22px; }
-        .eye.r { right: 22px; }
-
-        .pupil {
-            position: absolute;
-            width: 12px;
-            height: 14px;
-            background: #111827;
-            border-radius: 50%;
-            left: 5px;
-            top: 6px;
-            transition: transform 0.08s linear;
-        }
-
-        .pupil::after {
-            content: '';
-            position: absolute;
-            width: 4px;
-            height: 4px;
-            background: #fff;
-            border-radius: 50%;
-            left: 2px;
-            top: 2px;
-        }
-
-        .home.listen .eye { height: 26px; }
-        .home.think .eye.l { transform: scaleY(0.85); }
-        .home.work .eye { height: 20px; top: 50px; }
-        .home.done .eye { height: 22px; }
-        .home.error .eye { height: 18px; top: 52px; }
-
-        .lid {
-            position: absolute;
-            inset: 0;
-            background: var(--skin);
-            transform-origin: top;
-            animation: blink 4.8s infinite;
-        }
-
-        @keyframes blink {
-            0%, 92%, 100% { transform: scaleY(0); }
-            94%, 96% { transform: scaleY(1); }
-        }
-
-        .brow {
-            position: absolute;
-            top: 40px;
-            width: 20px;
-            height: 4px;
-            background: var(--hair);
-            border-radius: 4px;
-        }
-
-        .brow.l { left: 24px; }
-        .brow.r { right: 24px; }
-        .home.think .brow.l { transform: rotate(-12deg) translateY(2px); }
-        .home.work .brow { transform: translateY(2px); }
-        .home.error .brow.l { transform: rotate(16deg); }
-        .home.error .brow.r { transform: rotate(-16deg); }
-
-        .mouth {
-            position: absolute;
-            left: 44px;
-            top: 86px;
-            width: 20px;
-            height: 8px;
-            border-bottom: 3px solid #c2416a;
-            border-radius: 0 0 12px 12px;
-        }
-
-        .home.listen .mouth { width: 14px; left: 47px; height: 10px; border: 2px solid #c2416a; border-radius: 10px; background: #4b1d2f; }
-        .home.think .mouth { width: 10px; height: 10px; left: 54px; border-radius: 50%; border: 2px solid #c2416a; border-bottom: none; }
-        .home.work .mouth { width: 12px; left: 48px; border-radius: 0; border-bottom-width: 2px; }
-        .home.done .mouth { width: 26px; left: 41px; height: 12px; }
-        .home.error .mouth { width: 16px; transform: scaleY(-1); top: 90px; }
-
-        .hair-back {
-            position: absolute;
-            left: -6px;
-            top: 18px;
-            width: 136px;
-            height: 150px;
-            background: var(--hair);
-            border-radius: 70px 70px 30px 30px;
-            z-index: 3;
-        }
-
-        .bang {
-            position: absolute;
-            left: 10px;
-            top: 22px;
-            width: 104px;
-            height: 42px;
-            background: var(--hair);
-            border-radius: 0 0 40px 40px;
-            z-index: 5;
-        }
-
-        .bang::before, .bang::after {
-            content: '';
-            position: absolute;
-            background: var(--hair);
-            width: 36px;
-            height: 48px;
-            top: 8px;
-            border-radius: 20px;
-        }
-
-        .bang::before { left: 8px; transform: rotate(12deg); }
-        .bang::after { right: 8px; transform: rotate(-12deg); }
-
-        .ahoge {
-            position: absolute;
-            left: 78px;
-            top: 8px;
-            width: 10px;
-            height: 28px;
-            background: var(--hair);
-            border-radius: 8px;
-            transform: rotate(18deg);
-            z-index: 5;
-            transform-origin: bottom;
-            animation: ahoge 2.8s ease-in-out infinite;
-        }
-
-        @keyframes ahoge {
-            0%, 100% { transform: rotate(18deg); }
-            50% { transform: rotate(28deg); }
-        }
+        .home.listen .avatar-photo { transform: scale(1.04); filter: drop-shadow(0 18px 24px rgba(37,99,235,0.35)) brightness(1.06); }
+        .home.think .avatar-photo { filter: drop-shadow(0 18px 24px rgba(15, 23, 42, 0.28)) saturate(0.85); }
+        .home.work .avatar-photo { filter: drop-shadow(0 18px 24px rgba(15, 23, 42, 0.28)) contrast(1.05); }
+        .home.done .avatar-photo { filter: drop-shadow(0 18px 24px rgba(16,185,129,0.28)) brightness(1.08); }
+        .home.error .avatar-photo { filter: drop-shadow(0 18px 24px rgba(239,68,68,0.22)) saturate(0.7); }
 
         .progress {
             position: absolute;
@@ -770,7 +568,10 @@
 <body>
     <aside class="panel">
         <h1>首页换成虚拟角色</h1>
-        <p class="lead">这是交互原型，不是 3D VRM 渲染。默认用 2.5D 半身看板娘，状态机可替换成 VRM BlendShape。请在右侧手机里点角色、麦克风或快捷指令。</p>
+        <p class="lead"><b>正选：Elel Silverbell</b>（Open Source Avatars · Xmas Chibis · CC0）。Q 版精灵，青绿外套接近产品主色，可合法打进 APK。右侧手机已换成这个形象。</p>
+        <img src="doc/assets/avatars/elel-full.jpg" alt="Elel Silverbell 全身" style="width:100%;border-radius:14px;margin-bottom:10px;">
+        <p class="lead" style="margin-bottom:8px;"><b>备选：Holy Garland</b> 同系列粉发天使，更偏「小助手」；冬装季节感更弱。</p>
+        <img src="doc/assets/avatars/holy-full.jpg" alt="Holy Garland 全身" style="width:100%;border-radius:14px;margin-bottom:12px;">
 
         <h2>演示状态</h2>
         <div class="state-grid" id="state-grid">
@@ -825,24 +626,7 @@
                 <div class="avatar-wrap" id="avatar-wrap">
                     <div class="listen-ring"></div>
                     <div class="avatar" id="avatar">
-                        <div class="hair-back"></div>
-                        <div class="arm l"><div class="hand"></div></div>
-                        <div class="arm r"><div class="hand"></div></div>
-                        <div class="torso"></div>
-                        <div class="collar"></div>
-                        <div class="head">
-                            <div class="ahoge"></div>
-                            <div class="face">
-                                <div class="brow l"></div>
-                                <div class="brow r"></div>
-                                <div class="eye l"><div class="pupil"></div><div class="lid"></div></div>
-                                <div class="eye r"><div class="pupil"></div><div class="lid"></div></div>
-                                <div class="blush l"></div>
-                                <div class="blush r"></div>
-                                <div class="mouth"></div>
-                            </div>
-                            <div class="bang"></div>
-                        </div>
+                        <img class="avatar-photo" id="avatar-photo" src="doc/assets/avatars/elel-bust.jpg" alt="Elel Silverbell">
                     </div>
                     <div class="progress"><span id="bar"></span></div>
                 </div>
@@ -883,17 +667,13 @@
 
         <div class="sheet" id="sheet">
             <h4>换形象</h4>
-            <div class="pack on" data-pack="2d">
-                <div class="mini"></div>
-                <div><b>小格 · 2.5D 默认</b><span>随 APK 分发，Android 7 能跑</span></div>
+            <div class="pack on" data-pack="elel">
+                <img class="mini" src="doc/assets/avatars/elel-bust.jpg" alt="" style="object-fit:cover;">
+                <div><b>Elel Silverbell · 正选</b><span>Xmas Chibis · CC0 · 低端机先用半身图</span></div>
             </div>
-            <div class="pack" data-pack="cc0">
-                <div class="mini vrm"></div>
-                <div><b>OSA CC0 VRM（可选）</b><span>中高端机按需下载，无需署名</span></div>
-            </div>
-            <div class="pack" data-pack="vtube">
-                <div class="mini real"></div>
-                <div><b>VTubeMe 写实 · CC BY</b><span>内置需署名 vtubeme.com</span></div>
+            <div class="pack" data-pack="holy">
+                <img class="mini" src="doc/assets/avatars/holy-bust.jpg" alt="" style="object-fit:cover;">
+                <div><b>Holy Garland · 备选</b><span>同系列粉发天使 · CC0</span></div>
             </div>
             <div class="pack" data-pack="import">
                 <div class="mini import"></div>
@@ -1084,13 +864,18 @@
         p.addEventListener('click', () => {
             sheet.querySelectorAll('.pack').forEach(x => x.classList.remove('on'));
             p.classList.add('on');
-            const msg = {
-                '2d': '已切回 2.5D 默认形象。',
-                'cc0': '将按需下载 OSA 的 CC0 VRM（演示未真正加载）。',
-                'vtube': '写实包可内置，关于页需署名 VTubeMe。',
-                'import': '请选择本机 .vrm（演示不读文件）。'
-            }[p.dataset.pack];
-            toast(msg);
+            const photo = document.getElementById('avatar-photo');
+            if (p.dataset.pack === 'elel') {
+                photo.src = 'doc/assets/avatars/elel-bust.jpg';
+                photo.alt = 'Elel Silverbell';
+                toast('已换成正选 Elel Silverbell');
+            } else if (p.dataset.pack === 'holy') {
+                photo.src = 'doc/assets/avatars/holy-bust.jpg';
+                photo.alt = 'Holy Garland';
+                toast('已换成备选 Holy Garland');
+            } else {
+                toast('请选择本机 .vrm（演示不读文件）。');
+            }
             sheet.classList.remove('show');
         });
     });
@@ -1101,9 +886,8 @@
         const cy = rect.top + rect.height * 0.38;
         const dx = Math.max(-1, Math.min(1, (e.clientX - cx) / 80));
         const dy = Math.max(-1, Math.min(1, (e.clientY - cy) / 80));
-        document.querySelectorAll('.pupil').forEach(p => {
-            p.style.transform = `translate(${dx * 4}px, ${dy * 3}px)`;
-        });
+        document.getElementById('avatar-photo').style.transform =
+            `rotateY(${dx * 8}deg) rotateX(${-dy * 5}deg)`;
     });
 </script>
 </body>

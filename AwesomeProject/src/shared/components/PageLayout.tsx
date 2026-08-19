@@ -14,7 +14,6 @@ import {
 } from 'react-native';
 import {useNavigation} from '@react-navigation/native';
 import {AppIcon, IconNames} from './Icon';
-import {PageTransitionWrapper} from './PageTransitionWrapper';
 import {COLORS, FONT_WEIGHTS} from '../constants';
 
 export interface PageLayoutProps {
@@ -89,9 +88,9 @@ export const PageLayout: React.FC<PageLayoutProps> = ({
         </View>
       )}
 
-      <PageTransitionWrapper style={[styles.content, contentStyle]}>
+      <View style={[styles.content, contentStyle]}>
         {children}
-      </PageTransitionWrapper>
+      </View>
     </View>
   );
 };

@@ -1,12 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { TouchableOpacity, Alert, Platform, AppState, AppStateStatus } from 'react-native';
+import { Alert, Platform, AppState, AppStateStatus } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { AppIcon, IconNames } from '../shared/components/Icon';
 import { HomeIcon, ModelsIcon, HistoryIcon, SettingsIcon } from '../shared/components/TabIcons';
 import { CustomTabBar } from './CustomTabBar';
-import type { RootStackParamList, MainTabParamList } from '../shared/types/navigation';
+import { createNoNoTabNavigator } from './NoNoTabNavigator';
+import type { RootStackParamList } from '../shared/types/navigation';
 import { ModelListScreen } from '../features/model/screens/ModelListScreen';
 import { AddModelScreen } from '../features/model/screens/AddModelScreen';
 import { EditModelScreen } from '../features/model/screens/EditModelScreen';
@@ -21,10 +20,9 @@ import { modelService } from '../features/model/services/ModelService';
 import { accessibilityService } from '../core/ability';
 import { permissionService, PermissionStatus } from '../shared/services/PermissionService';
 import { AlertProvider } from '../shared/utils/alert';
-import type { AIModel } from '../shared/types/Model';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
-const Tab = createBottomTabNavigator<MainTabParamList>();
+const Tab = createNoNoTabNavigator();
 
 const MainTabs = () => {
   const [hasActiveModel, setHasActiveModel] = useState<boolean | null>(null); // null表示初始化未完成
@@ -54,35 +52,18 @@ const MainTabs = () => {
 
   return (
     <Tab.Navigator
-      initialRouteName={hasActiveModel ? "Home" : "Models"}
-      tabBar={(props) => <CustomTabBar {...props} />}
+      initialRouteName={hasActiveModel ? 'Home' : 'Models'}
+      disabledRoutes={hasActiveModel ? [] : ['Home', 'History']}
+      tabBar={props => <CustomTabBar {...(props as any)} />}
       screenOptions={{
         headerShown: false,
-        tabBarStyle: {
-          position: 'absolute',
-          backgroundColor: 'transparent',
-          borderTopWidth: 0,
-          elevation: 0,
-        },
       }}>
       <Tab.Screen
         name="Home"
         component={HomeScreen}
         options={{
           tabBarLabel: '首页',
-          tabBarIcon: ({ color }) => (
-            <HomeIcon color={color} size={24} />
-          ),
-          tabBarItemStyle: !hasActiveModel ? { opacity: 0.4 } : undefined,
-          tabBarButton: !hasActiveModel
-            ? (props) => (
-                <TouchableOpacity
-                  {...props}
-                  disabled={true}
-                  style={[props.style, { opacity: 0.4 }]}
-                />
-              )
-            : undefined,
+          tabBarIcon: ({color}) => <HomeIcon color={color} size={24} />,
         }}
       />
       <Tab.Screen
@@ -90,9 +71,7 @@ const MainTabs = () => {
         component={ModelListScreen}
         options={{
           tabBarLabel: '模型',
-          tabBarIcon: ({ color }) => (
-            <ModelsIcon color={color} size={24} />
-          ),
+          tabBarIcon: ({color}) => <ModelsIcon color={color} size={24} />,
         }}
       />
       <Tab.Screen
@@ -100,19 +79,7 @@ const MainTabs = () => {
         component={TaskHistoryScreenTab}
         options={{
           tabBarLabel: '活动',
-          tabBarIcon: ({ color }) => (
-            <HistoryIcon color={color} size={24} />
-          ),
-          tabBarItemStyle: !hasActiveModel ? { opacity: 0.4 } : undefined,
-          tabBarButton: !hasActiveModel
-            ? (props) => (
-                <TouchableOpacity
-                  {...props}
-                  disabled={true}
-                  style={[props.style, { opacity: 0.4 }]}
-                />
-              )
-            : undefined,
+          tabBarIcon: ({color}) => <HistoryIcon color={color} size={24} />,
         }}
       />
       <Tab.Screen
@@ -120,9 +87,7 @@ const MainTabs = () => {
         component={SettingsScreen}
         options={{
           tabBarLabel: '设置',
-          tabBarIcon: ({ color }) => (
-            <SettingsIcon color={color} size={24} />
-          ),
+          tabBarIcon: ({color}) => <SettingsIcon color={color} size={24} />,
         }}
       />
     </Tab.Navigator>

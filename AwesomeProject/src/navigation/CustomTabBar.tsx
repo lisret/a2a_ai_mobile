@@ -1,13 +1,19 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {View, TouchableOpacity, StyleSheet, Animated, Text} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {BottomTabBarProps} from '@react-navigation/bottom-tabs';
+import type {BottomTabBarProps} from '@react-navigation/bottom-tabs';
+import {useReducedMotion} from '@shared/ui/nono';
 import {HomeIcon, ModelsIcon, HistoryIcon, SettingsIcon} from '../shared/components/TabIcons';
 
-const TAB_COUNT = 4;
 const BAR_PADDING = 7;
 
-const TabIcon = ({name, color, size}: {name: string; color: string; size: number}) => {
+export type NoNoTabBarProps = BottomTabBarProps & {
+  onRoutePress?: (routeKey: string) => void;
+  disabledRoutes?: readonly string[];
+  reducedMotion?: boolean;
+};
+
+const FallbackIcon = ({name, color, size}: {name: string; color: string; size: number}) => {
   switch (name) {
     case 'Home':
       return <HomeIcon color={color} size={size} />;
@@ -22,24 +28,35 @@ const TabIcon = ({name, color, size}: {name: string; color: string; size: number
   }
 };
 
-export const CustomTabBar: React.FC<BottomTabBarProps> = ({
+export const CustomTabBar: React.FC<NoNoTabBarProps> = ({
   state,
   descriptors,
   navigation,
+  insets: insetsProp,
+  onRoutePress,
+  disabledRoutes = [],
+  reducedMotion: reducedMotionProp,
 }) => {
-  const insets = useSafeAreaInsets();
+  const hookInsets = useSafeAreaInsets();
+  const insets = insetsProp ?? hookInsets;
+  const reducedMotionFromSystem = useReducedMotion();
+  const reducedMotion = reducedMotionProp ?? reducedMotionFromSystem;
   const indexAnim = useRef(new Animated.Value(state.index)).current;
   const [barWidth, setBarWidth] = useState(0);
 
   useEffect(() => {
+    if (reducedMotion) {
+      indexAnim.setValue(state.index);
+      return;
+    }
     Animated.timing(indexAnim, {
       toValue: state.index,
       duration: 280,
       useNativeDriver: true,
     }).start();
-  }, [indexAnim, state.index]);
+  }, [indexAnim, reducedMotion, state.index]);
 
-  const tabWidth = barWidth > 0 ? (barWidth - BAR_PADDING * 2) / TAB_COUNT : 0;
+  const tabWidth = barWidth > 0 ? (barWidth - BAR_PADDING * 2) / state.routes.length : 0;
   const bottomInset = Math.max(insets.bottom, 8);
 
   return (
@@ -55,8 +72,8 @@ export const CustomTabBar: React.FC<BottomTabBarProps> = ({
                 transform: [
                   {
                     translateX: indexAnim.interpolate({
-                      inputRange: [0, TAB_COUNT - 1],
-                      outputRange: [0, tabWidth * (TAB_COUNT - 1)],
+                      inputRange: [0, Math.max(state.routes.length - 1, 1)],
+                      outputRange: [0, tabWidth * Math.max(state.routes.length - 1, 0)],
                     }),
                   },
                 ],
@@ -66,12 +83,19 @@ export const CustomTabBar: React.FC<BottomTabBarProps> = ({
         ) : null}
         {state.routes.map((route, index) => {
           const {options} = descriptors[route.key];
-          const label = options.tabBarLabel as string;
+          const label = (options.tabBarLabel as string) || route.name;
           const isFocused = state.index === index;
-          const isDisabled = options.tabBarButton !== undefined;
+          const isDisabled = disabledRoutes.includes(route.name);
           const color = isFocused ? '#FFFFFF' : '#858896';
+          const icon = options.tabBarIcon
+            ? options.tabBarIcon({focused: isFocused, color, size: 20})
+            : <FallbackIcon name={route.name} color={color} size={20} />;
 
           const onPress = () => {
+            if (onRoutePress) {
+              onRoutePress(route.key);
+              return;
+            }
             if (isDisabled) {
               navigation.navigate('Models');
               return;
@@ -91,9 +115,12 @@ export const CustomTabBar: React.FC<BottomTabBarProps> = ({
               key={route.key}
               onPress={onPress}
               style={[styles.tab, isDisabled && {opacity: 0.4}]}
-              activeOpacity={0.85}>
-              <View style={isFocused ? styles.iconActive : undefined}>
-                <TabIcon name={route.name} color={color} size={20} />
+              activeOpacity={0.85}
+              accessibilityRole="tab"
+              accessibilityState={{selected: isFocused, disabled: isDisabled}}
+              accessibilityLabel={label}>
+              <View style={!reducedMotion && isFocused ? styles.iconActive : undefined}>
+                {icon}
               </View>
               <Text style={[styles.label, {color}]}>{label}</Text>
             </TouchableOpacity>

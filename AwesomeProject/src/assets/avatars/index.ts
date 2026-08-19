@@ -12,7 +12,8 @@ export const DEFAULT_AVATAR = {
   credit:
     'Elel Silverbell\n来自 Open Source Avatars · Xmas Chibis\n授权：CC0，可自由使用。',
   vrmUrl:
-    'https://dweb.link/ipfs/QmSpb8jZRtwDhpp7zjpfvU47GZyapmh8GvQApmzTxFcaLz/Avatar01_Neutral.vrm',
+    'https://ipfs.io/ipfs/QmSpb8jZRtwDhpp7zjpfvU47GZyapmh8GvQApmzTxFcaLz/Avatar01_Neutral.vrm',
+  /** Android 本地 3D：`file:///android_asset/vrm/elel.vrm` */
   bust: require('./elel-bust.jpg'),
   full: require('./elel-full.jpg'),
 } as const;

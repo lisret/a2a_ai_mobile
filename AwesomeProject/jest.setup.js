@@ -26,6 +26,15 @@ jest.mock('react-native', () => {
 });
 
 // Mock 原生模块
+jest.mock('react-native-webview', () => {
+  const {View} = require('react-native');
+  return {
+    __esModule: true,
+    default: View,
+    WebView: View,
+  };
+});
+
 jest.mock('react-native/Libraries/BatchedBridge/NativeModules', () => ({
   AccessibilityModule: {},
   ADBModule: {},

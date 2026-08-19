@@ -268,17 +268,22 @@
         }
 
         .avatar-photo {
+            position: absolute;
+            inset: 0;
             width: 240px;
             height: 340px;
+            left: 50%;
+            margin-left: -120px;
             object-fit: cover;
             object-position: center 18%;
             border-radius: 28px 28px 8px 8px;
             filter: drop-shadow(0 18px 24px rgba(15, 23, 42, 0.28));
             transform-origin: 50% 70%;
-            transition: filter 0.3s, transform 0.2s;
             pointer-events: none;
             user-select: none;
         }
+        #vrm-canvas { pointer-events: auto; background: transparent; }
+        #vrm-canvas.is-live + #avatar-photo { opacity: 0; }
 
         .home.listen .avatar-photo { transform: scale(1.04); filter: drop-shadow(0 18px 24px rgba(37,99,235,0.35)) brightness(1.06); }
         .home.think .avatar-photo { filter: drop-shadow(0 18px 24px rgba(15, 23, 42, 0.28)) saturate(0.85); }
@@ -626,6 +631,7 @@
                 <div class="avatar-wrap" id="avatar-wrap">
                     <div class="listen-ring"></div>
                     <div class="avatar" id="avatar">
+                        <canvas class="avatar-photo" id="vrm-canvas" width="480" height="640"></canvas>
                         <img class="avatar-photo" id="avatar-photo" src="doc/assets/avatars/elel-bust.jpg" alt="Elel Silverbell">
                     </div>
                     <div class="progress"><span id="bar"></span></div>
@@ -734,6 +740,10 @@
         if (next !== 'work') {
             bar.style.width = '0%';
             document.getElementById('exec-steps').innerHTML = '';
+        }
+        if (window.__elelSetMood) {
+            var map = {idle:'idle', listen:'idle', think:'work', work:'work', done:'done', error:'error'};
+            window.__elelSetMood(map[next] || 'idle');
         }
     }
 
@@ -889,6 +899,71 @@
         document.getElementById('avatar-photo').style.transform =
             `rotateY(${dx * 8}deg) rotateX(${-dy * 5}deg)`;
     });
+</script>
+<script src="https://unpkg.com/three@0.140.2/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.140.2/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://unpkg.com/three@0.140.2/examples/js/controls/OrbitControls.js"></script>
+<script src="https://unpkg.com/@pixiv/three-vrm@0.6.11/lib/three-vrm.min.js"></script>
+<script>
+(function () {
+    var canvas = document.getElementById('vrm-canvas');
+    if (!canvas || !window.THREE || !window.THREE_VRM) return;
+    var renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true });
+    renderer.setClearColor(0x000000, 0);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(240, 340, false);
+    var scene = new THREE.Scene();
+    var camera = new THREE.PerspectiveCamera(32, 240 / 340, 0.05, 30);
+    camera.position.set(0, 0.92, 1.55);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.75));
+    var key = new THREE.DirectionalLight(0xfff4e8, 0.9);
+    key.position.set(0.5, 1.6, 1.1);
+    scene.add(key);
+    var controls = new THREE.OrbitControls(camera, canvas);
+    controls.enablePan = false;
+    controls.enableZoom = false;
+    controls.target.set(0, 0.78, 0);
+    controls.update();
+    var clock = new THREE.Clock();
+    var vrmObj = null;
+    function setBlend(name, value) {
+        if (!vrmObj || !vrmObj.blendShapeProxy) return;
+        try { vrmObj.blendShapeProxy.setValue(name, value); } catch (e) {}
+    }
+    window.__elelSetMood = function (mood) {
+        ['fun', 'joy', 'sorrow', 'a'].forEach(function (n) { setBlend(n, 0); });
+        if (mood === 'done') { setBlend('fun', 0.55); setBlend('joy', 0.4); }
+        else if (mood === 'error') { setBlend('sorrow', 0.75); }
+        else if (mood === 'work' || mood === 'think') { setBlend('a', 0.2); }
+    };
+    var loader = new THREE.GLTFLoader();
+    loader.crossOrigin = 'anonymous';
+    loader.load(
+        'https://ipfs.io/ipfs/QmSpb8jZRtwDhpp7zjpfvU47GZyapmh8GvQApmzTxFcaLz/Avatar01_Neutral.vrm',
+        function (gltf) {
+            THREE_VRM.VRM.from(gltf).then(function (vrm) {
+                vrmObj = vrm;
+                if (THREE_VRM.VRMUtils && THREE_VRM.VRMUtils.rotateVRM0) THREE_VRM.VRMUtils.rotateVRM0(vrm);
+                scene.add(vrm.scene);
+                if (vrm.lookAt) vrm.lookAt.target = camera;
+                canvas.classList.add('is-live');
+            });
+        }
+    );
+    (function animate() {
+        requestAnimationFrame(animate);
+        var dt = clock.getDelta();
+        var t = clock.elapsedTime;
+        if (vrmObj) {
+            var c = t % 4.4;
+            setBlend('blink', c > 4.15 && c < 4.28 ? 1 : 0);
+            vrmObj.scene.position.y = Math.sin(t * 1.35) * 0.012;
+            if (vrmObj.update) vrmObj.update(dt);
+        }
+        controls.update();
+        renderer.render(scene, camera);
+    })();
+})();
 </script>
 </body>
 </html>

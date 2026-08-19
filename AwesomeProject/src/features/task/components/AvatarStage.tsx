@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {
   View,
   Text,
@@ -8,10 +8,12 @@ import {
   Animated,
   Alert,
 } from 'react-native';
-import { COLORS, SHADOWS } from '@shared/constants';
-import { DEFAULT_AVATAR } from '../../../assets/avatars';
+import {COLORS, SHADOWS} from '@shared/constants';
+import {DEFAULT_AVATAR} from '../../../assets/avatars';
+import {AvatarVrmView} from './AvatarVrmView';
+import type {AvatarMood} from './avatarTypes';
 
-export type AvatarMood = 'idle' | 'work' | 'done' | 'error';
+export type {AvatarMood} from './avatarTypes';
 
 interface AvatarStageProps {
   bubble: string;
@@ -26,13 +28,15 @@ export const AvatarStage: React.FC<AvatarStageProps> = ({
   compact = false,
   onPress,
 }) => {
+  const [use3d, setUse3d] = useState(true);
+  const [ready3d, setReady3d] = useState(false);
   const float = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(float, { toValue: 1, duration: 1800, useNativeDriver: true }),
-        Animated.timing(float, { toValue: 0, duration: 1800, useNativeDriver: true }),
+        Animated.timing(float, {toValue: 1, duration: 1800, useNativeDriver: true}),
+        Animated.timing(float, {toValue: 0, duration: 1800, useNativeDriver: true}),
       ]),
     );
     loop.start();
@@ -41,12 +45,15 @@ export const AvatarStage: React.FC<AvatarStageProps> = ({
 
   const translateY = float.interpolate({
     inputRange: [0, 1],
-    outputRange: [0, compact ? 0 : -8],
+    outputRange: [0, compact || ready3d ? 0 : -8],
   });
 
   const handleLongPress = () => {
     Alert.alert(DEFAULT_AVATAR.name, DEFAULT_AVATAR.credit);
   };
+
+  const showFallback = !use3d;
+  const showPlaceholder = use3d && !ready3d;
 
   return (
     <View style={[styles.stage, compact && styles.stageCompact]}>
@@ -55,27 +62,40 @@ export const AvatarStage: React.FC<AvatarStageProps> = ({
           <Text style={styles.bubbleText}>{bubble}</Text>
         </View>
       )}
-      <TouchableOpacity
-        activeOpacity={0.9}
-        onPress={compact ? undefined : onPress}
-        onLongPress={handleLongPress}
-        delayLongPress={450}
-        disabled={compact}
-        style={styles.hit}>
-        <Animated.View
-          style={[
-            styles.avatarWrap,
-            compact && styles.avatarWrapCompact,
-            { transform: [{ translateY }] },
-          ]}>
-          <Image
-            source={DEFAULT_AVATAR.bust}
-            style={[styles.photo, mood === 'error' && styles.photoDim]}
-            resizeMode="cover"
-            accessibilityLabel={DEFAULT_AVATAR.name}
+      <View style={[styles.avatarWrap, compact && styles.avatarWrapCompact]}>
+        {use3d && (
+          <AvatarVrmView
+            mood={mood}
+            onReady={() => setReady3d(true)}
+            onError={() => {
+              setUse3d(false);
+              setReady3d(false);
+            }}
+            onPress={compact ? undefined : onPress}
+            onLongPress={handleLongPress}
           />
-        </Animated.View>
-      </TouchableOpacity>
+        )}
+        {(showFallback || showPlaceholder) && (
+          <Animated.View
+            pointerEvents={showFallback ? 'auto' : 'none'}
+            style={[styles.fallback, {transform: [{translateY}]}]}>
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={compact || !showFallback ? undefined : onPress}
+              onLongPress={handleLongPress}
+              delayLongPress={450}
+              disabled={compact || !showFallback}
+              style={styles.hit}>
+              <Image
+                source={DEFAULT_AVATAR.bust}
+                style={[styles.photo, mood === 'error' && styles.photoDim]}
+                resizeMode="cover"
+                accessibilityLabel={DEFAULT_AVATAR.name}
+              />
+            </TouchableOpacity>
+          </Animated.View>
+        )}
+      </View>
     </View>
   );
 };
@@ -114,20 +134,23 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     color: COLORS.text.primary,
   },
-  hit: {
-    alignItems: 'center',
-  },
   avatarWrap: {
-    width: 240,
-    height: 300,
+    width: 260,
+    height: 320,
     borderRadius: 24,
     overflow: 'hidden',
-    ...SHADOWS.default,
+    backgroundColor: 'transparent',
   },
   avatarWrapCompact: {
-    width: 88,
-    height: 110,
+    width: 96,
+    height: 118,
     borderRadius: 16,
+  },
+  fallback: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  hit: {
+    flex: 1,
   },
   photo: {
     width: '100%',

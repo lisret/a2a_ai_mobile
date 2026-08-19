@@ -66,8 +66,9 @@
 | 自定义 Tab | 80% | 已接入 App；缺 navigator 集成测试 |
 | Elel 选型 / 授权 / 调研 | 100% | 正选 Elel，备选 Holy；模之屋不打进包 |
 | Elel 首页第一期（旧壳上） | 70% | PR #2 已在旧 Home 接半身图 + Dock；**尚未接到 NoNo 壳** |
+| Elel 3D VRM（WebView） | 80% | Android 打进 `android/app/src/main/assets/vrm/`；失败回退半身图。真机 WebGL 未验收 |
 | 融合首页（NoNo 壳 + Elel 脸） | 0% | 本计划的下一项 |
-| 3D VRM / 语音听写 / 悬浮窗头像 | 0% | 明确后置，不挡融合 |
+| 语音听写 / 悬浮窗头像 | 0% | 后置 |
 | Agent 配置车道 | 0% | 等 `AgentConfigController` |
 | 真机 / Android 验收 | 0% | 两轨都没编 debug 包 |
 
@@ -96,7 +97,8 @@
 | 执行时缩小让路 | 完成（旧壳） | 迁到 `NoNoHomeView` 后复测，避免和 `paddingBottom: 120` 底栏抢空间 |
 | HTML 原型 `design_demo_avatar.html` | 完成 | 视觉参考；正式 UI 以 NoNo 珍珠底为准 |
 | 接到 NoNoHomeView | **未做** | 融合第一优先 |
-| 导入本地 VRM / 按需 3D | 未做 | 融合首页稳定后再开 |
+| 导入本地 VRM / 用户换装 | 未做 | 当前只内置 Elel |
+| 语音听写 / 悬浮窗头像 | 未做 | 后置 |
 | 悬浮窗头像 | 未做 | 与 NoNo「第二阶段悬浮球」合并规划，不塞进这一轨 |
 
 ---
@@ -112,7 +114,7 @@
 4. **要真机**  
    debug 包；连点 Tab；减少动画；键盘 + Elel Dock + 深紫底栏三件套是否互挡。
 5. **后置（不要和融合搅在一起）**  
-   语音听写、按需加载 Elel VRM、悬浮球/通知里的 Elel 头像。
+   语音听写、悬浮球/通知里的 Elel 头像。3D 已在首页 WebView 接入，真机验收仍缺。
 
 ---
 
@@ -123,4 +125,5 @@
 - 点 Elel → 聚焦底部输入；发送逻辑仍走现有 `HomeScreen` hooks。
 - 执行中 Elel 缩小，`ExecutionCard` 可用，终止确认文案可继续用 NoNo 语气。
 - 长按 Elel 能看到 CC0 出处。
-- 不新增 npm 依赖，不把 `.vrm` 打进 APK。
+- 不新增 3D 引擎 npm 包；WebView + 本地 UMD three/three-vrm。新增 `react-native-webview`。
+- `.vrm` 已打进 Android assets（约 3.2MB），不是 4200 个模型。

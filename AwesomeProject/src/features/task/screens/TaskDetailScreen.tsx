@@ -12,11 +12,9 @@ import type { RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '@shared/types/navigation';
 import { PageLayout } from '@shared/components/PageLayout';
 import { taskHistoryService } from '../services/TaskHistoryService';
-import { COLORS, SHADOWS } from '@shared/constants';
-import { AppIcon, IconNames } from '@shared/components/Icon';
-import { getTaskTitle, getStatusText, getStatusColor } from '@shared/utils/taskHelpers';
+import { COLORS } from '@shared/constants';
 import { TaskStepDetail } from '../components/TaskStepDetail';
-import type { Task, TaskStep } from '@core/engine/taskEngine';
+import type { Task } from '@core/engine/taskEngine';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 type RoutePropType = RouteProp<RootStackParamList, 'TaskDetail'>;
@@ -85,24 +83,13 @@ export const TaskDetailScreen: React.FC = () => {
       <ScrollView style={styles.container} contentContainerStyle={styles.content}>
         {/* 任务概览卡片 */}
         <View style={styles.overviewCard}>
-          <View style={styles.overviewHeader}>
-            <View style={[styles.statusBadge, { backgroundColor: isFailed ? COLORS.background.red : COLORS.background.blue }]}>
-              <AppIcon
-                name={isFailed ? IconNames.error : IconNames.success}
-                size={16}
-                color={isFailed ? COLORS.error : COLORS.success}
-              />
-              <Text style={[styles.statusText, { color: isFailed ? COLORS.error : COLORS.success }]}>
-                {getStatusText(task.status)}
-              </Text>
-            </View>
-            <Text style={styles.timeText}>
-              {new Date(task.createdAt).toLocaleString('zh-CN')}
-            </Text>
-          </View>
-
-          <Text style={styles.instructionTitle}>任务指令</Text>
+          <Text style={styles.heroKicker}>
+            {isFailed ? 'FAILED' : isSuccess ? 'SUCCEEDED' : 'TASK'}
+          </Text>
           <Text style={styles.instructionText}>{task.instruction}</Text>
+          <Text style={styles.timeText}>
+            {new Date(task.createdAt).toLocaleString('zh-CN')} · {steps.length} 个步骤
+          </Text>
 
           {task.error && (
             <View style={styles.errorBox}>
@@ -110,24 +97,27 @@ export const TaskDetailScreen: React.FC = () => {
               <Text style={styles.errorText}>{task.error}</Text>
             </View>
           )}
-
-          <View style={styles.metaRow}>
-            <Text style={styles.metaLabel}>执行步骤数：</Text>
-            <Text style={styles.metaValue}>{steps.length}</Text>
-          </View>
         </View>
+
+        <TouchableOpacity
+          style={styles.rerunButton}
+          onPress={() => {
+            (global as any).__pendingInstruction = task.instruction;
+            navigation.navigate('MainTabs', {screen: 'Home'});
+          }}>
+          <Text style={styles.rerunText}>再次执行</Text>
+        </TouchableOpacity>
 
         {/* 执行步骤时间轴 */}
         {steps.length > 0 && (
           <View style={styles.stepsSection}>
             <Text style={styles.sectionTitle}>执行过程</Text>
-            {steps.map((step, index) => (
+            {steps.map(step => (
               <TaskStepDetail
                 key={step.step}
                 step={step}
                 isExpanded={expandedSteps.has(step.step)}
                 onToggle={() => toggleStep(step.step)}
-                isLast={index === steps.length - 1}
               />
             ))}
           </View>
@@ -148,7 +138,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    padding: 16,
+    paddingHorizontal: 18,
+    paddingBottom: 40,
   },
   loadingContainer: {
     flex: 1,
@@ -160,46 +151,42 @@ const styles = StyleSheet.create({
     color: COLORS.text.secondary,
   },
   overviewCard: {
-    backgroundColor: COLORS.background.card,
-    borderRadius: 16,
+    backgroundColor: '#1b1d30',
+    borderRadius: 28,
     padding: 20,
     marginBottom: 20,
-    ...SHADOWS.default,
   },
-  overviewHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  statusText: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  timeText: {
-    fontSize: 12,
-    color: COLORS.text.secondary,
-  },
-  instructionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.text.secondary,
+  heroKicker: {
+    color: '#aca7ea',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.8,
     marginBottom: 8,
   },
+  timeText: {
+    fontSize: 11,
+    color: '#c9cad4',
+  },
   instructionText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text.primary,
-    lineHeight: 24,
-    marginBottom: 16,
+    fontSize: 23,
+    fontWeight: '800',
+    color: '#ffffff',
+    lineHeight: 26,
+    marginBottom: 8,
+  },
+  rerunButton: {
+    alignSelf: 'flex-start',
+    minHeight: 42,
+    paddingHorizontal: 18,
+    borderRadius: 999,
+    backgroundColor: COLORS.ink,
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+  rerunText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
   },
   errorBox: {
     backgroundColor: COLORS.background.red,

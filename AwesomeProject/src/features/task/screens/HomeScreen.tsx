@@ -1,26 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Alert,
-} from 'react-native';
+import { Alert } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@shared/types/navigation';
-import { ConfirmModal } from '@shared/components/ConfirmModal';
-import { PageLayout } from '@shared/components/PageLayout';
-import { TaskInputCard } from '../components/TaskInputCard';
-import { ExecutionCard } from '../components/ExecutionCard';
-import { SuggestionChips } from '../components/SuggestionChips';
 import { useTaskExecution } from '../hooks/useTaskExecution';
 import { useTaskExecutionWithBackground } from '../useTaskExecutionWithBackground';
 import { modelService } from '@features/model/services/ModelService';
 import { settingsService } from '@features/settings/services/SettingsService';
 import { accessibilityService, appMappingService, floatingWindowService } from '@core/ability';
 import { taskHistoryService } from '../services/TaskHistoryService';
-import { COLORS, HOME_SUGGESTIONS } from '@shared/constants';
+import { HOME_SUGGESTIONS, HOME_QUICK_TASKS } from '@shared/constants';
+import { NoNoHomeView } from '../components/NoNoHomeView';
 import type { AIModel } from '@shared/types/Model';
 import type { Task, TaskStep } from '@core/engine/taskEngine';
 
@@ -340,83 +330,23 @@ export const HomeScreen: React.FC = () => {
   };
 
   return (
-    <PageLayout
-      title={model ? model.name : 'OpenAutoGLM'}
-      backgroundColor={COLORS.background.default}>
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}>
-        <View style={styles.greetingSection}>
-          <Text style={styles.greetingTitle}>
-            准备好{'\n'}执行任务了吗？
-          </Text>
-          <Text style={styles.greetingSubtitle}>输入指令，剩下的交给我。</Text>
-        </View>
-
-        {executing ? (
-          <ExecutionCard
-            instruction={taskInput || '执行中...'}
-            steps={executionSteps}
-            currentStep={currentStep}
-            onStop={handleStopTask}
-          />
-        ) : (
-          <TaskInputCard
-            value={taskInput}
-            onChangeText={setTaskInput}
-            onClear={handleClear}
-            onStart={handleStartTask}
-            disabled={executing}
-          />
-        )}
-
-        {!executing && (
-          <View style={styles.suggestionsSection}>
-            <SuggestionChips suggestions={HOME_SUGGESTIONS} onSelect={handleSuggestionSelect} />
-          </View>
-        )}
-      </ScrollView>
-
-      <ConfirmModal
-        visible={stopConfirmVisible}
-        title="确认中断"
-        message="确定要中断当前任务吗？"
-        confirmText="中断"
-        cancelText="取消"
-        onConfirm={confirmStopTask}
-        onCancel={() => setStopConfirmVisible(false)}
-        danger
-      />
-    </PageLayout>
+    <NoNoHomeView
+      input={taskInput}
+      executing={executing}
+      displayInstruction={taskInput || '执行中...'}
+      steps={executionSteps}
+      currentStep={currentStep}
+      suggestions={HOME_SUGGESTIONS}
+      quickTasks={HOME_QUICK_TASKS}
+      stopConfirmVisible={stopConfirmVisible}
+      onInputChange={setTaskInput}
+      onClear={handleClear}
+      onStart={handleStartTask}
+      onRequestStop={handleStopTask}
+      onConfirmStop={confirmStopTask}
+      onCancelStop={() => setStopConfirmVisible(false)}
+      onSuggestionSelect={handleSuggestionSelect}
+    />
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  content: {
-    padding: 20,
-    paddingTop: 24,
-    gap: 24,
-  },
-  greetingSection: {
-    marginTop: 12,
-  },
-  greetingTitle: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: COLORS.text.primary,
-    marginBottom: 8,
-    lineHeight: 34,
-  },
-  greetingSubtitle: {
-    fontSize: 15,
-    color: COLORS.text.secondary,
-  },
-  suggestionsSection: {
-    marginTop: 0,
-  },
-});
 

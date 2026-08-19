@@ -46,19 +46,19 @@ describe('taskHelpers', () => {
 
   describe('getStatusColor', () => {
     it('应该返回成功状态的颜色', () => {
-      expect(getStatusColor('success')).toBe('#10b981');
+      expect(getStatusColor('success')).toBe('#267568');
     });
 
     it('应该返回失败状态的颜色', () => {
-      expect(getStatusColor('failed')).toBe('#dc2626');
+      expect(getStatusColor('failed')).toBe('#a94e40');
     });
 
     it('应该返回运行中状态的颜色', () => {
-      expect(getStatusColor('running')).toBe('#2563eb');
+      expect(getStatusColor('running')).toBe('#ebe8ff');
     });
 
     it('应该返回默认颜色', () => {
-      expect(getStatusColor('waiting')).toBe('#86868b');
+      expect(getStatusColor('waiting')).toBe('#777a88');
     });
   });
 

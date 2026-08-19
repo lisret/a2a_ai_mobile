@@ -673,7 +673,7 @@ export const TaskHistoryScreen: React.FC = () => {
               {selectedTask && !executing && (
                 <View style={styles.aiMessageContainer}>
                   <View style={styles.aiAvatar}>
-                    <AppIcon name={IconNames.robot} size={18} color="#2563eb" />
+                    <AppIcon name={IconNames.robot} size={18} color="#756bf0" />
                   </View>
                   <View style={styles.aiMessageContent}>
                     <View style={styles.statusRow}>
@@ -728,7 +728,7 @@ export const TaskHistoryScreen: React.FC = () => {
         {/* 执行状态提示 */}
         {executing && (
           <View style={styles.executionStatus}>
-            <ActivityIndicator size="small" color="#2563eb" />
+            <ActivityIndicator size="small" color="#756bf0" />
             <Text style={styles.executionStatusText}>
               正在执行任务... 步骤 {currentStep}
             </Text>
@@ -938,7 +938,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#165DFF',
+    backgroundColor: '#1b1d30',
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 8,
@@ -962,7 +962,7 @@ const styles = StyleSheet.create({
   },
   executionStatusText: {
     fontSize: 14,
-    color: '#2563eb',
+    color: '#756bf0',
     fontWeight: '500',
     flex: 1,
   },

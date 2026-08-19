@@ -11,6 +11,9 @@ Thumbs.db
 # Code graph index
 .codegraph/
 
+# Local isolated implementation worktrees
+.worktrees/
+
 # Zip archives
 *.zip
 *.rar

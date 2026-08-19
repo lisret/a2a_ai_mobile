@@ -234,16 +234,10 @@ export const APIKeyGuideScreen: React.FC = () => {
         contentContainerStyle={styles.scrollContent}>
         {!providerId && (
           <View style={styles.introCard}>
-            <AppIcon
-              name={IconNames.info}
-              size={24}
-              color={COLORS.primary}
-              style={styles.introIcon}
-            />
-            <Text style={styles.introTitle}>什么是 API Key？</Text>
+            <Text style={styles.heroKicker}>SAFE SETUP</Text>
+            <Text style={styles.introTitle}>只在可信服务商后台创建密钥</Text>
             <Text style={styles.introText}>
-              API Key 是访问 AI 模型服务的密钥，类似于账号密码。
-              每个模型厂商都有自己的 API Key 获取方式，请按照下方指引操作。
+              API Key 是访问模型服务的凭据。真实应用只应安全存储，不要把它写进日志或任务历史。
             </Text>
           </View>
         )}
@@ -286,30 +280,33 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   introCard: {
-    backgroundColor: COLORS.background.card,
-    borderRadius: 12,
-    padding: 16,
+    backgroundColor: '#1b1d30',
+    borderRadius: 28,
+    padding: 20,
     marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: COLORS.primary,
   },
-  introIcon: {
+  heroKicker: {
+    color: '#aca7ea',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.8,
     marginBottom: 8,
   },
   introTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text.primary,
+    fontSize: 23,
+    fontWeight: '800',
+    color: '#ffffff',
     marginBottom: 8,
+    lineHeight: 26,
   },
   introText: {
-    fontSize: 14,
-    color: COLORS.text.secondary,
-    lineHeight: 20,
+    fontSize: 11,
+    color: '#c9cad4',
+    lineHeight: 16,
   },
   guideCard: {
     backgroundColor: COLORS.background.card,
-    borderRadius: 12,
+    borderRadius: 21,
     padding: 16,
     marginBottom: 16,
     borderWidth: 1,
@@ -317,7 +314,7 @@ const styles = StyleSheet.create({
   },
   emptyCard: {
     backgroundColor: COLORS.background.card,
-    borderRadius: 12,
+    borderRadius: 21,
     padding: 32,
     marginBottom: 16,
     alignItems: 'center',
@@ -371,7 +368,7 @@ const styles = StyleSheet.create({
   stepNumber: {
     width: 24,
     height: 24,
-    borderRadius: 12,
+    borderRadius: 21,
     backgroundColor: COLORS.primary,
     justifyContent: 'center',
     alignItems: 'center',
@@ -436,7 +433,7 @@ const styles = StyleSheet.create({
   },
   footerCard: {
     backgroundColor: COLORS.background.light,
-    borderRadius: 12,
+    borderRadius: 21,
     padding: 16,
     marginTop: 8,
     marginBottom: 32,

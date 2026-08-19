@@ -1,17 +1,20 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
-  Text,
   StyleSheet,
   ScrollView,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
+  TextInput,
 } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '@shared/types/navigation';
 import { ConfirmModal } from '@shared/components/ConfirmModal';
 import { PageLayout } from '@shared/components/PageLayout';
-import { TaskInputCard } from '../components/TaskInputCard';
+import { AvatarStage, type AvatarMood } from '../components/AvatarStage';
+import { AvatarInputDock } from '../components/AvatarInputDock';
 import { ExecutionCard } from '../components/ExecutionCard';
 import { SuggestionChips } from '../components/SuggestionChips';
 import { useTaskExecution } from '../hooks/useTaskExecution';
@@ -35,6 +38,9 @@ export const HomeScreen: React.FC = () => {
   const [executionSteps, setExecutionSteps] = useState<TaskStep[]>([]);
   const [currentStep, setCurrentStep] = useState<number | undefined>(undefined);
   const [stopConfirmVisible, setStopConfirmVisible] = useState(false);
+  const [runningInstruction, setRunningInstruction] = useState('');
+  const [bubbleOverride, setBubbleOverride] = useState<string | null>(null);
+  const inputRef = useRef<TextInput>(null);
 
   // 加载激活的模型
   useEffect(() => {
@@ -98,12 +104,16 @@ export const HomeScreen: React.FC = () => {
       setExecuting(false);
       setCurrentStep(undefined);
       await loadActiveModel(); // 刷新模型状态
+      setRunningInstruction('');
+      setBubbleOverride('搞定了，还要我做点别的吗？');
       Alert.alert('成功', '任务执行完成');
     },
     onTaskFailed: (error, isCancelled) => {
       setExecuting(false);
       setCurrentStep(undefined);
       setExecutionSteps([]); // 清空执行步骤
+      setRunningInstruction('');
+      setBubbleOverride(isCancelled ? '好，已经停手了。' : '这次没做成。换个说法再试一次？');
       if (!isCancelled) {
         Alert.alert('执行失败', error);
       }
@@ -141,12 +151,16 @@ export const HomeScreen: React.FC = () => {
         setExecutionSteps([]);
       }
       await loadActiveModel();
+      setRunningInstruction('');
+      setBubbleOverride('搞定了，还要我做点别的吗？');
       Alert.alert('成功', '任务执行完成');
     },
     onTaskFailed: (error, isCancelled) => {
       setExecuting(false);
       setCurrentStep(undefined);
       setExecutionSteps([]); // 清空执行步骤
+      setRunningInstruction('');
+      setBubbleOverride(isCancelled ? '好，已经停手了。' : '这次没做成。换个说法再试一次？');
       if (!isCancelled) {
         Alert.alert('执行失败', error);
       }
@@ -212,6 +226,8 @@ export const HomeScreen: React.FC = () => {
             setExecutionSteps([]);
           }
           await loadActiveModel();
+          setRunningInstruction('');
+          setBubbleOverride('搞定了，还要我做点别的吗？');
           // 延迟显示 Alert，避免与系统对话框冲突
           setTimeout(() => {
             Alert.alert('成功', '任务执行完成');
@@ -233,6 +249,8 @@ export const HomeScreen: React.FC = () => {
         } else {
           setExecutionSteps([]);
         }
+        setRunningInstruction('');
+        setBubbleOverride(data.isCancelled ? '好，已经停手了。' : '这次没做成。换个说法再试一次？');
         // 触发回调（如果还没有被触发）
         if (!data.isCancelled) {
           // 延迟显示 Alert，避免与系统对话框冲突
@@ -259,6 +277,7 @@ export const HomeScreen: React.FC = () => {
     }
 
     if (!model) {
+      setBubbleOverride('先去「模型」页选一个，我才能干活。');
       Alert.alert('提示', '请先选择一个模型');
       (navigation as any).navigate('MainTabs', { screen: 'Models' });
       return;
@@ -266,6 +285,7 @@ export const HomeScreen: React.FC = () => {
 
     const isEnabled = await accessibilityService.isEnabled();
     if (!isEnabled) {
+      setBubbleOverride('先去打开无障碍，我才能动手。');
       Alert.alert(
         '需要无障碍权限',
         '请先启用无障碍服务',
@@ -293,13 +313,16 @@ export const HomeScreen: React.FC = () => {
     }
 
     // 尝试后台执行，失败则前台执行
+    setRunningInstruction(instruction);
     try {
       await startBackgroundTask(instruction);
-      setTaskInput(''); // 清空输入
+      setTaskInput('');
+      setBubbleOverride(null);
     } catch (error) {
       console.error('启动后台任务失败，回退到前台执行:', error);
       await executeTaskForeground(instruction);
       setTaskInput('');
+      setBubbleOverride(null);
     }
   };
 
@@ -325,6 +348,8 @@ export const HomeScreen: React.FC = () => {
       setExecuting(false);
       setCurrentStep(undefined);
       setExecutionSteps([]);
+      setRunningInstruction('');
+      setBubbleOverride('好，已经停手了。');
     } catch (error) {
       console.error('中断任务失败:', error);
       Alert.alert('错误', '中断任务时发生错误');
@@ -333,50 +358,70 @@ export const HomeScreen: React.FC = () => {
 
   const handleSuggestionSelect = (text: string) => {
     setTaskInput(text);
+    setBubbleOverride('要我去做这件事吗？点发送就开始。');
   };
 
-  const handleClear = () => {
-    setTaskInput('');
+  const handleAvatarPress = () => {
+    inputRef.current?.focus();
+    setBubbleOverride('想让我干什么？打在下面就行。');
   };
+
+  const mood: AvatarMood = executing ? 'work' : model ? 'idle' : 'error';
+  const bubble = useMemo(() => {
+    if (bubbleOverride) {
+      return bubbleOverride;
+    }
+    if (executing) {
+      return '我去动手，你先看着。';
+    }
+    if (!model) {
+      return '先去「模型」页选一个，我才能干活。';
+    }
+    return '点我，或在下面打字，剩下的交给我。';
+  }, [bubbleOverride, executing, model]);
 
   return (
     <PageLayout
       title={model ? model.name : 'OpenAutoGLM'}
-      backgroundColor={COLORS.background.default}>
-      <ScrollView
+      backgroundColor={COLORS.background.default}
+      contentStyle={styles.pageContent}>
+      <KeyboardAvoidingView
         style={styles.container}
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}>
-        <View style={styles.greetingSection}>
-          <Text style={styles.greetingTitle}>
-            准备好{'\n'}执行任务了吗？
-          </Text>
-          <Text style={styles.greetingSubtitle}>输入指令，剩下的交给我。</Text>
-        </View>
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <AvatarStage
+          bubble={bubble}
+          mood={mood}
+          compact={executing}
+          onPress={handleAvatarPress}
+        />
 
         {executing ? (
-          <ExecutionCard
-            instruction={taskInput || '执行中...'}
-            steps={executionSteps}
-            currentStep={currentStep}
-            onStop={handleStopTask}
-          />
+          <ScrollView
+            style={styles.execScroll}
+            contentContainerStyle={styles.execContent}
+            showsVerticalScrollIndicator={false}>
+            <ExecutionCard
+              instruction={runningInstruction || taskInput || '执行中...'}
+              steps={executionSteps}
+              currentStep={currentStep}
+              onStop={handleStopTask}
+            />
+          </ScrollView>
         ) : (
-          <TaskInputCard
-            value={taskInput}
-            onChangeText={setTaskInput}
-            onClear={handleClear}
-            onStart={handleStartTask}
-            disabled={executing}
-          />
-        )}
-
-        {!executing && (
-          <View style={styles.suggestionsSection}>
-            <SuggestionChips suggestions={HOME_SUGGESTIONS} onSelect={handleSuggestionSelect} />
+          <View style={styles.bottomBlock}>
+            <View style={styles.suggestionsSection}>
+              <SuggestionChips suggestions={HOME_SUGGESTIONS} onSelect={handleSuggestionSelect} />
+            </View>
+            <AvatarInputDock
+              ref={inputRef}
+              value={taskInput}
+              onChangeText={setTaskInput}
+              onStart={handleStartTask}
+              disabled={executing}
+            />
           </View>
         )}
-      </ScrollView>
+      </KeyboardAvoidingView>
 
       <ConfirmModal
         visible={stopConfirmVisible}
@@ -393,30 +438,25 @@ export const HomeScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
+  pageContent: {
+    flex: 1,
+  },
   container: {
     flex: 1,
   },
-  content: {
-    padding: 20,
-    paddingTop: 24,
-    gap: 24,
+  execScroll: {
+    flex: 1,
   },
-  greetingSection: {
-    marginTop: 12,
+  execContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
   },
-  greetingTitle: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: COLORS.text.primary,
-    marginBottom: 8,
-    lineHeight: 34,
-  },
-  greetingSubtitle: {
-    fontSize: 15,
-    color: COLORS.text.secondary,
+  bottomBlock: {
+    paddingTop: 8,
   },
   suggestionsSection: {
-    marginTop: 0,
+    paddingHorizontal: 16,
+    marginBottom: 10,
   },
 });
 

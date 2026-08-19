@@ -1,0 +1,1110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>虚拟角色首页交互原型 — OpenAutoGLM</title>
+    <style>
+        :root {
+            --primary: #2563EB;
+            --primary-dark: #1D4ED8;
+            --primary-light: #EFF6FF;
+            --success: #10B981;
+            --warning: #F59E0B;
+            --error: #EF4444;
+            --text-main: #111827;
+            --text-secondary: #6B7280;
+            --bg-page: #F3F4F6;
+            --bg-card: #FFFFFF;
+            --border: #E5E7EB;
+            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.06);
+            --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            --skin: #f7d7c4;
+            --skin-shadow: #e8b89a;
+            --hair: #1f2937;
+            --hair-hi: #374151;
+            --shirt: #2563EB;
+            --shirt-dark: #1D4ED8;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            background: #E5E7EB;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            gap: 32px;
+            padding: 28px 20px 48px;
+            flex-wrap: wrap;
+        }
+
+        .panel {
+            width: min(420px, 100%);
+            background: #fff;
+            border-radius: 20px;
+            padding: 22px 22px 18px;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border);
+        }
+
+        .panel h1 {
+            font-size: 20px;
+            margin-bottom: 6px;
+        }
+
+        .panel .lead {
+            color: var(--text-secondary);
+            font-size: 13px;
+            line-height: 1.6;
+            margin-bottom: 16px;
+        }
+
+        .panel h2 {
+            font-size: 13px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin: 16px 0 8px;
+        }
+
+        .panel ul {
+            padding-left: 18px;
+            font-size: 13px;
+            line-height: 1.7;
+            color: var(--text-main);
+        }
+
+        .panel code {
+            font-size: 12px;
+            background: #F3F4F6;
+            padding: 1px 6px;
+            border-radius: 4px;
+        }
+
+        .state-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .state-btn {
+            border: 1px solid var(--border);
+            background: #fff;
+            border-radius: 10px;
+            padding: 8px 10px;
+            font-size: 13px;
+            cursor: pointer;
+            text-align: left;
+        }
+
+        .state-btn.active {
+            border-color: var(--primary);
+            background: var(--primary-light);
+            color: var(--primary-dark);
+            font-weight: 600;
+        }
+
+        .note {
+            margin-top: 14px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            background: #F9FAFB;
+            border-radius: 10px;
+            padding: 10px 12px;
+            line-height: 1.55;
+        }
+
+        .phone-container {
+            width: 375px;
+            height: 812px;
+            background: var(--bg-page);
+            border-radius: 40px;
+            border: 8px solid #1F2937;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            display: flex;
+            flex-direction: column;
+            user-select: none;
+        }
+
+        .status-bar {
+            height: 44px;
+            background: transparent;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 24px 0;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-main);
+            z-index: 20;
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+        }
+
+        .home {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            background:
+                radial-gradient(120% 80% at 50% 0%, #dbeafe 0%, transparent 55%),
+                var(--bg-page);
+            overflow: hidden;
+        }
+
+        .top-meta {
+            margin-top: 48px;
+            padding: 0 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 5;
+        }
+
+        .model-pill {
+            font-size: 12px;
+            background: rgba(255,255,255,0.9);
+            border: 1px solid var(--border);
+            padding: 4px 10px;
+            border-radius: 999px;
+            color: var(--text-secondary);
+        }
+
+        .hint {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        .stage {
+            flex: 1;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-end;
+            min-height: 0;
+            cursor: pointer;
+        }
+
+        .bubble {
+            max-width: 280px;
+            background: #fff;
+            border-radius: 18px 18px 18px 6px;
+            padding: 12px 16px;
+            box-shadow: var(--shadow);
+            font-size: 15px;
+            line-height: 1.45;
+            color: var(--text-main);
+            position: relative;
+            margin-bottom: 8px;
+            z-index: 6;
+            transition: opacity 0.2s;
+        }
+
+        .bubble.confirm {
+            border: 1px solid #BFDBFE;
+            background: #EFF6FF;
+        }
+
+        .bubble-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .bubble-actions button {
+            flex: 1;
+            border: none;
+            border-radius: 10px;
+            padding: 8px 0;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .btn-yes { background: var(--primary); color: #fff; }
+        .btn-no { background: #fff; color: var(--text-secondary); border: 1px solid var(--border) !important; }
+
+        .avatar-wrap {
+            width: 260px;
+            height: 360px;
+            position: relative;
+            transform-origin: 50% 90%;
+            transition: transform 0.45s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.3s;
+        }
+
+        .home.compact .avatar-wrap {
+            transform: scale(0.42) translate(140px, 80px);
+        }
+
+        .home.compact .bubble { opacity: 0; pointer-events: none; }
+
+        .avatar {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            animation: breathe 3.6s ease-in-out infinite;
+        }
+
+        @keyframes breathe {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-6px); }
+        }
+
+        .torso {
+            position: absolute;
+            left: 70px;
+            top: 188px;
+            width: 120px;
+            height: 150px;
+            background: linear-gradient(180deg, var(--shirt) 0%, var(--shirt-dark) 100%);
+            border-radius: 40px 40px 18px 18px;
+            box-shadow: inset 0 8px 0 rgba(255,255,255,0.12);
+        }
+
+        .collar {
+            position: absolute;
+            left: 88px;
+            top: 182px;
+            width: 84px;
+            height: 28px;
+            background: #fff;
+            border-radius: 0 0 40px 40px;
+            z-index: 2;
+        }
+
+        .arm {
+            position: absolute;
+            top: 200px;
+            width: 34px;
+            height: 110px;
+            background: var(--skin);
+            border-radius: 18px;
+            z-index: 1;
+        }
+
+        .arm.l { left: 48px; transform: rotate(12deg); }
+        .arm.r { right: 48px; transform: rotate(-12deg); }
+
+        .home.listen .arm.l { transform: rotate(-18deg) translateY(-8px); }
+        .home.think .arm.r { transform: rotate(-48deg) translate(-18px, -36px); }
+        .home.work .arm.l, .home.work .arm.r { transform: rotate(0deg) translateY(6px); }
+        .home.done .arm.r { transform: rotate(-70deg) translate(-10px, -50px); }
+        .home.error .arm.l, .home.error .arm.r { transform: rotate(8deg) translateY(12px); }
+
+        .hand {
+            position: absolute;
+            bottom: -8px;
+            left: 2px;
+            width: 30px;
+            height: 24px;
+            background: var(--skin);
+            border-radius: 12px;
+        }
+
+        .head {
+            position: absolute;
+            left: 68px;
+            top: 48px;
+            width: 124px;
+            height: 142px;
+            z-index: 4;
+        }
+
+        .face {
+            position: absolute;
+            left: 8px;
+            top: 28px;
+            width: 108px;
+            height: 118px;
+            background: var(--skin);
+            border-radius: 54px 54px 50px 50px;
+            box-shadow: inset -8px -10px 0 rgba(232, 184, 154, 0.35);
+        }
+
+        .blush {
+            position: absolute;
+            width: 18px;
+            height: 10px;
+            background: rgba(244, 114, 182, 0.35);
+            border-radius: 10px;
+            top: 72px;
+            filter: blur(0.5px);
+        }
+
+        .blush.l { left: 14px; }
+        .blush.r { right: 14px; }
+
+        .eye {
+            position: absolute;
+            top: 48px;
+            width: 22px;
+            height: 24px;
+            background: #fff;
+            border-radius: 50%;
+            overflow: hidden;
+            box-shadow: 0 2px 0 rgba(0,0,0,0.06);
+        }
+
+        .eye.l { left: 22px; }
+        .eye.r { right: 22px; }
+
+        .pupil {
+            position: absolute;
+            width: 12px;
+            height: 14px;
+            background: #111827;
+            border-radius: 50%;
+            left: 5px;
+            top: 6px;
+            transition: transform 0.08s linear;
+        }
+
+        .pupil::after {
+            content: '';
+            position: absolute;
+            width: 4px;
+            height: 4px;
+            background: #fff;
+            border-radius: 50%;
+            left: 2px;
+            top: 2px;
+        }
+
+        .home.listen .eye { height: 26px; }
+        .home.think .eye.l { transform: scaleY(0.85); }
+        .home.work .eye { height: 20px; top: 50px; }
+        .home.done .eye { height: 22px; }
+        .home.error .eye { height: 18px; top: 52px; }
+
+        .lid {
+            position: absolute;
+            inset: 0;
+            background: var(--skin);
+            transform-origin: top;
+            animation: blink 4.8s infinite;
+        }
+
+        @keyframes blink {
+            0%, 92%, 100% { transform: scaleY(0); }
+            94%, 96% { transform: scaleY(1); }
+        }
+
+        .brow {
+            position: absolute;
+            top: 40px;
+            width: 20px;
+            height: 4px;
+            background: var(--hair);
+            border-radius: 4px;
+        }
+
+        .brow.l { left: 24px; }
+        .brow.r { right: 24px; }
+        .home.think .brow.l { transform: rotate(-12deg) translateY(2px); }
+        .home.work .brow { transform: translateY(2px); }
+        .home.error .brow.l { transform: rotate(16deg); }
+        .home.error .brow.r { transform: rotate(-16deg); }
+
+        .mouth {
+            position: absolute;
+            left: 44px;
+            top: 86px;
+            width: 20px;
+            height: 8px;
+            border-bottom: 3px solid #c2416a;
+            border-radius: 0 0 12px 12px;
+        }
+
+        .home.listen .mouth { width: 14px; left: 47px; height: 10px; border: 2px solid #c2416a; border-radius: 10px; background: #4b1d2f; }
+        .home.think .mouth { width: 10px; height: 10px; left: 54px; border-radius: 50%; border: 2px solid #c2416a; border-bottom: none; }
+        .home.work .mouth { width: 12px; left: 48px; border-radius: 0; border-bottom-width: 2px; }
+        .home.done .mouth { width: 26px; left: 41px; height: 12px; }
+        .home.error .mouth { width: 16px; transform: scaleY(-1); top: 90px; }
+
+        .hair-back {
+            position: absolute;
+            left: -6px;
+            top: 18px;
+            width: 136px;
+            height: 150px;
+            background: var(--hair);
+            border-radius: 70px 70px 30px 30px;
+            z-index: 3;
+        }
+
+        .bang {
+            position: absolute;
+            left: 10px;
+            top: 22px;
+            width: 104px;
+            height: 42px;
+            background: var(--hair);
+            border-radius: 0 0 40px 40px;
+            z-index: 5;
+        }
+
+        .bang::before, .bang::after {
+            content: '';
+            position: absolute;
+            background: var(--hair);
+            width: 36px;
+            height: 48px;
+            top: 8px;
+            border-radius: 20px;
+        }
+
+        .bang::before { left: 8px; transform: rotate(12deg); }
+        .bang::after { right: 8px; transform: rotate(-12deg); }
+
+        .ahoge {
+            position: absolute;
+            left: 78px;
+            top: 8px;
+            width: 10px;
+            height: 28px;
+            background: var(--hair);
+            border-radius: 8px;
+            transform: rotate(18deg);
+            z-index: 5;
+            transform-origin: bottom;
+            animation: ahoge 2.8s ease-in-out infinite;
+        }
+
+        @keyframes ahoge {
+            0%, 100% { transform: rotate(18deg); }
+            50% { transform: rotate(28deg); }
+        }
+
+        .progress {
+            position: absolute;
+            left: 50%;
+            bottom: 18px;
+            transform: translateX(-50%);
+            width: 120px;
+            height: 6px;
+            background: #e5e7eb;
+            border-radius: 99px;
+            overflow: hidden;
+            opacity: 0;
+            z-index: 8;
+        }
+
+        .home.work .progress { opacity: 1; }
+        .progress > span {
+            display: block;
+            height: 100%;
+            width: 0%;
+            background: var(--primary);
+            transition: width 0.4s;
+        }
+
+        .listen-ring {
+            position: absolute;
+            left: 50%;
+            top: 46%;
+            width: 220px;
+            height: 220px;
+            margin: -110px 0 0 -110px;
+            border-radius: 50%;
+            border: 2px solid rgba(37, 99, 235, 0.25);
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .home.listen .listen-ring {
+            opacity: 1;
+            animation: ping 1.4s ease-out infinite;
+        }
+
+        @keyframes ping {
+            from { transform: scale(0.7); opacity: 0.8; }
+            to { transform: scale(1.15); opacity: 0; }
+        }
+
+        .wave {
+            display: none;
+            gap: 3px;
+            align-items: end;
+            height: 16px;
+            margin-top: 8px;
+        }
+
+        .home.listen .wave { display: flex; }
+        .wave i {
+            width: 3px;
+            background: var(--primary);
+            border-radius: 2px;
+            animation: eq 0.8s ease-in-out infinite;
+        }
+        .wave i:nth-child(1) { height: 6px; animation-delay: 0s; }
+        .wave i:nth-child(2) { height: 14px; animation-delay: 0.1s; }
+        .wave i:nth-child(3) { height: 8px; animation-delay: 0.2s; }
+        .wave i:nth-child(4) { height: 16px; animation-delay: 0.05s; }
+        .wave i:nth-child(5) { height: 7px; animation-delay: 0.15s; }
+
+        @keyframes eq {
+            0%, 100% { transform: scaleY(0.4); }
+            50% { transform: scaleY(1); }
+        }
+
+        .chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 0 16px 10px;
+            z-index: 5;
+        }
+
+        .home.compact .chips { display: none; }
+
+        .chip {
+            background: #fff;
+            border: 1px solid var(--border);
+            padding: 7px 12px;
+            border-radius: 16px;
+            font-size: 12px;
+            cursor: pointer;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+
+        .dock {
+            margin: 0 12px 8px;
+            background: #fff;
+            border: 1px solid var(--border);
+            border-radius: 22px;
+            padding: 8px 8px 8px 14px;
+            display: flex;
+            align-items: flex-end;
+            gap: 8px;
+            box-shadow: var(--shadow);
+            z-index: 8;
+        }
+
+        .dock textarea {
+            flex: 1;
+            border: none;
+            resize: none;
+            outline: none;
+            font-size: 14px;
+            min-height: 22px;
+            max-height: 72px;
+            line-height: 1.4;
+            color: var(--text-main);
+            background: transparent;
+            font-family: inherit;
+        }
+
+        .icon-round {
+            width: 40px;
+            height: 40px;
+            border: none;
+            border-radius: 50%;
+            display: grid;
+            place-items: center;
+            cursor: pointer;
+            background: var(--bg-page);
+            color: var(--text-main);
+            flex-shrink: 0;
+        }
+
+        .icon-round.send {
+            background: var(--primary);
+            color: #fff;
+        }
+
+        .icon-round.send:disabled {
+            opacity: 0.4;
+        }
+
+        .icon-round.mic.live {
+            background: var(--primary-light);
+            color: var(--primary);
+            box-shadow: 0 0 0 4px rgba(37,99,235,0.12);
+        }
+
+        .exec-sheet {
+            position: absolute;
+            left: 12px;
+            right: 12px;
+            top: 96px;
+            background: #fff;
+            border-radius: 18px;
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow);
+            padding: 14px 16px;
+            z-index: 7;
+            display: none;
+        }
+
+        .home.compact .exec-sheet { display: block; }
+
+        .exec-sheet h3 {
+            font-size: 14px;
+            color: var(--primary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .exec-sheet p {
+            font-size: 15px;
+            font-weight: 600;
+            margin: 10px 0 12px;
+        }
+
+        .step {
+            font-size: 13px;
+            color: var(--text-secondary);
+            padding: 6px 0 6px 14px;
+            border-left: 2px solid #E5E7EB;
+        }
+
+        .step.on { color: var(--primary); border-color: var(--primary); font-weight: 600; }
+        .step.ok { color: var(--success); border-color: var(--success); }
+
+        .stop {
+            margin-top: 10px;
+            width: 100%;
+            border: none;
+            background: #FEF2F2;
+            color: var(--error);
+            padding: 10px;
+            border-radius: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
+        .tabbar {
+            height: 72px;
+            background: #fff;
+            display: flex;
+            border-top: 1px solid var(--border);
+        }
+
+        .tab {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            font-size: 11px;
+            color: #6B7280;
+        }
+
+        .tab.active { color: var(--primary); font-weight: 600; }
+
+        .toast {
+            position: absolute;
+            left: 50%;
+            bottom: 160px;
+            transform: translateX(-50%) translateY(12px);
+            background: #111827;
+            color: #fff;
+            font-size: 13px;
+            padding: 8px 14px;
+            border-radius: 99px;
+            opacity: 0;
+            pointer-events: none;
+            transition: 0.25s;
+            z-index: 30;
+        }
+
+        .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+        .sheet {
+            position: absolute;
+            left: 0; right: 0; bottom: 0;
+            background: #fff;
+            border-radius: 20px 20px 0 0;
+            padding: 16px 18px 28px;
+            transform: translateY(110%);
+            transition: 0.3s;
+            z-index: 40;
+            box-shadow: 0 -10px 30px rgba(0,0,0,0.12);
+        }
+
+        .sheet.show { transform: translateY(0); }
+
+        .sheet h4 { font-size: 16px; margin-bottom: 12px; }
+
+        .pack {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            padding: 10px;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            margin-bottom: 8px;
+            cursor: pointer;
+        }
+
+        .pack.on { border-color: var(--primary); background: var(--primary-light); }
+
+        .pack .mini {
+            width: 40px; height: 40px; border-radius: 50%;
+            background: var(--primary);
+        }
+
+        .pack .mini.vrm { background: #8b5cf6; }
+        .pack .mini.real { background: #10B981; }
+        .pack .mini.import { background: #6B7280; }
+
+        .pack b { display: block; font-size: 13px; }
+        .pack span { font-size: 11px; color: var(--text-secondary); }
+    </style>
+</head>
+<body>
+    <aside class="panel">
+        <h1>首页换成虚拟角色</h1>
+        <p class="lead">这是交互原型，不是 3D VRM 渲染。默认用 2.5D 半身看板娘，状态机可替换成 VRM BlendShape。请在右侧手机里点角色、麦克风或快捷指令。</p>
+
+        <h2>演示状态</h2>
+        <div class="state-grid" id="state-grid">
+            <button class="state-btn active" data-state="idle">待机 idle</button>
+            <button class="state-btn" data-state="listen">倾听 listen</button>
+            <button class="state-btn" data-state="think">思考 think</button>
+            <button class="state-btn" data-state="work">执行 work</button>
+            <button class="state-btn" data-state="done">完成 done</button>
+            <button class="state-btn" data-state="error">失败 error</button>
+        </div>
+
+        <h2>核心交互</h2>
+        <ul>
+            <li>点角色 / 麦克风 → 听写</li>
+            <li>听完气泡复述，确认后才执行</li>
+            <li>执行时角色缩小让路，步骤走卡片</li>
+            <li>长按角色 → 换形象 / 导入 VRM</li>
+            <li>眼睛跟随指针（LookAt）</li>
+        </ul>
+
+        <h2>免费资源（结论）</h2>
+        <ul>
+            <li><b>Open Source Avatars</b>：大量 <code>CC0</code>，可内置，JSON 直链</li>
+            <li><b>VTubeMe</b> 四套写实：<code>CC BY 4.0</code>，要署名</li>
+            <li><b>模之屋</b>：不要打进 APK，只允许用户自己导入</li>
+        </ul>
+        <p class="note">完整调研见 <code>doc/虚拟角色首页调研.md</code>。本项目目标机是 Android 7.0 低端机，默认首页不要上完整 3D VRM。</p>
+    </aside>
+
+    <div class="phone-container">
+        <div class="status-bar">
+            <span>9:41</span>
+            <span>●●● LTE</span>
+        </div>
+
+        <div class="home idle" id="home">
+            <div class="top-meta">
+                <span class="model-pill">GLM-4V · 本地</span>
+                <span class="hint">长按角色换形象</span>
+            </div>
+
+            <div class="stage" id="stage">
+                <div class="bubble" id="bubble">
+                    说一句，或点我开始听。
+                    <div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+                    <div class="bubble-actions" id="confirm-actions" style="display:none">
+                        <button class="btn-no" type="button">不是</button>
+                        <button class="btn-yes" type="button">去做</button>
+                    </div>
+                </div>
+
+                <div class="avatar-wrap" id="avatar-wrap">
+                    <div class="listen-ring"></div>
+                    <div class="avatar" id="avatar">
+                        <div class="hair-back"></div>
+                        <div class="arm l"><div class="hand"></div></div>
+                        <div class="arm r"><div class="hand"></div></div>
+                        <div class="torso"></div>
+                        <div class="collar"></div>
+                        <div class="head">
+                            <div class="ahoge"></div>
+                            <div class="face">
+                                <div class="brow l"></div>
+                                <div class="brow r"></div>
+                                <div class="eye l"><div class="pupil"></div><div class="lid"></div></div>
+                                <div class="eye r"><div class="pupil"></div><div class="lid"></div></div>
+                                <div class="blush l"></div>
+                                <div class="blush r"></div>
+                                <div class="mouth"></div>
+                            </div>
+                            <div class="bang"></div>
+                        </div>
+                    </div>
+                    <div class="progress"><span id="bar"></span></div>
+                </div>
+            </div>
+
+            <div class="exec-sheet" id="exec-sheet">
+                <h3>正在执行任务…</h3>
+                <p id="exec-title">—</p>
+                <div id="exec-steps"></div>
+                <button class="stop" type="button" id="stop-btn">停止任务</button>
+            </div>
+
+            <div class="chips" id="chips">
+                <button class="chip" type="button" data-text="给我在美团点一份销量最高的汉堡">点外卖</button>
+                <button class="chip" type="button" data-text="给妈妈发微信说晚上回家吃饭">给妈妈发微信</button>
+                <button class="chip" type="button" data-text="给我在天猫超市买一包薯片">买薯片</button>
+            </div>
+
+            <div class="dock">
+                <textarea id="input" rows="1" placeholder="想让我干什么…"></textarea>
+                <button class="icon-round mic" id="mic" type="button" title="语音">
+                    <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="18" x2="12" y2="21"/></svg>
+                </button>
+                <button class="icon-round send" id="send" type="button" disabled title="发送">
+                    <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+                </button>
+            </div>
+        </div>
+
+        <div class="tabbar">
+            <div class="tab active">首页</div>
+            <div class="tab">模型</div>
+            <div class="tab">历史</div>
+            <div class="tab">设置</div>
+        </div>
+
+        <div class="toast" id="toast"></div>
+
+        <div class="sheet" id="sheet">
+            <h4>换形象</h4>
+            <div class="pack on" data-pack="2d">
+                <div class="mini"></div>
+                <div><b>小格 · 2.5D 默认</b><span>随 APK 分发，Android 7 能跑</span></div>
+            </div>
+            <div class="pack" data-pack="cc0">
+                <div class="mini vrm"></div>
+                <div><b>OSA CC0 VRM（可选）</b><span>中高端机按需下载，无需署名</span></div>
+            </div>
+            <div class="pack" data-pack="vtube">
+                <div class="mini real"></div>
+                <div><b>VTubeMe 写实 · CC BY</b><span>内置需署名 vtubeme.com</span></div>
+            </div>
+            <div class="pack" data-pack="import">
+                <div class="mini import"></div>
+                <div><b>从文件导入 VRM</b><span>模之屋 / VRoid / 约稿，用户自负授权</span></div>
+            </div>
+            <button class="stop" type="button" id="close-sheet" style="background:#F3F4F6;color:#111827">关闭</button>
+        </div>
+    </div>
+
+<script>
+    const home = document.getElementById('home');
+    const bubble = document.getElementById('bubble');
+    const confirmActions = document.getElementById('confirm-actions');
+    const input = document.getElementById('input');
+    const send = document.getElementById('send');
+    const mic = document.getElementById('mic');
+    const bar = document.getElementById('bar');
+    const toastEl = document.getElementById('toast');
+    const sheet = document.getElementById('sheet');
+
+    const LINES = {
+        idle: '说一句，或点我开始听。',
+        listen: '我在听…',
+        think: '让我想想怎么做…',
+        work: '我去动手，你先看着。',
+        done: '搞定了，还要我做点别的吗？',
+        error: '先去打开无障碍，我才能动手。'
+    };
+
+    let state = 'idle';
+    let pending = '';
+    let timer = null;
+    let listenTimer = null;
+    let pressTimer = null;
+
+    function toast(msg) {
+        toastEl.textContent = msg;
+        toastEl.classList.add('show');
+        setTimeout(() => toastEl.classList.remove('show'), 1800);
+    }
+
+    function setBubbleText(text, isConfirm) {
+        const wave = bubble.querySelector('.wave');
+        bubble.childNodes[0].textContent = text;
+        confirmActions.style.display = isConfirm ? 'flex' : 'none';
+        bubble.classList.toggle('confirm', !!isConfirm);
+        if (wave) wave.style.display = state === 'listen' ? 'flex' : 'none';
+    }
+
+    function setState(next, extraText) {
+        state = next;
+        home.className = 'home ' + next + (next === 'work' ? ' compact' : '');
+        document.querySelectorAll('.state-btn').forEach(b => {
+            b.classList.toggle('active', b.dataset.state === next);
+        });
+        mic.classList.toggle('live', next === 'listen');
+        setBubbleText(extraText || LINES[next], false);
+        if (next !== 'work') {
+            bar.style.width = '0%';
+            document.getElementById('exec-steps').innerHTML = '';
+        }
+    }
+
+    function syncSend() {
+        send.disabled = !input.value.trim() || state === 'work' || state === 'listen';
+    }
+
+    function startListen() {
+        if (state === 'work') return;
+        clearTimeout(listenTimer);
+        setState('listen');
+        listenTimer = setTimeout(() => {
+            pending = '给妈妈发微信说晚上回家吃饭';
+            input.value = pending;
+            syncSend();
+            setState('idle', '你是说「给妈妈发微信说晚上回家吃饭」吗？');
+            confirmActions.style.display = 'flex';
+            bubble.classList.add('confirm');
+        }, 1600);
+    }
+
+    function runTask(text) {
+        const instruction = (text || input.value).trim();
+        if (!instruction) {
+            toast('请先说一句或输入指令');
+            return;
+        }
+        pending = '';
+        confirmActions.style.display = 'none';
+        setState('think');
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+            setState('work');
+            document.getElementById('exec-title').textContent = instruction;
+            const steps = ['打开应用', '找到入口', '完成操作'];
+            const box = document.getElementById('exec-steps');
+            box.innerHTML = steps.map((s, i) => `<div class="step" id="st${i}">${s}</div>`).join('');
+            let i = 0;
+            const tick = () => {
+                if (state !== 'work') return;
+                if (i > 0) document.getElementById('st' + (i - 1)).className = 'step ok';
+                if (i >= steps.length) {
+                    bar.style.width = '100%';
+                    setState('done');
+                    input.value = '';
+                    syncSend();
+                    return;
+                }
+                document.getElementById('st' + i).className = 'step on';
+                bar.style.width = ((i + 1) / steps.length * 100) + '%';
+                bubble.childNodes[0].textContent = '正在' + steps[i] + '…';
+                i += 1;
+                timer = setTimeout(tick, 900);
+            };
+            tick();
+        }, 900);
+    }
+
+    document.getElementById('state-grid').addEventListener('click', (e) => {
+        const btn = e.target.closest('.state-btn');
+        if (!btn) return;
+        clearTimeout(timer);
+        clearTimeout(listenTimer);
+        if (btn.dataset.state === 'work') {
+            input.value = input.value || '给妈妈发微信说晚上回家吃饭';
+            runTask(input.value);
+            return;
+        }
+        setState(btn.dataset.state);
+        syncSend();
+    });
+
+    document.getElementById('stage').addEventListener('click', (e) => {
+        if (e.target.closest('.bubble-actions')) return;
+        if (state === 'work') return;
+        startListen();
+    });
+
+    document.getElementById('avatar-wrap').addEventListener('pointerdown', () => {
+        pressTimer = setTimeout(() => sheet.classList.add('show'), 520);
+    });
+    ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => {
+        document.getElementById('avatar-wrap').addEventListener(ev, () => clearTimeout(pressTimer));
+    });
+
+    mic.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (state === 'listen') {
+            clearTimeout(listenTimer);
+            setState('idle');
+            return;
+        }
+        startListen();
+    });
+
+    send.addEventListener('click', () => runTask());
+
+    confirmActions.querySelector('.btn-yes').addEventListener('click', (e) => {
+        e.stopPropagation();
+        runTask(pending || input.value);
+    });
+    confirmActions.querySelector('.btn-no').addEventListener('click', (e) => {
+        e.stopPropagation();
+        pending = '';
+        input.value = '';
+        setState('idle', '好，那你再说一次。');
+        syncSend();
+    });
+
+    document.getElementById('chips').addEventListener('click', (e) => {
+        const chip = e.target.closest('.chip');
+        if (!chip) return;
+        input.value = chip.dataset.text;
+        setState('idle', '要我去做「' + chip.textContent + '」吗？点发送就开始。');
+        syncSend();
+    });
+
+    input.addEventListener('input', syncSend);
+
+    document.getElementById('stop-btn').addEventListener('click', () => {
+        clearTimeout(timer);
+        setState('error', '好，已经停手了。');
+        syncSend();
+    });
+
+    document.getElementById('close-sheet').addEventListener('click', () => sheet.classList.remove('show'));
+    sheet.querySelectorAll('.pack').forEach(p => {
+        p.addEventListener('click', () => {
+            sheet.querySelectorAll('.pack').forEach(x => x.classList.remove('on'));
+            p.classList.add('on');
+            const msg = {
+                '2d': '已切回 2.5D 默认形象。',
+                'cc0': '将按需下载 OSA 的 CC0 VRM（演示未真正加载）。',
+                'vtube': '写实包可内置，关于页需署名 VTubeMe。',
+                'import': '请选择本机 .vrm（演示不读文件）。'
+            }[p.dataset.pack];
+            toast(msg);
+            sheet.classList.remove('show');
+        });
+    });
+
+    document.getElementById('stage').addEventListener('pointermove', (e) => {
+        const rect = document.getElementById('avatar').getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height * 0.38;
+        const dx = Math.max(-1, Math.min(1, (e.clientX - cx) / 80));
+        const dy = Math.max(-1, Math.min(1, (e.clientY - cy) / 80));
+        document.querySelectorAll('.pupil').forEach(p => {
+            p.style.transform = `translate(${dx * 4}px, ${dy * 3}px)`;
+        });
+    });
+</script>
+</body>
+</html>

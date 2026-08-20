@@ -333,7 +333,7 @@ export const HomeScreen: React.FC = () => {
 
     if (!flags?.phoneOperate && !flags?.openclaw) {
       Alert.alert('要操作手机，请先打开「替我操作手机」或 OpenClaw');
-      navigation.navigate('Capabilities');
+      navigation.navigate('MainTabs', {screen: 'Capabilities'});
       return;
     }
 

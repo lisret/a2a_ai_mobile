@@ -2,6 +2,8 @@
  * Jest 测试环境设置
  */
 
+/* eslint-env jest */
+
 // Mock AsyncStorage
 jest.mock('@react-native-async-storage/async-storage', () => ({
   getItem: jest.fn(),
@@ -14,20 +16,9 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
   multiRemove: jest.fn(),
 }));
 
-// Mock React Native 模块
-jest.mock('react-native', () => {
-  const RN = jest.requireActual('react-native');
-  RN.DeviceEventEmitter = {
-    addListener: jest.fn(() => ({ remove: jest.fn() })),
-    removeListener: jest.fn(),
-    emit: jest.fn(),
-  };
-  RN.NativeModules = {
-    ...RN.NativeModules,
-    AccessibilityModule: {},
-    ADBModule: {},
-    AccessibilityActionModule: {},
-  };
-  return RN;
-});
+const {NativeModules} = require('react-native');
+NativeModules.AccessibilityModule = {};
+NativeModules.AccessibilityActionModule = {};
+NativeModules.ADBModule = {};
 
+jest.mock('react-native-vector-icons/FontAwesome', () => 'Icon');

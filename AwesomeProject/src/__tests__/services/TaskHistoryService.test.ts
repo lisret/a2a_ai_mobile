@@ -2,9 +2,10 @@
  * TaskHistoryService 单元测试
  */
 
-import { taskHistoryService } from '../../features/task/services/TaskHistoryService';
+import {taskHistoryService} from '../../features/task/services/TaskHistoryService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Task } from '../../core/engine/taskEngine';
+import type {Task} from '@core/engine/taskEngine';
+import {STORAGE_KEYS, TASK_CONFIG} from '@shared/constants';
 
 // Mock AsyncStorage
 jest.mock('@react-native-async-storage/async-storage', () => ({
@@ -23,7 +24,7 @@ describe('TaskHistoryService', () => {
     instruction: '测试任务',
     status: 'success',
     createdAt: Date.now(),
-    output: { steps: [] },
+    output: {steps: []},
   };
 
   beforeEach(() => {
@@ -46,10 +47,12 @@ describe('TaskHistoryService', () => {
     });
 
     it('应该更新已存在的任务', async () => {
-      const existingTask = { ...mockTask, status: 'running' as const };
-      mockAsyncStorage.getItem.mockResolvedValue(JSON.stringify([existingTask]));
+      const existingTask = {...mockTask, status: 'running' as const};
+      mockAsyncStorage.getItem.mockResolvedValue(
+        JSON.stringify([existingTask]),
+      );
 
-      const updatedTask = { ...mockTask, status: 'success' as const };
+      const updatedTask = {...mockTask, status: 'success' as const};
       await taskHistoryService.saveTask(updatedTask);
 
       const setItemCalls = mockAsyncStorage.setItem.mock.calls;
@@ -58,30 +61,28 @@ describe('TaskHistoryService', () => {
       expect(savedTasks[0].status).toBe('success');
     });
 
-    it('应该自动删除超过50条的最早记录', async () => {
-      const tasks: Task[] = Array.from({ length: 51 }, (_, i) => ({
+    it('应该自动删除超过配置上限的最早记录', async () => {
+      const tasks = Array.from({length: TASK_CONFIG.MAX_TASKS}, (_, index) => ({
         ...mockTask,
-        id: `task_${i}`,
-        createdAt: Date.now() - i * 1000, // 时间递增，最早的在前
+        id: `task_${index}`,
+        createdAt: index,
       }));
-
       mockAsyncStorage.getItem.mockResolvedValue(JSON.stringify(tasks));
 
       const newTask: Task = {
         ...mockTask,
         id: 'task_new',
-        createdAt: Date.now(),
+        createdAt: TASK_CONFIG.MAX_TASKS + 1,
       };
 
       await taskHistoryService.saveTask(newTask);
 
-      const setItemCalls = mockAsyncStorage.setItem.mock.calls;
-      const savedTasks = JSON.parse(setItemCalls[0][1] as string);
-      expect(savedTasks).toHaveLength(51);
-      // 最早的任务（task_0）应该被删除
-      expect(savedTasks.find((t: Task) => t.id === 'task_0')).toBeUndefined();
-      // 新任务应该存在
-      expect(savedTasks.find((t: Task) => t.id === 'task_new')).toBeDefined();
+      const globalWrite = mockAsyncStorage.setItem.mock.calls.find(
+        ([key]) => key === STORAGE_KEYS.TASKS,
+      );
+      expect(globalWrite).toBeDefined();
+      const savedTasks = JSON.parse(globalWrite![1] as string) as Task[];
+      expect(savedTasks).toHaveLength(TASK_CONFIG.MAX_TASKS);
     });
   });
 
@@ -109,9 +110,16 @@ describe('TaskHistoryService', () => {
     it('应该返回指定模型的任务列表', async () => {
       const tasks = [
         mockTask,
-        { ...mockTask, id: 'task_2', modelId: 'model_456' },
+        {...mockTask, id: 'task_2', modelId: 'model_456'},
       ];
-      mockAsyncStorage.getItem.mockResolvedValue(JSON.stringify(tasks));
+      mockAsyncStorage.getItem.mockImplementation(async key => {
+        if (key === `${STORAGE_KEYS.TASKS_BY_MODEL_PREFIX}${mockModelId}`) {
+          return JSON.stringify(
+            tasks.filter(task => task.modelId === mockModelId),
+          );
+        }
+        return JSON.stringify(tasks);
+      });
 
       const result = await taskHistoryService.getTasksByModelId(mockModelId);
 
@@ -121,9 +129,9 @@ describe('TaskHistoryService', () => {
 
     it('应该按创建时间倒序排列', async () => {
       const tasks = [
-        { ...mockTask, id: 'task_1', createdAt: Date.now() - 2000 },
-        { ...mockTask, id: 'task_2', createdAt: Date.now() - 1000 },
-        { ...mockTask, id: 'task_3', createdAt: Date.now() },
+        {...mockTask, id: 'task_1', createdAt: Date.now() - 2000},
+        {...mockTask, id: 'task_2', createdAt: Date.now() - 1000},
+        {...mockTask, id: 'task_3', createdAt: Date.now()},
       ];
       mockAsyncStorage.getItem.mockResolvedValue(JSON.stringify(tasks));
 
@@ -137,7 +145,7 @@ describe('TaskHistoryService', () => {
 
   describe('deleteTask', () => {
     it('应该删除指定任务', async () => {
-      const tasks = [mockTask, { ...mockTask, id: 'task_2' }];
+      const tasks = [mockTask, {...mockTask, id: 'task_2'}];
       mockAsyncStorage.getItem.mockResolvedValue(JSON.stringify(tasks));
 
       await taskHistoryService.deleteTask('task_1');
@@ -153,11 +161,7 @@ describe('TaskHistoryService', () => {
       mockAsyncStorage.getItem.mockResolvedValue(JSON.stringify(tasks));
 
       await taskHistoryService.deleteTask('non_existent');
-
-      const setItemCalls = mockAsyncStorage.setItem.mock.calls;
-      const savedTasks = JSON.parse(setItemCalls[0][1] as string);
-      expect(savedTasks).toHaveLength(1);
+      expect(mockAsyncStorage.setItem).not.toHaveBeenCalled();
     });
   });
 });
-

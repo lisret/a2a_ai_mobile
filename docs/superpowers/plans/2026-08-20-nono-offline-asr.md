@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 安装完立刻能对着角色说话；APK 内中文流式 ASR 是唯一保底；更大模型仅 Wi-Fi 静默升级，失败用户无感，绝不回云、不用演示话轮。
+**Goal:** 对着角色说一句短文本就能出字。优先系统 `SpeechRecognizer`，失败再用端侧大 ASR，最后用 APK 内小 ASR；大模型仅 Wi-Fi 静默升级；不用演示话轮，不绑厂商私有包名。
 
-**Architecture:** Sherpa-ONNX JNI 读 `files/nono/asr/builtin/`（从 APK assets 解压并校验）。`SilentAsrUpgrade` 仅在 Wi-Fi 且磁盘足够时把钉死的 upgrade 包写到 `files/nono/asr/upgrade/`。开口时选一个引擎实例，utterance 中途不热切换。HomeScreen 删除 `DEMO_TURNS`。
+**Architecture:** 原生 `SpeechToTextModule` 做探测、状态机和熔断。`SpeechRouter` 按 **系统 → upgrade → builtin** 选档；系统在 `Starting` 失败可同一次点按降级，一旦进入 `Listening` 则本句结束。Sherpa-ONNX 只负责两档端侧模型。`SilentAsrUpgrade` 仍只在 Wi-Fi 拉大模型。
 
-**Tech Stack:** React Native 0.73.6、Kotlin JNI、Sherpa-ONNX Android AAR、`react-native-permissions`、AsyncStorage、Jest。下载复用外观计划里的 `LocalPackModule`。
+**Tech Stack:** React Native 0.73.6、Kotlin `SpeechRecognizer`、Sherpa-ONNX AAR、`react-native-permissions`、AsyncStorage、Jest。不用通用 RN 语音插件当唯一实现。下载复用 `LocalPackModule`。
 
 **Spec:** `docs/superpowers/specs/2026-08-19-nono-avatar-asr-local-packs-design.md` 听写部分。
 
@@ -14,11 +14,12 @@
 
 ## Global Constraints
 
-- 点角色即可听写。不依赖下载完成、不依赖云、不用 `DEMO_TURNS` 冒充成功。
+- 点角色即可听写。不依赖下载完成、不用 `DEMO_TURNS` 冒充成功。
+- 开口档位：**系统 SpeechRecognizer → 端侧大模型 → 端侧小模型**。
+- 不硬编码小爱/小布/Jovi/Bixby 包名。本版不接华为 SDK、不接自有云端 ASR、首页不拉 `ACTION_RECOGNIZE_SPEECH`。
 - 听写增强模型仅 Wi-Fi 静默下载；移动网络、未知网络、飞行模式不下。
-- 下载 / 校验 / load 失败：继续 builtin，无进度、无弹窗、无通知。
-- 本地听写失败不改走云端听写或系统 `SpeechRecognizer`。
-- 本版不实现云端听写开关。
+- 下载 / 校验 / load 失败：跳过大模型档，无进度、无弹窗、无通知。
+- 系统档连续失败 2 次（不含 NO_MATCH / SPEECH_TIMEOUT）后本进程熔断，改从端侧开始。
 - MiniCPM 视觉包不套用这条静默升级。
 - 听写包不得写入 `@autoglm:models` / `@nono:models:*`。
 - 日志只记 final 文本长度，不把全文打到非调试通道。
@@ -37,8 +38,10 @@
 | `AwesomeProject/src/features/task/asr/AsrArtifactPins.ts` | builtin / upgrade 的 url、bytes、sha256、文件名 |
 | `AwesomeProject/src/features/task/asr/AsrModelStore.ts` | 解压 builtin、upgradeReady、resolve |
 | `AwesomeProject/src/features/task/asr/SilentAsrUpgrade.ts` | Wi-Fi 静默下载 |
-| `AwesomeProject/android/.../SherpaAsrModule.kt` | 录音 + 流式识别 |
-| `AwesomeProject/src/features/task/asr/SherpaAsr.ts` | JS 封装 |
+| `AwesomeProject/android/.../SpeechToTextModule.kt` | 系统识别探测、状态机、熔断 |
+| `AwesomeProject/src/features/task/asr/SpeechRouter.ts` | 系统 → upgrade → builtin |
+| `AwesomeProject/android/.../SherpaAsrModule.kt` | 端侧大/小模型 |
+| `AwesomeProject/src/features/task/asr/SherpaAsr.ts` | Sherpa JS 封装 |
 | `AwesomeProject/src/features/task/screens/HomeScreen.tsx` | 权限、partial/final、删除 DEMO |
 
 钉死产物（官方 GitHub Release，不是 CDN 脚本）：
@@ -283,7 +286,94 @@ EOF
 
 ---
 
-### Task 4: Sherpa JNI 桥
+### Task 4: 系统 SpeechRecognizer
+
+**Files:**
+- Create: `AwesomeProject/android/app/src/main/java/com/awesomeproject/bridge/SpeechToTextModule.kt`
+- Modify: `AwesomeProject/android/app/src/main/java/com/awesomeproject/bridge/AccessibilityPackage.kt`
+- Modify: `AwesomeProject/android/app/src/main/AndroidManifest.xml` — `RECORD_AUDIO` 与：
+
+```xml
+<queries>
+    <intent>
+        <action android:name="android.speech.RecognitionService" />
+    </intent>
+</queries>
+```
+
+- Create: `AwesomeProject/src/features/task/asr/SpeechToText.ts`
+- Modify: `AwesomeProject/jest.setup.js` — `SpeechToTextModule: {}`
+- Test: `AwesomeProject/src/__tests__/features/task/asr/SpeechToText.test.ts`
+
+**Interfaces:**
+- Consumes: nothing
+- Produces:
+
+```ts
+export type SpeechEngine = 'system' | 'upgrade' | 'builtin';
+export type SpeechCapability = {
+  available: boolean;
+  onDeviceAvailable: boolean;
+  servicePackage?: string;
+};
+export type SpeechEvent =
+  | {type: 'ready'}
+  | {type: 'partial'; text: string}
+  | {type: 'final'; text: string; engine: SpeechEngine}
+  | {type: 'error'; code: 'busy' | 'no_match' | 'timeout' | 'network' | 'client' | 'unavailable'};
+
+export function getCapability(): Promise<SpeechCapability>;
+export function startSystemListen(): Promise<void>;
+export function stopSystemListen(): Promise<void>;
+export function destroySystemListen(): Promise<void>;
+export function isSystemFused(): boolean;
+```
+
+Native 必须：主线程 `createSpeechRecognizer` / `startListening`；API 31+ 先试 on-device；`queryIntentServices` 后才允许 `createSpeechRecognizer(context, component)`；3s 无 `onReadyForSpeech` → `unavailable`；`ERROR_NO_MATCH` / `ERROR_SPEECH_TIMEOUT` 不计入熔断；其它失败累计 2 次 `isSystemFused()==true`。禁止写死厂商包名。禁止 `ACTION_RECOGNIZE_SPEECH`。
+
+- [ ] **Step 1: Write the failing test**
+
+1. `startSystemListen` 在 fused 时立即 `error.unavailable` 且不调 native start。
+2. 两次 `error.client` 之后 `isSystemFused()` 为 true。
+3. `error.no_match` 不增加熔断计数。
+4. 仓库 `SpeechToTextModule.kt` 不含 `xiaoai` / `speechassist` / `jovi` / `bixby` 字符串（实现后用 `fs.readFileSync` 断言）。
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd AwesomeProject && npm test -- --testPathPattern=SpeechToText.test.ts`
+
+Expected: FAIL module not found.
+
+- [ ] **Step 3: Implement Kotlin + JS**
+
+`Intent` extras：`LANGUAGE_MODEL_FREE_FORM`、`zh-CN`、`EXTRA_PARTIAL_RESULTS=true`、`EXTRA_MAX_RESULTS=3`、`EXTRA_PREFER_OFFLINE=true`（偏好，不当事成）。用完 `destroy()`。
+
+- [ ] **Step 4: Run the tests and make sure they pass**
+
+Run: `cd AwesomeProject && npm test -- --testPathPattern=SpeechToText.test.ts`
+
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add AwesomeProject/android/app/src/main/java/com/awesomeproject/bridge/SpeechToTextModule.kt \
+  AwesomeProject/android/app/src/main/java/com/awesomeproject/bridge/AccessibilityPackage.kt \
+  AwesomeProject/android/app/src/main/AndroidManifest.xml \
+  AwesomeProject/src/features/task/asr/SpeechToText.ts \
+  AwesomeProject/jest.setup.js \
+  AwesomeProject/src/__tests__/features/task/asr/SpeechToText.test.ts
+git commit -m "$(cat <<'EOF'
+feat: probe Android SpeechRecognizer with a fuse
+
+Prefer the system engine without binding vendor private components.
+EOF
+)"
+```
+
+---
+
+### Task 5: Sherpa JNI 桥
 
 **Files:**
 - Create: `AwesomeProject/android/app/src/main/java/com/awesomeproject/bridge/SherpaAsrModule.kt`
@@ -314,7 +404,7 @@ export function stopListening(): Promise<void>;
 
 Native：`AudioRecord` 16kHz mono；`OnlineRecognizer` + `OnlineStream`；endpoint 后 `final`。`packId` 在 `startListening` 时冻结，直到 `stopListening`。
 
-load 失败：emit `engine_failed`，JS 层若 pack 是 upgrade 则 `markUpgradeReady(false)`、`deletePack('asr','upgrade')`，**同一句不要自动重开**（避免半句丢给第二个引擎）。下一次点角色走 builtin。
+load 失败：emit `engine_failed`。upgrade 失败时 store 回滚 ready 标志。同一句是否改试下一档由 Task 6 的 Router 决定，Sherpa 模块自己不启动系统识别。
 
 - [ ] **Step 1: Write the failing test**
 
@@ -356,15 +446,65 @@ EOF
 
 ---
 
-### Task 5: 首页真实听写
+### Task 6: SpeechRouter
+
+**Files:**
+- Create: `AwesomeProject/src/features/task/asr/SpeechRouter.ts`
+- Test: `AwesomeProject/src/__tests__/features/task/asr/SpeechRouter.test.ts`
+
+**Interfaces:**
+- Consumes: `getCapability`, `startSystemListen`, `isSystemFused`, `resolveAsrPackId`, `getAsrDirUri`, Sherpa `startListening`
+- Produces: `startUtterance(onEvent)` / `stopUtterance()`，事件带 `engine: 'system' | 'upgrade' | 'builtin'`
+
+规则：
+
+1. 未熔断则先系统。`error.unavailable|client|network` 且尚未 `ready` → 同一次调用改试 upgrade（若 ready）否则 builtin。
+2. 已 `ready` 后的失败：结束本句，不热切。
+3. 系统熔断或跳过：upgrade 可用则 Sherpa upgrade，否则 builtin。
+4. upgrade `engine_failed` 且尚未 `ready`：改 builtin。已 listening 则结束。
+
+- [ ] **Step 1: Write the failing test**
+
+覆盖：系统 ready+final；系统 Starting 失败落到 builtin；fused 时不调系统；upgrade 失败落到 builtin；listening 后失败不启动第二引擎。
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd AwesomeProject && npm test -- --testPathPattern=SpeechRouter.test.ts`
+
+Expected: FAIL
+
+- [ ] **Step 3: Implement router**
+
+- [ ] **Step 4: Run the tests and make sure they pass**
+
+Run: `cd AwesomeProject && npm test -- --testPathPattern=SpeechRouter.test.ts`
+
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add AwesomeProject/src/features/task/asr/SpeechRouter.ts \
+  AwesomeProject/src/__tests__/features/task/asr/SpeechRouter.test.ts
+git commit -m "$(cat <<'EOF'
+feat: route speech through system then large then small ASR
+
+Fall through only before the microphone is captured by an engine.
+EOF
+)"
+```
+
+---
+
+### Task 7: 首页真实听写
 
 **Files:**
 - Modify: `AwesomeProject/src/features/task/screens/HomeScreen.tsx`
-- Modify: `AwesomeProject/src/shared/constants/permission.config.ts` — 增加 `RECORD_AUDIO` 分组 `CORE`，purpose「对着角色说话时把语音转成文字，识别在手机内完成」
+- Modify: `AwesomeProject/src/shared/constants/permission.config.ts` — 增加 `RECORD_AUDIO` 分组 `CORE`，purpose「对着角色说话时把语音转成文字」
 - Test: `AwesomeProject/src/__tests__/features/task/HomeScreenListen.test.tsx`
 
 **Interfaces:**
-- Consumes: `ensureBuiltinAsr`, `maybeSilentUpgradeAsr`, `resolveAsrPackId`, `getAsrDirUri`, `startListening`, `stopListening`, `check`/`request` from `react-native-permissions`
+- Consumes: `ensureBuiltinAsr`, `maybeSilentUpgradeAsr`, `startUtterance`, `stopUtterance`, `check`/`request` from `react-native-permissions`
 - Produces: `HeardTurn` 仅来自 `final.text`
 
 ```ts
@@ -379,9 +519,10 @@ type HeardTurn = {
 - [ ] **Step 1: Write the failing test**
 
 1. `HomeScreen.tsx` 源码（`fs.readFileSync`）不含 `DEMO_TURNS`。
-2. mock 权限拒绝：`startVoiceListen` 后不出现 `heard.text`，且 `startListening` 未调用。
+2. mock 权限拒绝：`startVoiceListen` 后不出现 `heard.text`，且 `startUtterance` 未调用。
 3. mock 权限通过 + final `你好`：出现 `heard.text === '你好'`。
 4. `maybeSilentUpgradeAsr` 在 focus 时调用，但不因此显示下载文案（屏幕 JSON 不含「下载模型」「正在下载识别」）。
+5. `startVoiceListen` 调用 `startUtterance` 而不是直接 `SherpaAsr.startListening`。
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -396,11 +537,10 @@ Expected: FAIL（仍有 DEMO_TURNS）
 1. `executing || listening` return。
 2. 无陪伴模型：保持现有 Alert。
 3. `request(PERMISSIONS.ANDROID.RECORD_AUDIO)`；拒绝则 `Alert`「需要麦克风才能说话」，return。
-4. `await ensureBuiltinAsr()`。
-5. `packId = await resolveAsrPackId()`；`modelDir = await getAsrDirUri(packId)`。
-6. `setListening(true)`；`startListening({packId, modelDir, onEvent})`。
-7. `partial` 更新 dock 文案；`final` 若 `text.trim()` 为空则 `setListening(false)` 不设 heard；否则 `setHeard({text, intent:'operate'})`。
-8. `engine_failed`：`setListening(false)`；若当时 packId 是 upgrade 则 store 已回滚，Alert「这次没听清，请再试」——这是失败提示不是下载提示。builtin `engine_failed` 同样 Alert，禁止填 DEMO。
+4. `await ensureBuiltinAsr()`（保证保底模型在盘上，即使本句走系统档）。
+5. `setListening(true)`；`startUtterance(onEvent)`。
+6. `partial` 更新 dock；`final` 空文本不设 heard，否则 `setHeard({text, intent:'operate'})`。
+7. 三档都失败：`Alert`「这次没听清，请再试」，禁止 DEMO。
 
 `useFocusEffect`：`ensureBuiltinAsr(); maybeSilentUpgradeAsr();` 不要 await 挡 UI。
 
@@ -419,16 +559,16 @@ git add AwesomeProject/src/features/task/screens/HomeScreen.tsx \
   AwesomeProject/src/shared/constants/permission.config.ts \
   AwesomeProject/src/__tests__/features/task/HomeScreenListen.test.tsx
 git commit -m "$(cat <<'EOF'
-feat: replace demo listen turns with on-device ASR
+feat: replace demo listen turns with the speech router
 
-Require the mic and bundled Sherpa model so speaking works offline.
+Ask for the mic, then system ASR before on-device large and small models.
 EOF
 )"
 ```
 
 ---
 
-### Task 6: 小米 9 验收
+### Task 8: 小米 9 验收
 
 - [ ] **Step 1: 准备模型资产**
 
@@ -438,19 +578,23 @@ Expected: `android/app/src/main/assets/nono-asr/builtin/` 下有 onnx + tokens�
 
 - [ ] **Step 2: 安装并断网听写**
 
-飞行模式点角色，授予麦克风，说「打开设置」。Expected：出字，无下载 UI。`logcat` 无 jsdelivr。
+飞行模式点角色，授予麦克风，说「打开设置」。Expected：出字（系统档在无网下应失败或熔断，落到 builtin）。无下载 UI。`logcat` 无 jsdelivr。
 
 - [ ] **Step 3: 拒麦克风**
 
 Expected：权限说明，不出现假句子。
 
-- [ ] **Step 4: Wi-Fi 静默升级**
+- [ ] **Step 4: 系统熔断**
 
-连 Wi-Fi 使用 1 分钟，界面仍无下载文案。再用 `run-as` 看 `files/nono/asr/upgrade/` 是否出现。出现后下一句 `packId` 应为 upgrade（log 只打 packId 与 text length）。
+若小米 9 上系统识别直接失败：连点两次失败后第三次 log 中 `engine` 为 `builtin` 或 `upgrade`，不再出现系统 `startListening`。
+
+- [ ] **Step 5: Wi-Fi 静默升级**
+
+连 Wi-Fi 使用 1 分钟，界面仍无下载文案。再用 `run-as` 看 `files/nono/asr/upgrade/` 是否出现。出现后系统已熔断时下一句 `engine` 为 `upgrade`（log 只打 engine 与 text length）。
 
 人为截断 upgrade 文件，杀进程再听。Expected：无弹窗抱怨升级，仍能出字。
 
-- [ ] **Step 5: 移动网络**
+- [ ] **Step 6: 移动网络**
 
 关 Wi-Fi 开 4G，抓包或 logcat 确认没有 upgrade archive URL 请求。
 

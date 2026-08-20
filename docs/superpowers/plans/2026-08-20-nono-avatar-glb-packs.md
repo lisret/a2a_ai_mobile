@@ -35,7 +35,7 @@
 | `AwesomeProject/src/features/task/avatar/scene.js` | builtin 网格 + `loadGltf` / `useBuiltin` |
 | `AwesomeProject/src/features/task/avatar/avatar.html` | 本地 ESM，无 CDN |
 | `AwesomeProject/src/features/task/components/NonoAvatar3D.tsx` | 注入路径、收失败消息 |
-| `AwesomeProject/src/features/settings/screens/AvatarLooksScreen.tsx` | 列表 / 确认下载 |
+| `AwesomeProject/src/features/settings/screens/AvatarLooksScreen.tsx` | 3D 预览 + 选角色 / 确认下载 |
 | `AwesomeProject/android/app/build.gradle` | `copyNonoAvatarAssets` 增加 `three.module.js`、`GLTFLoader.js` |
 
 ---
@@ -534,22 +534,24 @@ EOF
 
 ---
 
-### Task 6: 外观列表与确认下载
+### Task 6: 角色外观预览页
 
 **Files:**
 - Create: `AwesomeProject/src/features/settings/screens/AvatarLooksScreen.tsx`
 - Modify: `AwesomeProject/src/shared/types/navigation.ts` — `AvatarLooks: undefined`
 - Modify: `AwesomeProject/src/navigation/AppNavigator.tsx` — 注册 `AvatarLooks`
-- Modify: `AwesomeProject/src/features/settings/screens/SettingsScreen.tsx` — 「陪伴」旁增加「角色外观」入口，文案不要和「陪伴模型」混用
+- Modify: `AwesomeProject/src/features/settings/screens/SettingsScreen.tsx` — 在「陪伴」分组里、对话模型那一行**下面**增加「角色外观」；文案不得写成陪伴模型
 - Test: `AwesomeProject/src/__tests__/features/task/avatar/AvatarLooksScreen.test.tsx`
 
 **Interfaces:**
-- Consumes: `listAvatarLooks`, `installPinnedAvatar`, `setActiveAvatarId`, `localPack.getNetworkType`
+- Consumes: `listAvatarLooks`, `installPinnedAvatar`, `setActiveAvatarId`, `localPack.getNetworkType`, `NonoAvatar3D`
 - Produces: 用户确认后再下载
+
+页面结构：上半 `NonoAvatar3D`（未下载项预览 builtin，不发起下载）；下半横向卡片，`builtin` 第一项无下载按钮。
 
 - [ ] **Step 1: Write the failing test**
 
-渲染屏幕（mock store）。点「测试盒」在 wifi/cellular 都应先出现确认（可用 `Alert.alert` mock）。未确认前 `installPinnedAvatar` 不被调用。确认后被调用。`builtin` 行没有下载按钮。
+渲染屏幕（mock store）。设置页源码（`fs.readFileSync` SettingsScreen）含 `角色外观` 且该行在 `CompanionConfig` 导航之后。点「测试盒」在 wifi/cellular 都应先出现确认。未确认前 `installPinnedAvatar` 不被调用。确认后被调用。`builtin` 卡没有下载按钮。屏幕含预览区域（`NonoAvatar3D` 或 testID `avatar-look-preview`）。
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -559,7 +561,11 @@ Expected: FAIL
 
 - [ ] **Step 3: Implement screen**
 
-确认框文案必须带网络类型与 `bytes`。进度：在下载 Promise settle 前显示「正在下载」，不要静默。失败 Alert「外观不可用，仍用默认角色」，不要改其它包。
+`SettingsScreen` 新行：label `角色外观`，description `只换首页角色长什么样，不改说话用的模型`，`navigate('AvatarLooks')`。
+
+确认框文案必须带网络类型与 `bytes`。进度：下载中显示「正在下载」，不要静默。失败 Alert「外观不可用，仍用默认角色」，预览回到 builtin，不要改其它包。
+
+不要在首页顶栏、能力 Tab、底栏增加入口。
 
 - [ ] **Step 4: Run the tests and make sure they pass**
 

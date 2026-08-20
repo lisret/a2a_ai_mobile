@@ -17,6 +17,18 @@ export interface AIModel {
 /**
  * 模型表单数据（用于新增/编辑）
  */
+export type ModelListKey =
+  | 'unified'
+  | 'splitVision'
+  | 'splitPlanner'
+  | 'localPlanner'
+  | 'companion';
+
+export type AgentModeId =
+  | 'cloud_direct'
+  | 'cloud_split'
+  | 'local_vision_cloud_planner';
+
 export interface AIModelFormData {
   name: string;
   provider: string;              // 服务提供商

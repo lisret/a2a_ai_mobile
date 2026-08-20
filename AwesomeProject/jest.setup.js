@@ -22,12 +22,12 @@ jest.mock('react-native', () => {
     removeListener: jest.fn(),
     emit: jest.fn(),
   };
+  RN.NativeModules = {
+    ...RN.NativeModules,
+    AccessibilityModule: {},
+    ADBModule: {},
+    AccessibilityActionModule: {},
+  };
   return RN;
 });
-
-// Mock 原生模块
-jest.mock('react-native/Libraries/BatchedBridge/NativeModules', () => ({
-  AccessibilityModule: {},
-  ADBModule: {},
-}));
 

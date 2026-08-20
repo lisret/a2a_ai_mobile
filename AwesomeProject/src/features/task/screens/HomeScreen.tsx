@@ -1,30 +1,79 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, {useState, useEffect, useCallback, useRef} from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   Alert,
+  TouchableOpacity,
+  StatusBar,
+  Platform,
 } from 'react-native';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { RootStackParamList } from '@shared/types/navigation';
-import { ConfirmModal } from '@shared/components/ConfirmModal';
-import { PageLayout } from '@shared/components/PageLayout';
-import { TaskInputCard } from '../components/TaskInputCard';
-import { ExecutionCard } from '../components/ExecutionCard';
-import { SuggestionChips } from '../components/SuggestionChips';
-import { useTaskExecution } from '../hooks/useTaskExecution';
-import { useTaskExecutionWithBackground } from '../useTaskExecutionWithBackground';
-import { modelService } from '@features/model/services/ModelService';
-import { settingsService } from '@features/settings/services/SettingsService';
-import { accessibilityService, appMappingService, floatingWindowService } from '@core/ability';
-import { taskHistoryService } from '../services/TaskHistoryService';
-import { COLORS, HOME_SUGGESTIONS } from '@shared/constants';
-import type { AIModel } from '@shared/types/Model';
-import type { Task, TaskStep } from '@core/engine/taskEngine';
+import {useNavigation, useFocusEffect} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import type {RootStackParamList} from '@shared/types/navigation';
+import {ConfirmModal} from '@shared/components/ConfirmModal';
+import {PageLayout} from '@shared/components/PageLayout';
+import {showCustomAlert} from '@shared/utils/alert';
+import {ExecutionCard} from '../components/ExecutionCard';
+import {useTaskExecution} from '../hooks/useTaskExecution';
+import {useTaskExecutionWithBackground} from '../useTaskExecutionWithBackground';
+import {modelService} from '@features/model/services/ModelService';
+import {settingsService} from '@features/settings/services/SettingsService';
+import {
+  accessibilityService,
+  appMappingService,
+  floatingWindowService,
+} from '@core/ability';
+import {taskHistoryService} from '../services/TaskHistoryService';
+import {COLORS} from '@shared/constants';
+import type {NoNoMood} from '@shared/components/NoNoMascot';
+import {NonoAvatar3D} from '../components/NonoAvatar3D';
+import {nonoConfigService} from '@features/capability/services/NonoConfigService';
+import type {CapabilityFlags, MemoryItem} from '@features/capability/types';
+import type {AIModel} from '@shared/types/Model';
+import type {Task, TaskStep} from '@core/engine/taskEngine';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
+
+type HeardTurn = {
+  text: string;
+  intent: 'operate' | 'preference' | 'errand';
+  citePref?: boolean;
+  proposal?: {
+    kind: 'preference' | 'errand';
+    title: string;
+    body?: string;
+    errandType?: 'once' | 'schedule';
+    when?: string;
+  };
+};
+
+const DEMO_TURNS: HeardTurn[] = [
+  {
+    text: '帮我查找附近评分高的咖啡店',
+    intent: 'operate',
+    citePref: true,
+  },
+  {
+    text: '以后点奶茶也少糖',
+    intent: 'preference',
+    proposal: {
+      kind: 'preference',
+      title: '奶茶少糖',
+      body: '点奶茶时默认少糖',
+    },
+  },
+  {
+    text: '每周五下班前提醒我交周报',
+    intent: 'errand',
+    proposal: {
+      kind: 'errand',
+      errandType: 'schedule',
+      title: '每周五下班前提醒交周报',
+      when: '周五 18:00',
+    },
+  },
+];
 
 export const HomeScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
@@ -35,6 +84,13 @@ export const HomeScreen: React.FC = () => {
   const [executionSteps, setExecutionSteps] = useState<TaskStep[]>([]);
   const [currentStep, setCurrentStep] = useState<number | undefined>(undefined);
   const [stopConfirmVisible, setStopConfirmVisible] = useState(false);
+  const [companion, setCompanion] = useState<AIModel | null>(null);
+  const [flags, setFlags] = useState<CapabilityFlags | null>(null);
+  const [memories, setMemories] = useState<MemoryItem[]>([]);
+  const [listening, setListening] = useState(false);
+  const [heard, setHeard] = useState<HeardTurn | null>(null);
+  const listenTurn = useRef(0);
+  const listenTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // 加载激活的模型
   useEffect(() => {
@@ -63,8 +119,17 @@ export const HomeScreen: React.FC = () => {
 
   const loadActiveModel = async () => {
     try {
-      const selectedModel = await modelService.getSelectedModel();
-      setModel(selectedModel);
+      const [operate, nextCompanion, nextFlags, nextMemories] =
+        await Promise.all([
+          modelService.getSelectedModel(),
+          modelService.getSelectedModel('companion'),
+          nonoConfigService.getCapabilities(),
+          nonoConfigService.getMemories(),
+        ]);
+      setModel(operate);
+      setCompanion(nextCompanion);
+      setFlags(nextFlags);
+      setMemories(nextMemories);
     } catch (error) {
       console.error('加载模型失败:', error);
     }
@@ -251,16 +316,30 @@ export const HomeScreen: React.FC = () => {
     };
   }, [executing]);
 
-  const handleStartTask = async () => {
-    const instruction = taskInput.trim();
+  useEffect(() => {
+    return () => {
+      if (listenTimer.current) {
+        clearTimeout(listenTimer.current);
+      }
+    };
+  }, []);
+
+  const handleStartTask = async (instructionText?: string) => {
+    const instruction = (instructionText ?? taskInput).trim();
     if (!instruction) {
       Alert.alert('提示', '请输入任务指令');
       return;
     }
 
+    if (!flags?.phoneOperate && !flags?.openclaw) {
+      Alert.alert('要操作手机，请先打开「替我操作手机」或 OpenClaw');
+      navigation.navigate('Capabilities');
+      return;
+    }
+
     if (!model) {
       Alert.alert('提示', '请先选择一个模型');
-      (navigation as any).navigate('MainTabs', { screen: 'Models' });
+      (navigation as any).navigate('PhoneOperate');
       return;
     }
 
@@ -294,12 +373,12 @@ export const HomeScreen: React.FC = () => {
 
     // 尝试后台执行，失败则前台执行
     try {
+      setTaskInput(instruction);
+      setHeard(null);
       await startBackgroundTask(instruction);
-      setTaskInput(''); // 清空输入
     } catch (error) {
       console.error('启动后台任务失败，回退到前台执行:', error);
       await executeTaskForeground(instruction);
-      setTaskInput('');
     }
   };
 
@@ -331,92 +410,336 @@ export const HomeScreen: React.FC = () => {
     }
   };
 
-  const handleSuggestionSelect = (text: string) => {
-    setTaskInput(text);
+  const startVoiceListen = () => {
+    if (executing || listening) return;
+    if (!companion) {
+      showCustomAlert('请先配置陪伴模型', '首页说话用设置里的对话模型。', [
+        {text: '取消', style: 'cancel'},
+        {
+          text: '去设置',
+          onPress: () => navigation.navigate('CompanionConfig'),
+        },
+      ]);
+      return;
+    }
+    setHeard(null);
+    setListening(true);
+    if (listenTimer.current) clearTimeout(listenTimer.current);
+    listenTimer.current = setTimeout(() => {
+      const turn = DEMO_TURNS[listenTurn.current % DEMO_TURNS.length];
+      listenTurn.current += 1;
+      setListening(false);
+      setHeard(turn);
+    }, 2600);
   };
 
-  const handleClear = () => {
-    setTaskInput('');
+  const coffeePref =
+    memories.find(
+      item => item.kind === 'preference' && item.title.includes('咖啡'),
+    ) || memories.find(item => item.kind === 'preference');
+
+  const recallParts: string[] = [];
+  const pref = memories.find(item => item.kind === 'preference');
+  if (pref) recallParts.push(pref.title);
+  if (flags?.errands) {
+    const errand =
+      memories.find(
+        item => item.kind === 'errand' && item.errandType === 'schedule',
+      ) || memories.find(item => item.kind === 'errand');
+    if (errand) recallParts.push(errand.title);
+  }
+  const recall = recallParts.slice(0, 2).join(' · ');
+
+  const acceptHeard = async () => {
+    if (!heard?.proposal) return;
+    if (heard.intent === 'preference') {
+      const exists = memories.some(
+        item =>
+          item.kind === 'preference' && item.title === heard.proposal?.title,
+      );
+      if (!exists && heard.proposal) {
+        await nonoConfigService.addMemory({
+          id: `mem-${Date.now()}`,
+          kind: 'preference',
+          title: heard.proposal.title,
+          body: heard.proposal.body,
+        });
+        setMemories(await nonoConfigService.getMemories());
+      }
+    } else if (heard.intent === 'errand') {
+      if (!flags?.errands) {
+        Alert.alert('先在能力里打开「交代的事」');
+        navigation.navigate('Errands');
+        return;
+      }
+      const exists = memories.some(
+        item => item.kind === 'errand' && item.title === heard.proposal?.title,
+      );
+      if (!exists && heard.proposal) {
+        await nonoConfigService.addMemory({
+          id: `mem-${Date.now()}`,
+          kind: 'errand',
+          errandType: heard.proposal.errandType || 'once',
+          title: heard.proposal.title,
+          when: heard.proposal.when || '',
+        });
+        setMemories(await nonoConfigService.getMemories());
+      }
+    }
+    setHeard(null);
   };
 
-  return (
-    <PageLayout
-      title={model ? model.name : 'OpenAutoGLM'}
-      backgroundColor={COLORS.background.default}>
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}>
-        <View style={styles.greetingSection}>
-          <Text style={styles.greetingTitle}>
-            准备好{'\n'}执行任务了吗？
-          </Text>
-          <Text style={styles.greetingSubtitle}>输入指令，剩下的交给我。</Text>
-        </View>
+  const saveHeardErrand = async () => {
+    if (!heard) return;
+    if (!flags?.errands) {
+      Alert.alert('先在能力里打开「交代的事」');
+      navigation.navigate('Errands');
+      return;
+    }
+    await nonoConfigService.addMemory({
+      id: `mem-${Date.now()}`,
+      kind: 'errand',
+      errandType: 'once',
+      title: heard.text,
+      when: '',
+    });
+    setMemories(await nonoConfigService.getMemories());
+    setHeard(null);
+  };
 
-        {executing ? (
+  const mascotMood: NoNoMood = executing
+    ? 'thinking'
+    : listening
+    ? 'listen'
+    : 'idle'; // stage idle / listen / operate
+
+
+  if (executing) {
+    return (
+      <PageLayout
+        title="任务执行"
+        kicker="LIVE TASK"
+        backgroundColor={COLORS.background.default}>
+        <View style={styles.console}>
           <ExecutionCard
             instruction={taskInput || '执行中...'}
             steps={executionSteps}
             currentStep={currentStep}
             onStop={handleStopTask}
           />
-        ) : (
-          <TaskInputCard
-            value={taskInput}
-            onChangeText={setTaskInput}
-            onClear={handleClear}
-            onStart={handleStartTask}
-            disabled={executing}
-          />
-        )}
+        </View>
+        <ConfirmModal
+          visible={stopConfirmVisible}
+          title="确定终止当前任务？"
+          message="NoNo 会停止后续操作；已经在其他应用中完成的操作无法自动撤销。"
+          confirmText="确认终止"
+          cancelText="取消"
+          onConfirm={confirmStopTask}
+          onCancel={() => setStopConfirmVisible(false)}
+          danger
+        />
+      </PageLayout>
+    );
+  }
 
-        {!executing && (
-          <View style={styles.suggestionsSection}>
-            <SuggestionChips suggestions={HOME_SUGGESTIONS} onSelect={handleSuggestionSelect} />
+  return (
+    <View style={styles.stage}>
+      {Platform.OS === 'android' ? (
+        <StatusBar
+          barStyle="dark-content"
+          backgroundColor="transparent"
+          translucent
+        />
+      ) : (
+        <StatusBar barStyle="dark-content" />
+      )}
+      <View style={styles.topDock}>
+        <Text style={styles.topDockText}>
+          陪伴 · {companion?.name || '未配置陪伴模型'}
+        </Text>
+      </View>
+      <View style={styles.avatarWrap}>
+        <NonoAvatar3D mood={mascotMood} />
+        <TouchableOpacity
+          style={styles.avatarHit}
+          activeOpacity={0.92}
+          onPress={startVoiceListen}
+          accessibilityLabel="和 NoNo 说话"
+        />
+      </View>
+      {listening ? (
+        <View style={[styles.bottomDock, styles.mintDock, styles.dockFloat]}>
+          <Text style={styles.dockKicker}>正在听</Text>
+          <Text style={styles.dockBody}>说完我会自己停，不用点结束</Text>
+        </View>
+      ) : heard ? (
+        <View style={styles.heardStack}>
+          <View style={[styles.bottomDock, styles.mintDock]}>
+            <Text style={styles.dockKicker}>
+              {heard.intent === 'preference'
+                ? '要不要记住'
+                : heard.intent === 'errand'
+                ? '要不要交代'
+                : heard.citePref && coffeePref
+                ? `我记得你${coffeePref.title}`
+                : '我听到了'}
+            </Text>
+            <Text style={styles.dockBody}>
+              {heard.intent === 'operate'
+                ? coffeePref
+                  ? `按你「${coffeePref.title}」的习惯，帮你找附近评分高的店`
+                  : '帮你找附近评分高的咖啡店'
+                : heard.intent === 'errand'
+                ? `${heard.proposal?.title} · ${heard.proposal?.when}`
+                : heard.proposal?.title || heard.text}
+            </Text>
           </View>
-        )}
-      </ScrollView>
-
-      <ConfirmModal
-        visible={stopConfirmVisible}
-        title="确认中断"
-        message="确定要中断当前任务吗？"
-        confirmText="中断"
-        cancelText="取消"
-        onConfirm={confirmStopTask}
-        onCancel={() => setStopConfirmVisible(false)}
-        danger
-      />
-    </PageLayout>
+          <View style={styles.actions}>
+            {heard.intent === 'operate' ? (
+              <>
+                {(flags?.phoneOperate && model) || flags?.openclaw ? (
+                  <TouchableOpacity
+                    style={[styles.actionBtn, styles.actionMint]}
+                    onPress={() => handleStartTask(heard.text)}>
+                    <Text style={styles.actionText}>开始操作</Text>
+                  </TouchableOpacity>
+                ) : null}
+                {flags?.errands ? (
+                  <TouchableOpacity
+                    style={styles.actionBtn}
+                    onPress={saveHeardErrand}>
+                    <Text style={styles.actionText}>记成交代</Text>
+                  </TouchableOpacity>
+                ) : null}
+                <TouchableOpacity
+                  style={styles.actionBtn}
+                  onPress={() => setHeard(null)}>
+                  <Text style={styles.actionText}>先不用</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.actionMint]}
+                  onPress={acceptHeard}>
+                  <Text style={styles.actionText}>
+                    {heard.intent === 'errand' ? '记成交代' : '记住这条'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.actionBtn}
+                  onPress={() => setHeard(null)}>
+                  <Text style={styles.actionText}>不用</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </View>
+      ) : (
+        <View style={[styles.bottomDock, styles.dockFloat]}>
+          <Text style={styles.dockKicker}>点角色开始说</Text>
+          <Text style={styles.dockBody}>
+            {recall ? `还记得 ${recall}` : '说完我会自己停'}
+          </Text>
+        </View>
+      )}
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
+  stage: {
     flex: 1,
+    backgroundColor: COLORS.pearl,
   },
-  content: {
-    padding: 20,
-    paddingTop: 24,
-    gap: 24,
+  console: {
+    paddingHorizontal: 18,
+    paddingBottom: 120,
   },
-  greetingSection: {
-    marginTop: 12,
+  topDock: {
+    position: 'absolute',
+    top: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 12 : 56,
+    right: 14,
+    zIndex: 2,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.9)',
   },
-  greetingTitle: {
-    fontSize: 28,
-    fontWeight: '800',
+  topDockText: {
     color: COLORS.text.primary,
-    marginBottom: 8,
-    lineHeight: 34,
+    fontSize: 10,
+    fontWeight: '800',
   },
-  greetingSubtitle: {
-    fontSize: 15,
+  avatarWrap: {
+    flex: 1,
+    position: 'relative',
+    paddingBottom: 96,
+  },
+  avatarHit: {
+    position: 'absolute',
+    left: '28%',
+    right: '28%',
+    top: '28%',
+    bottom: '30%',
+  },
+  bottomDock: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.95)',
+  },
+  dockFloat: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 108,
+  },
+  mintDock: {
+    backgroundColor: 'rgba(141,244,226,0.88)',
+  },
+  dockKicker: {
+    marginBottom: 3,
     color: COLORS.text.secondary,
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    textAlign: 'center',
   },
-  suggestionsSection: {
-    marginTop: 0,
+  dockBody: {
+    color: COLORS.text.primary,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  heardStack: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 108,
+    gap: 8,
+  },
+  actions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  actionBtn: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.92)',
+  },
+  actionMint: {
+    backgroundColor: 'rgba(141,244,226,0.92)',
+  },
+  actionText: {
+    color: COLORS.text.primary,
+    fontSize: 11,
+    fontWeight: '700',
   },
 });
-

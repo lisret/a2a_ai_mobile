@@ -10,6 +10,27 @@ export const STORAGE_KEYS = {
   
   /** 选中的模型存储键 */
   SELECTED_MODEL: '@autoglm:selectedModel',
+
+  /** 分列表模型前缀 */
+  MODEL_LIST_PREFIX: '@nono:models:',
+
+  /** 分列表选中模型前缀 */
+  MODEL_SELECTED_PREFIX: '@nono:selected:',
+
+  /** 能力开关 */
+  CAPABILITIES: '@nono:capabilities',
+
+  /** 隐私 / 记忆策略 */
+  PRIVACY: '@nono:privacy',
+
+  /** Agent 运行模式 */
+  AGENT_MODE: '@nono:agent_mode',
+
+  /** 记忆与交代 */
+  MEMORIES: '@nono:memories',
+
+  /** OpenClaw 网关配置 */
+  OPENCLAW: '@nono:openclaw',
   
   /** 任务列表存储键 */
   TASKS: '@autoglm:tasks',

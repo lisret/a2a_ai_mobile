@@ -1,47 +1,41 @@
 /**
  * 统一的页面布局组件
- * 提供统一的顶部header和底部样式，确保所有页面布局一致
+ * 对齐 NoNo 原型：珍珠底、kicker + 标题、右侧品牌标
  */
 
-import React, { ReactNode } from 'react';
+import React, {ReactNode} from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ViewStyle,
-  TextStyle,
   StatusBar,
   Platform,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import { AppIcon, IconNames } from './Icon';
-import { PageTransitionWrapper } from './PageTransitionWrapper';
-import { COLORS, FONT_SIZES, FONT_WEIGHTS, SPACING } from '../constants';
+import {useNavigation} from '@react-navigation/native';
+import {AppIcon, IconNames} from './Icon';
+import {PageTransitionWrapper} from './PageTransitionWrapper';
+import {COLORS, FONT_WEIGHTS, SPACING} from '../constants';
 
 export interface PageLayoutProps {
-  /** 页面标题 */
   title: string;
-  /** 是否显示返回按钮 */
+  kicker?: string;
+  headerAccessory?: ReactNode;
   showBackButton?: boolean;
-  /** 自定义返回按钮点击事件 */
   onBackPress?: () => void;
-  /** 右侧操作按钮（ReactNode） */
   rightAction?: ReactNode;
-  /** 页面内容 */
   children: ReactNode;
-  /** 是否使用安全区域（状态栏） */
   safeArea?: boolean;
-  /** 背景颜色 */
   backgroundColor?: string;
-  /** 内容区域样式 */
   contentStyle?: ViewStyle;
-  /** 是否显示底部边框 */
   showBottomBorder?: boolean;
 }
 
 export const PageLayout: React.FC<PageLayoutProps> = ({
   title,
+  kicker,
+  headerAccessory,
   showBackButton = false,
   onBackPress,
   rightAction,
@@ -49,7 +43,6 @@ export const PageLayout: React.FC<PageLayoutProps> = ({
   safeArea = true,
   backgroundColor = COLORS.background.default,
   contentStyle,
-  showBottomBorder = false,
 }) => {
   const navigation = useNavigation();
 
@@ -62,56 +55,54 @@ export const PageLayout: React.FC<PageLayoutProps> = ({
   };
 
   return (
-    <View style={[styles.container, { backgroundColor }]}>
+    <View style={[styles.container, {backgroundColor}]}>
       {safeArea && Platform.OS === 'ios' && (
         <StatusBar barStyle="dark-content" />
       )}
       {Platform.OS === 'android' && (
-        <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+        <StatusBar
+          barStyle="dark-content"
+          backgroundColor="transparent"
+          translucent
+        />
       )}
-      
-      {/* 统一的顶部Header */}
-      <View style={[styles.header, showBottomBorder && styles.headerBorder]}>
-        {showBackButton ? (
-          <>
-            <View style={styles.headerLeft}>
-              <TouchableOpacity
-                style={styles.backButton}
-                onPress={handleBackPress}
-                activeOpacity={0.7}>
-                <AppIcon name={IconNames.arrowLeft} size={20} color={COLORS.text.primary} />
-              </TouchableOpacity>
-              <Text style={styles.headerTitle} numberOfLines={1}>
-                {title}
-              </Text>
-            </View>
-            
-            {rightAction ? (
-              <View style={styles.headerRight}>
-                {rightAction}
-              </View>
-            ) : (
-              <View style={styles.headerRightPlaceholder} />
-            )}
-          </>
-        ) : (
-          <>
-            <View style={styles.headerCenter}>
-              <Text style={[styles.headerTitle, styles.headerTitleCenter]} numberOfLines={1}>
-                {title}
-              </Text>
-            </View>
-            
-            {rightAction && (
-              <View style={styles.headerRight}>
-                {rightAction}
-              </View>
-            )}
-          </>
-        )}
-      </View>
 
-      {/* 页面内容 */}
+      {showBackButton ? (
+        <View style={styles.subpageHeader}>
+          <TouchableOpacity
+            style={styles.roundButton}
+            onPress={handleBackPress}
+            activeOpacity={0.8}>
+            <AppIcon
+              name={IconNames.arrowLeft}
+              size={18}
+              color={COLORS.text.primary}
+            />
+          </TouchableOpacity>
+          <Text style={styles.subpageTitle} numberOfLines={1}>
+            {title}
+          </Text>
+          {rightAction ? (
+            <View style={styles.subpageRight}>{rightAction}</View>
+          ) : (
+            <View style={styles.roundButtonPlaceholder} />
+          )}
+        </View>
+      ) : (
+        <View style={styles.pageHeader}>
+          <View style={styles.pageHeaderCopy}>
+            {kicker ? <Text style={styles.kicker}>{kicker}</Text> : null}
+            <Text style={styles.pageTitle} numberOfLines={1}>
+              {title}
+            </Text>
+          </View>
+          <View style={styles.headerActions}>
+            {rightAction}
+            {headerAccessory}
+          </View>
+        </View>
+      )}
+
       <PageTransitionWrapper style={[styles.content, contentStyle]}>
         {children}
       </PageTransitionWrapper>
@@ -124,61 +115,76 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background.default,
   },
-  header: {
-    backgroundColor: '#FFFFFF',
-    paddingTop: Platform.OS === 'ios' ? 50 : (StatusBar.currentHeight || 24) + 12,
-    paddingBottom: SPACING.md,
-    paddingHorizontal: SPACING.base,
+  pageHeader: {
+    minHeight: 74,
+    paddingTop: Platform.OS === 'ios' ? 50 : (StatusBar.currentHeight || 24) + 8,
+    paddingHorizontal: 18,
+    paddingBottom: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    minHeight: Platform.OS === 'ios' ? 66 : 56,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-    zIndex: 99,
+    gap: 14,
   },
-  headerBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+  pageHeaderCopy: {
+    flex: 1,
   },
-  headerLeft: {
+  kicker: {
+    marginBottom: 4,
+    color: COLORS.text.secondary,
+    fontSize: 11,
+    fontWeight: FONT_WEIGHTS.medium,
+    letterSpacing: 0.4,
+  },
+  pageTitle: {
+    color: COLORS.text.primary,
+    fontSize: 22,
+    lineHeight: 24,
+    fontWeight: '800',
+    letterSpacing: -0.6,
+  },
+  headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    flex: 1,
-    height: 32,
+    gap: 8,
   },
-  headerCenter: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 32,
-  },
-  backButton: {
-    width: 32,
-    height: 32,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: SPACING.sm,
-  },
-  headerTitle: {
-    fontSize: 18, // Demo: 18px
-    fontWeight: '700', // Demo: 700
-    color: COLORS.text.primary, // Demo: text-main (#111827)
-    flex: 1,
-  },
-  headerTitleCenter: {
-    flex: 0,
-  },
-  headerRight: {
+  subpageHeader: {
+    minHeight: 58,
+    paddingTop: Platform.OS === 'ios' ? 50 : (StatusBar.currentHeight || 24) + 8,
+    paddingHorizontal: 18,
+    paddingBottom: 8,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING.sm,
+    justifyContent: 'space-between',
   },
-  headerRightPlaceholder: {
-    width: 36,
+  subpageTitle: {
+    flex: 1,
+    textAlign: 'center',
+    color: COLORS.text.primary,
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  roundButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.82)',
+    shadowColor: '#1e1f32',
+    shadowOffset: {width: 0, height: 7},
+    shadowOpacity: 0.07,
+    shadowRadius: 9,
+    elevation: 2,
+  },
+  roundButtonPlaceholder: {
+    width: 38,
+    height: 38,
+  },
+  subpageRight: {
+    minWidth: 38,
+    alignItems: 'flex-end',
   },
   content: {
     flex: 1,
   },
 });
-

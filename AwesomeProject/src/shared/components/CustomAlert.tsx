@@ -5,6 +5,9 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
+  ScrollView,
+  Pressable,
+  ActivityIndicator,
 } from 'react-native';
 
 export interface AlertButton {
@@ -18,6 +21,8 @@ interface CustomAlertProps {
   title: string;
   message?: string;
   buttons?: AlertButton[];
+  loading?: boolean;
+  dismissable?: boolean;
   onDismiss?: () => void;
 }
 
@@ -29,6 +34,8 @@ export const CustomAlert: React.FC<CustomAlertProps> = ({
   title,
   message,
   buttons = [{ text: '确定' }],
+  loading = false,
+  dismissable = true,
   onDismiss,
 }) => {
   const [isVisible, setIsVisible] = useState(visible);
@@ -38,14 +45,17 @@ export const CustomAlert: React.FC<CustomAlertProps> = ({
   }, [visible]);
 
   const handleButtonPress = (button: AlertButton) => {
-    setIsVisible(false);
-    button.onPress?.();
-    if (!button.onPress) {
-      onDismiss?.();
+    const next = button.onPress;
+    handleDismiss();
+    if (next) {
+      setTimeout(next, 0);
     }
   };
 
   const handleDismiss = () => {
+    if (!dismissable && loading) {
+      return;
+    }
     setIsVisible(false);
     onDismiss?.();
   };
@@ -55,17 +65,38 @@ export const CustomAlert: React.FC<CustomAlertProps> = ({
   const defaultButton = buttons.find(btn => !btn.style || btn.style === 'default') || buttons[0];
   const cancelButton = buttons.find(btn => btn.style === 'cancel');
   const destructiveButton = buttons.find(btn => btn.style === 'destructive');
+  const canDismiss = dismissable !== false && !loading;
 
   return (
     <Modal
       visible={isVisible}
       transparent
       animationType="fade"
-      onRequestClose={handleDismiss}>
+      onRequestClose={canDismiss ? handleDismiss : () => {}}>
       <View style={styles.overlay}>
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={canDismiss ? handleDismiss : undefined}
+        />
         <View style={styles.content}>
+          <View style={styles.grab} />
+          {loading ? (
+            <ActivityIndicator
+              color="#756bf0"
+              style={styles.spinner}
+              accessibilityLabel="正在检测权限"
+            />
+          ) : null}
           <Text style={styles.title}>{title}</Text>
-          {message && <Text style={styles.message}>{message}</Text>}
+          {message ? (
+            <ScrollView
+              style={[styles.messageScroll, loading && styles.loadingMessage]}
+              bounces={false}
+              showsVerticalScrollIndicator={false}>
+              <Text style={styles.message}>{message}</Text>
+            </ScrollView>
+          ) : null}
+          {loading || buttons.length === 0 ? null : (
           <View style={styles.buttonGroup}>
             {buttons.length === 1 ? (
               // 单个按钮
@@ -131,6 +162,7 @@ export const CustomAlert: React.FC<CustomAlertProps> = ({
               ))
             )}
           </View>
+          )}
         </View>
       </View>
     </Modal>
@@ -140,48 +172,62 @@ export const CustomAlert: React.FC<CustomAlertProps> = ({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
+    backgroundColor: 'rgba(19,20,34,0.28)',
+    justifyContent: 'flex-end',
+    padding: 14,
   },
   content: {
-    backgroundColor: '#ffffff',
-    borderRadius: 20,
-    padding: 24,
+    backgroundColor: 'rgba(255,255,255,0.96)',
+    borderRadius: 26,
+    padding: 20,
     width: '100%',
-    maxWidth: 320,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.92)',
+    shadowColor: '#534bbc',
+    shadowOffset: {width: 0, height: 18},
+    shadowOpacity: 0.12,
+    shadowRadius: 24,
+    elevation: 8,
+  },
+  grab: {
+    width: 38,
+    height: 4,
+    borderRadius: 99,
+    backgroundColor: '#d8d7df',
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  spinner: {
+    alignSelf: 'center',
+    marginBottom: 12,
+  },
+  loadingMessage: {
+    marginBottom: 4,
   },
   title: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '700',
-    color: '#111827',
-    marginBottom: 12,
-    textAlign: 'center',
+    color: '#202231',
+    marginBottom: 8,
+  },
+  messageScroll: {
+    maxHeight: 240,
+    marginBottom: 18,
   },
   message: {
-    fontSize: 15,
-    color: '#6B7280',
-    marginBottom: 24,
-    textAlign: 'center',
-    lineHeight: 22,
+    fontSize: 12,
+    color: '#777a88',
+    lineHeight: 18,
   },
   buttonGroup: {
     flexDirection: 'row',
-    gap: 12,
+    flexWrap: 'wrap',
+    gap: 9,
   },
   button: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 24,
+    minHeight: 44,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -190,29 +236,29 @@ const styles = StyleSheet.create({
   },
   fullWidthButton: {
     width: '100%',
-    marginBottom: 8,
+    marginBottom: 0,
   },
   cancelButton: {
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#f1f0f7',
   },
   confirmButton: {
-    backgroundColor: '#2563EB',
+    backgroundColor: '#756bf0',
   },
   dangerButton: {
-    backgroundColor: '#EF4444',
+    backgroundColor: '#fff0ec',
   },
   cancelButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#374151',
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#575967',
   },
   confirmButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '700',
     color: '#ffffff',
   },
   dangerButtonText: {
-    color: '#ffffff',
+    color: '#a94e40',
   },
 });
 

@@ -1,6 +1,6 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { COLORS, SHADOWS, HOME_SUGGESTIONS, type SuggestionItem } from '@shared/constants';
+import {View, Text, TouchableOpacity, StyleSheet} from 'react-native';
+import {HOME_SUGGESTIONS, type SuggestionItem} from '@shared/constants';
 
 interface SuggestionChipsProps {
   suggestions?: readonly SuggestionItem[];
@@ -30,27 +30,24 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 8,
   },
   chip: {
-    backgroundColor: '#FFFFFF',
+    minHeight: 38,
+    paddingHorizontal: 13,
+    borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
+    borderColor: '#e8e7ed',
+    backgroundColor: 'rgba(255,255,255,0.8)',
+    justifyContent: 'center',
+    shadowColor: '#222336',
+    shadowOffset: {width: 0, height: 6},
     shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
+    shadowRadius: 8,
+    elevation: 1,
   },
   chipText: {
-    fontSize: 13,
-    color: '#111827',
-    fontWeight: '400',
+    fontSize: 11,
+    color: '#434552',
   },
 });

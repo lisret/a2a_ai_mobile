@@ -1,21 +1,29 @@
-import type { NavigatorScreenParams } from '@react-navigation/native';
+import type {NavigatorScreenParams} from '@react-navigation/native';
+import type {ModelListKey} from './Model';
 
-/**
- * 导航参数类型定义
- */
 export type RootStackParamList = {
   MainTabs: NavigatorScreenParams<MainTabParamList>;
-  AddModel: { importedData?: Partial<import('./Model').AIModelFormData> } | undefined;
-  EditModel: { modelId: string };
-  TaskHistory: { modelId: string };  // 任务历史页面（保留用于从模型列表跳转或详情查看）
-  TaskDetail: { taskId: string };    // 任务详情页面
-  APIKeyGuide: { providerId?: string } | undefined;
+  AddModel:
+    | {importedData?: Partial<import('./Model').AIModelFormData>; list?: ModelListKey}
+    | undefined;
+  EditModel: {modelId: string; list?: ModelListKey};
+  TaskHistory: {modelId: string};
+  TaskDetail: {taskId: string};
+  APIKeyGuide: {providerId?: string} | undefined;
   DebugLog: undefined;
+  PhoneOperate: undefined;
+  OpenClaw: undefined;
+  Errands: undefined;
+  Privacy: undefined;
+  CompanionConfig: undefined;
+  AvatarLooks: undefined;
+  ErrandDetail: {errandId: string};
+  About: undefined;
 };
 
 export type MainTabParamList = {
   Home: undefined;
-  Models: undefined;
+  Capabilities: undefined;
   History: undefined;
   Settings: undefined;
 };

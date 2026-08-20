@@ -64,3 +64,6 @@ yarn-error.log
 
 # testing
 /coverage
+
+# Local NoNo 3D avatar copied at build time
+android/app/src/main/assets/nono-avatar/

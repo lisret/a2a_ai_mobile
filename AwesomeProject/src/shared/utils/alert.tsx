@@ -1,12 +1,20 @@
 import React, { useState, useCallback } from 'react';
 import { CustomAlert, AlertButton } from '../components/CustomAlert';
 
+interface AlertOptions {
+  onDismiss?: () => void;
+  loading?: boolean;
+  dismissable?: boolean;
+}
+
 interface AlertState {
   id: number;
   title: string;
   message?: string;
   buttons?: AlertButton[];
   onDismiss?: () => void;
+  loading?: boolean;
+  dismissable?: boolean;
 }
 
 let alertIdCounter = 0;
@@ -19,7 +27,7 @@ export const showCustomAlert = (
   title: string,
   message?: string,
   buttons?: AlertButton[],
-  options?: { onDismiss?: () => void }
+  options?: AlertOptions
 ): void => {
   if (alertStateSetter) {
     const id = alertIdCounter++;
@@ -27,12 +35,18 @@ export const showCustomAlert = (
       id,
       title,
       message,
-      buttons: buttons || [{ text: '确定' }],
+      buttons: options?.loading ? buttons ?? [] : buttons || [{ text: '确定' }],
       onDismiss: options?.onDismiss,
+      loading: options?.loading,
+      dismissable: options?.dismissable,
     });
   } else {
     console.warn('AlertProvider未初始化，请确保在AppNavigator中使用AlertProvider');
   }
+};
+
+export const hideCustomAlert = (): void => {
+  alertStateSetter?.(null);
 };
 
 /**
@@ -62,6 +76,8 @@ export const AlertProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           title={alertState.title}
           message={alertState.message}
           buttons={alertState.buttons}
+          loading={alertState.loading}
+          dismissable={alertState.dismissable}
           onDismiss={handleDismiss}
         />
       )}

@@ -374,6 +374,22 @@ class ADBService {
   }
 
   /**
+   * 探测 ADB 模块和 shell 权限，不执行任何界面操作。
+   */
+  async probeAvailability(): Promise<{module: boolean; shell: boolean}> {
+    if (!this.isModuleAvailable()) {
+      return {module: false, shell: false};
+    }
+    try {
+      await ADBModule.executeShellCommand('getprop ro.build.version.release');
+      return {module: true, shell: true};
+    } catch (error) {
+      console.warn('[ADB服务] shell 探测失败:', error);
+      return {module: true, shell: false};
+    }
+  }
+
+  /**
    * 检查 ADB 是否可用
    */
   async isAvailable(): Promise<boolean> {

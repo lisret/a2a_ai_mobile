@@ -452,7 +452,7 @@ Expected: FAIL（仍有 DEMO_TURNS）
 4. `await ensureBuiltinAsr()`（保证保底模型在盘上，即使本句走系统档）。
 5. `setListening(true)`；`startUtterance(onEvent)`。
 6. `partial` 更新 dock；`final` 空文本不设 heard，否则 `setHeard({text, intent:'operate'})`。
-7. 三档都失败：`Alert`「这次没听清，请再试」，禁止 DEMO。
+7. 两档都失败：`Alert`「这次没听清，请再试」，禁止 DEMO。
 
 `useFocusEffect`：`ensureBuiltinAsr(); maybeSilentUpgradeAsr();` 不要 await 挡 UI。
 

@@ -13,7 +13,7 @@
     "kill:metro": "node scripts/kill-metro.js",
     "test": "jest",
     "generate-icons": "node scripts/generate-icons.js",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package && node scripts/copy-nono-avatar-vendor.js"
   },
   "// dependencies": "========== 运行时依赖 (Runtime Dependencies) ==========",
   "dependencies": {
@@ -34,6 +34,8 @@
     "react-native-screens": "~3.27.0",
     "react-native-svg": "^14.1.0",
     "react-native-vector-icons": "^10.3.0",
+    "react-native-webview": "13.6.3",
+    "three": "0.160.1",
     "@types/react-native-vector-icons": "^6.4.18"
   },
   "// devDependencies": "========== 开发依赖 (Dev Dependencies) ==========",

@@ -132,6 +132,17 @@ android {
     }
 }
 
+tasks.register('copyNonoAvatarAssets', Copy) {
+    from("${rootProject.projectDir}/../src/features/task/avatar") {
+        include 'avatar.html', 'scene.js'
+    }
+    from("${rootProject.projectDir}/../node_modules/three/build") {
+        include 'three.min.js'
+    }
+    into("${projectDir}/src/main/assets/nono-avatar")
+}
+tasks.named('preBuild').configure { dependsOn('copyNonoAvatarAssets') }
+
 // 强制使用兼容 compileSdk 34 的 androidx.core 版本
 configurations.all {
     resolutionStrategy {

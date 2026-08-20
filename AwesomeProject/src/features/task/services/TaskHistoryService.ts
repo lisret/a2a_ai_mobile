@@ -1,60 +1,124 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Task } from '@core/engine/taskEngine';
-import { STORAGE_KEYS, TASK_CONFIG } from '@shared/constants';
+import type {Task, TaskStep} from '@core/engine/taskEngine';
+import type {TaskInstructionPort} from '@core/engine/operateRuntime/ports/TaskInstructionPort';
+import {STORAGE_KEYS, TASK_CONFIG} from '@shared/constants';
 
 const TASKS_KEY = STORAGE_KEYS.TASKS;
-const TASKS_BY_MODEL_KEY_PREFIX = STORAGE_KEYS.TASKS_BY_MODEL_PREFIX;
+
+// Bounds a persisted output summary so it can never smuggle in an unbounded
+// raw provider response; individual steps still drop screenshotUri/modelResponse below.
+const MAX_OUTPUT_SUMMARY_LENGTH = 4000;
+
+const TERMINAL_STATUSES: ReadonlySet<Task['status']> = new Set([
+  'success',
+  'failed',
+]);
+const NON_TERMINAL_STATUSES: ReadonlySet<Task['status']> = new Set([
+  'idle',
+  'waiting',
+  'running',
+]);
+
+/** Stable, ref-free rejection carried on `.code`. */
+export class TaskHistoryError extends Error {
+  readonly code: string;
+  constructor(code: string) {
+    super(code);
+    this.name = 'TaskHistoryError';
+    this.code = code;
+  }
+}
+
+function assertNoTerminalRegression(previous: Task | undefined, next: Task): void {
+  if (
+    previous &&
+    TERMINAL_STATUSES.has(previous.status) &&
+    NON_TERMINAL_STATUSES.has(next.status)
+  ) {
+    throw new TaskHistoryError('task_terminal_transition_rejected');
+  }
+}
+
+function projectStepForStorage(step: TaskStep): TaskStep {
+  const {screenshotUri, modelResponse, ...safeStep} = step;
+  return safeStep;
+}
+
+function projectTaskForStorage(task: Task): Task {
+  if (!task.output) {
+    return task;
+  }
+  return {
+    ...task,
+    output: {
+      ...task.output,
+      steps: task.output.steps.map(projectStepForStorage),
+      summary: task.output.summary?.slice(0, MAX_OUTPUT_SUMMARY_LENGTH),
+    },
+  };
+}
 
 /**
  * 任务历史服务
  */
-class TaskHistoryService {
+class TaskHistoryService implements TaskInstructionPort {
+  private mutationQueue: Promise<void> = Promise.resolve();
+
+  private async readAllTasksStrict(): Promise<Task[]> {
+    const jsonValue = await AsyncStorage.getItem(TASKS_KEY);
+    return jsonValue != null ? JSON.parse(jsonValue) : [];
+  }
+
+  private enqueueMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.mutationQueue.then(operation);
+    this.mutationQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
+
   /**
    * 保存任务
    */
   async saveTask(task: Task): Promise<void> {
-    try {
-      // 获取所有任务
-      const allTasks = await this.getAllTasks();
-      
-      // 更新或添加任务
-      const index = allTasks.findIndex(t => t.id === task.id);
-      if (index >= 0) {
-        allTasks[index] = task;
-      } else {
-        allTasks.push(task);
+    return this.enqueueMutation(async () => {
+      try {
+        const allTasks = await this.readAllTasksStrict();
+        const index = allTasks.findIndex(existing => existing.id === task.id);
+        assertNoTerminalRegression(
+          index >= 0 ? allTasks[index] : undefined,
+          task,
+        );
+
+        const storedTask = projectTaskForStorage(task);
+        if (index >= 0) {
+          allTasks[index] = storedTask;
+        } else {
+          allTasks.push(storedTask);
+        }
+
+        if (allTasks.length > TASK_CONFIG.MAX_TASKS) {
+          const oldestTask = [...allTasks].sort(
+            (a, b) => a.createdAt - b.createdAt,
+          )[0];
+          const filteredTasks = allTasks.filter(
+            existing => existing.id !== oldestTask.id,
+          );
+          allTasks.length = 0;
+          allTasks.push(...filteredTasks);
+          console.info(
+            `任务总数超过${TASK_CONFIG.MAX_TASKS}条，已自动删除最早的任务: ${oldestTask.id}`,
+          );
+        }
+
+        await AsyncStorage.setItem(TASKS_KEY, JSON.stringify(allTasks));
+        console.info('任务已保存:', task.id);
+      } catch (error) {
+        console.error('保存任务失败');
+        throw error;
       }
-      
-      // 如果总数超过最大任务数，删除最早的那条记录
-      if (allTasks.length > TASK_CONFIG.MAX_TASKS) {
-        // 按创建时间排序，找到最早的任务
-        const sortedTasks = [...allTasks].sort((a, b) => a.createdAt - b.createdAt);
-        const oldestTask = sortedTasks[0];
-        
-        // 删除最早的任务
-        const filteredTasks = allTasks.filter(t => t.id !== oldestTask.id);
-        console.info(`任务总数超过${TASK_CONFIG.MAX_TASKS}条，已自动删除最早的任务: ${oldestTask.id}`);
-        
-        // 更新 allTasks 数组
-        allTasks.length = 0;
-        allTasks.push(...filteredTasks);
-        
-        // 更新被删除任务所属模型的任务列表
-        await this.saveTasksByModel(oldestTask.modelId, filteredTasks.filter(t => t.modelId === oldestTask.modelId));
-      }
-      
-      // 保存所有任务
-      const jsonValue = JSON.stringify(allTasks);
-      await AsyncStorage.setItem(TASKS_KEY, jsonValue);
-      
-      // 按模型ID保存任务列表
-      await this.saveTasksByModel(task.modelId, allTasks.filter(t => t.modelId === task.modelId));
-      
-      console.info('任务已保存:', task.id);
-    } catch (error) {
-      console.error('保存任务失败:', error);
-      throw error;
-    }
+    });
   }
 
   /**
@@ -62,10 +126,9 @@ class TaskHistoryService {
    */
   async getAllTasks(): Promise<Task[]> {
     try {
-      const jsonValue = await AsyncStorage.getItem(TASKS_KEY);
-      return jsonValue != null ? JSON.parse(jsonValue) : [];
-    } catch (error) {
-      console.error('获取任务列表失败:', error);
+      return await this.readAllTasksStrict();
+    } catch {
+      console.error('获取任务列表失败');
       return [];
     }
   }
@@ -75,14 +138,12 @@ class TaskHistoryService {
    */
   async getTasksByModelId(modelId: string): Promise<Task[]> {
     try {
-      const key = `${TASKS_BY_MODEL_KEY_PREFIX}${modelId}`;
-      const jsonValue = await AsyncStorage.getItem(key);
-      const tasks: Task[] = jsonValue != null ? JSON.parse(jsonValue) : [];
-      
-      // 按创建时间倒序排列（最新的在前）
-      return tasks.sort((a, b) => b.createdAt - a.createdAt);
-    } catch (error) {
-      console.error('获取模型任务列表失败:', error);
+      const tasks = await this.getAllTasks();
+      return tasks
+        .filter(task => task.modelId === modelId)
+        .sort((a, b) => b.createdAt - a.createdAt);
+    } catch {
+      console.error('获取模型任务列表失败');
       return [];
     }
   }
@@ -94,8 +155,8 @@ class TaskHistoryService {
     try {
       const allTasks = await this.getAllTasks();
       return allTasks.find(task => task.id === taskId) || null;
-    } catch (error) {
-      console.error('获取任务失败:', error);
+    } catch {
+      console.error('获取任务失败');
       return null;
     }
   }
@@ -107,8 +168,21 @@ class TaskHistoryService {
     try {
       const tasks = await this.getTasksByModelId(modelId);
       return tasks.length > 0 ? tasks[0] : null;
-    } catch (error) {
-      console.error('获取最新任务失败:', error);
+    } catch {
+      console.error('获取最新任务失败');
+      return null;
+    }
+  }
+
+  /**
+   * TaskInstructionPort：仅返回去除首尾空白的指令文本，不暴露完整 Task。
+   */
+  async load(taskId: string): Promise<string | null> {
+    try {
+      const task = await this.getTaskById(taskId);
+      return task ? task.instruction.trim() : null;
+    } catch {
+      console.error('获取任务指令失败');
       return null;
     }
   }
@@ -117,58 +191,40 @@ class TaskHistoryService {
    * 删除任务
    */
   async deleteTask(taskId: string): Promise<void> {
-    try {
-      const allTasks = await this.getAllTasks();
-      const task = allTasks.find(t => t.id === taskId);
-      
-      if (!task) {
-        return;
-      }
-      
-      const filteredTasks = allTasks.filter(t => t.id !== taskId);
-      await AsyncStorage.setItem(TASKS_KEY, JSON.stringify(filteredTasks));
-      
-      // 更新模型的任务列表
-      await this.saveTasksByModel(task.modelId, filteredTasks.filter(t => t.modelId === task.modelId));
-      
-      console.info('任务已删除:', taskId);
-    } catch (error) {
-      console.error('删除任务失败:', error);
-      throw error;
-    }
-  }
+    return this.enqueueMutation(async () => {
+      try {
+        const allTasks = await this.readAllTasksStrict();
+        if (!allTasks.some(task => task.id === taskId)) {
+          return;
+        }
 
-  /**
-   * 按模型ID保存任务列表（内部方法）
-   */
-  private async saveTasksByModel(modelId: string, tasks: Task[]): Promise<void> {
-    try {
-      const key = `${TASKS_BY_MODEL_KEY_PREFIX}${modelId}`;
-      const jsonValue = JSON.stringify(tasks);
-      await AsyncStorage.setItem(key, jsonValue);
-    } catch (error) {
-      console.error('保存模型任务列表失败:', error);
-    }
+        const filteredTasks = allTasks.filter(task => task.id !== taskId);
+        await AsyncStorage.setItem(TASKS_KEY, JSON.stringify(filteredTasks));
+        console.info('任务已删除:', taskId);
+      } catch (error) {
+        console.error('删除任务失败');
+        throw error;
+      }
+    });
   }
 
   /**
    * 删除模型的所有任务
    */
   async deleteTasksByModelId(modelId: string): Promise<void> {
-    try {
-      const allTasks = await this.getAllTasks();
-      const filteredTasks = allTasks.filter(t => t.modelId !== modelId);
-      await AsyncStorage.setItem(TASKS_KEY, JSON.stringify(filteredTasks));
-      
-      // 删除模型的任务列表
-      const key = `${TASKS_BY_MODEL_KEY_PREFIX}${modelId}`;
-      await AsyncStorage.removeItem(key);
-    } catch (error) {
-      console.error('删除模型任务失败:', error);
-      throw error;
-    }
+    return this.enqueueMutation(async () => {
+      try {
+        const allTasks = await this.readAllTasksStrict();
+        const filteredTasks = allTasks.filter(
+          task => task.modelId !== modelId,
+        );
+        await AsyncStorage.setItem(TASKS_KEY, JSON.stringify(filteredTasks));
+      } catch (error) {
+        console.error('删除模型任务失败');
+        throw error;
+      }
+    });
   }
 }
 
 export const taskHistoryService = new TaskHistoryService();
-

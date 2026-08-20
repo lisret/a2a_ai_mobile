@@ -1,13 +1,13 @@
 # NoNo 本地 3D 角色包与离线听写设计
 
-日期：2026-08-19（2026-08-20 修订听写档位：系统 → 端侧大模型 → 端侧小模型）
+日期：2026-08-19（2026-08-20 修订听写：SenseVoice Small 静默下载 → Zipformer 中文 14M 包内保底；不用系统识别）
 
 ## 1. 目标
 
 安装包必须自带两份永远能用的本地能力，用户打开就能看见立体角色、点角色就能说话：
 
 1. 程序化 3D 默认角色（WebView + 本地 Three.js，禁止 CDN）。
-2. 听写：优先系统识别服务，失败再走端侧大 ASR，最后走 APK 内小 ASR。小模型随包，保证断网也能出字。
+2. 听写：优先静默下载的 SenseVoice Small，失败再用安装包里的 Zipformer 中文 14M。Zipformer 随包，保证断网也能出字。
 
 后续增强走下载，失败一律回滚到安装包内的默认实现，用户对听写升级无感知。
 
@@ -15,20 +15,19 @@
 
 1. 运行时 JS（`three.min.js`、`GLTFLoader`、`avatar.html`、`scene.js`、Sherpa JNI）只来自安装包，永不下载、永不走 CDN。
 2. 首页冷启动先渲染内置 3D，再尝试当前外观包；失败仍是 3D，不变扁图标、不白屏。
-3. 点角色即可听写。不依赖下载完成、不用演示话轮冒充识别成功。单次开口链路固定为 **系统识别 → 端侧大模型 → 端侧小模型**。
-4. 听写增强模型仅在 Wi-Fi 下静默下载；移动网络不下。下载、校验、加载失败时跳过「大模型」这一档，无进度、无弹窗。
+3. 点角色即可听写。不依赖下载完成、不用演示话轮冒充识别成功。单次开口链路固定为 **SenseVoice Small → Zipformer 中文 14M**。
+4. SenseVoice Small 仅在 Wi-Fi 下静默下载；移动网络不下。下载、校验、加载失败时跳过这一档，无进度、无弹窗。
 5. 角色外观包由用户点选后才下载，可走移动网络，有确认和进度。失败回滚到内置 3D。
 6. 角色包、听写包、陪伴/操作/MiniCPM 模型列表互不共用存储与 UI。
-7. 不绑定小爱 / 小布 / Jovi / Bixby 私有包名。不接华为 HiAI/HMS SDK（本版）。不静默改走自有云端听写。系统 `SpeechRecognizer` 可能上传音频，这是首选档的已知代价；系统不可用时才进端侧模型。
+7. 不用 Android `SpeechRecognizer`、不用 `ACTION_RECOGNIZE_SPEECH`、不绑定小爱/小布/Jovi/Bixby、不接华为 ASR SDK、不静默走自有云端听写。音频只进端侧 Sherpa。
 8. MiniCPM 视觉包（约 1.6GB）不套用听写的静默升级。
 
 ## 2. 非目标
 
 - 本版不做 iOS 角色包下载、iOS 离线听写接线。Android（小米 9 / API 30）为验收机。
 - 本版不播骨骼动画。清单可写 `wave` / `nod` / `talk` clip 名，加载器忽略。
-- 本版不实现云端听写开关、自有云端 ASR、华为 HiAI/HMS、鸿蒙 Core Speech Kit。
-- 首页不拉 `ACTION_RECOGNIZE_SPEECH` 系统识别界面（会离开角色页）。系统档只走页内 `SpeechRecognizer`。
-- 「大模型 / 小模型」在本设计里指端侧 ASR 权重（upgrade / builtin），不是陪伴对话用的 LLM。出字之后的对话仍走陪伴模型。
+- 本版不实现系统听写、云端听写开关、自有云端 ASR、华为 HiAI/HMS、鸿蒙 Core Speech Kit。
+- 「大模型」= SenseVoice Small（静默下载）。「小模型」= Zipformer 中文 14M（APK 内）。都不是陪伴对话 LLM。出字之后的对话仍走陪伴模型。
 - 本版不把下载来的 `scene.js` 当外观包。外观只允许 `glb` + 清单。
 - 本版不把听写结果自动执行手机操作。文本交给首页既有确认/陪伴路由；操作通道仍走独立设计。
 - 本版不改 MiniCPM 下载确认策略。
@@ -47,11 +46,11 @@
 ```text
 APK 只读运行时
   ├─ assets/nono-avatar/   three.min.js + GLTFLoader.js + avatar.html + scene.js
-  └─ assets/nono-asr/      sherpa-onnx 小模型（builtin）
+  └─ assets/nono-asr/      Zipformer 中文 14M（builtin）
 
 应用私有目录（可删、可再下）
   ├─ files/nono/avatars/{id}/   manifest.json + model.glb
-  └─ files/nono/asr/{id}/       增强听写模型文件
+  └─ files/nono/asr/{id}/       SenseVoice Small 等下载文件
 
 选择状态（AsyncStorage，不含密钥）
   ├─ avatar.activeId    "builtin" | 已校验外观 id
@@ -66,14 +65,12 @@ flowchart TD
   Pack3D -->|load fail| Builtin3D
   Home --> Mic[RECORD_AUDIO]
   Mic --> Router[SpeechRouter]
-  Router --> Sys[System SpeechRecognizer]
-  Router --> UpgradeAsr[端侧大模型 asr.upgrade]
-  Router --> BuiltinAsr[端侧小模型 asr.builtin]
-  Sys -->|probe fail or fuse| UpgradeAsr
-  UpgradeAsr -->|missing or load fail| BuiltinAsr
+  Router --> SenseVoice[SenseVoice Small 静默下载]
+  Router --> Zipformer[Zipformer 中文 14M 包内]
+  SenseVoice -->|未就绪或 load 失败| Zipformer
   Wifi[Wi-Fi idle] --> Silent[SilentAsrUpgrade]
-  Silent -->|sha256 ok| UpgradeAsr
-  Silent -->|fail| BuiltinAsr
+  Silent -->|sha256 ok| SenseVoice
+  Silent -->|fail| Zipformer
   UserPick[用户点外观] --> AvatarDl[AvatarPackDownload]
   AvatarDl -->|ok| Pack3D
   AvatarDl -->|fail| Builtin3D
@@ -132,66 +129,45 @@ interface AvatarManifestV1 {
 
 ## 6. 听写
 
-开口一句短文本。原生实现 `SpeechToTextModule`，JS 只消费统一事件，不感知品牌。禁止用只包一层 `SpeechRecognizer`、没有探测/熔断的通用 RN 语音插件。
+开口一句短文本。只走端侧 Sherpa-ONNX，JS 消费统一事件。不用 Android 系统识别，不用通用 RN 语音插件当唯一实现。
 
-优先级（用户指定）：
+优先级：
 
-1. **系统内部识别**（`SpeechRecognizer`）
-2. **端侧大模型**（静默下载的 `asr.upgrade`）
-3. **端侧小模型**（APK 内 `asr.builtin`，最终保底）
+1. **SenseVoice Small**（`asr.upgrade`）：Wi-Fi 静默下载后再用。
+2. **Zipformer 中文 14M**（`asr.builtin`）：打进 APK，最终保底。
 
-### 6.1 系统档
+钉死产物（k2-fsa GitHub Release，不是 JS CDN）：
 
-运行时探测，不按品牌写死能力，不硬编码小爱/小布/Jovi/Bixby `ComponentName`。
+| 档 | id | 官方包 | 约体积 | 引擎 |
+| --- | --- | --- | ---: | --- |
+| SenseVoice Small | `upgrade` | `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2` | 155.5MB | Offline SenseVoice（int8，源自 SenseVoiceSmall） |
+| Zipformer 中文 14M | `builtin` | `sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23-mobile.tar.bz2` | 51.8MB | Online Zipformer 流式 |
 
-顺序：
+url / bytes / sha256 在实现合入前写入 `AsrArtifactPins`。
 
-1. API 31+ 且 `SpeechRecognizer.isOnDeviceRecognitionAvailable()` 为真 → `createOnDeviceSpeechRecognizer()`。
-2. 否则 `createSpeechRecognizer()`。指定组件前必须 `queryIntentServices(RecognitionService)`。
-3. API 33+ 可调用 `checkRecognitionSupport()` 作日志，不得单独用它判定「能听」。
-4. `isRecognitionAvailable()==true` 不够：3 秒内没有 `onReadyForSpeech()` 视为服务异常。
-5. 首页 **不** 走 `ACTION_RECOGNIZE_SPEECH`（系统 UI 会离开角色页）。
+SenseVoice 按短句离线识别（VAD 切句或停说后 decode）。Zipformer 走流式 `OnlineRecognizer`。首页都是「正在听」直到出 final。同一句不跨引擎热切：SenseVoice 在 load 前失败则同一次点按改 Zipformer；已经开始录音则本句结束，下一句再选档。
 
-Manifest：`RECORD_AUDIO`；targetSdk ≥ 30 时 `<queries>` 声明 `android.speech.RecognitionService`。
-
-状态机：`Idle → Starting → Listening → Processing → Completed`，错误走 `Error → Backoff → Idle`。同一进程只保留一个会话。`ERROR_RECOGNIZER_BUSY`：`cancel()` 后 300–800ms 再重建，禁止立刻无限重试。`ERROR_NO_MATCH` / `ERROR_SPEECH_TIMEOUT` 不是引擎故障。`ERROR_CLIENT` / 超时 / `ERROR_SERVER` / `ERROR_NETWORK` 计入系统档失败。连续失败 2 次后本进程熔断系统档，后续开口直接进端侧模型。`onStop` 调 `cancel()`，不用时 `destroy()`。主线程创建与 `startListening()`。
-
-系统引擎可能把音频送去厂商云，文档如此。这是首选档的代价，不在 UI 里假装「一定离线」。`EXTRA_PREFER_OFFLINE` 可带，不保证厂商执行。
-
-### 6.2 端侧大 / 小模型
-
-Sherpa-ONNX JNI，流式中文。
-
-- `asr.builtin`：APK `assets/nono-asr/`，解压到 `files/nono/asr/builtin/`。断网必须能出字。
-- `asr.upgrade`：更大模型，仅 Wi-Fi 静默下载。未就绪或 load 失败则本档跳过。
-
-产物 url / bytes / sha256 写入 `AsrArtifactPins`，方式同 MiniCPM 钉死。
-
-同一句不跨引擎热切：系统若已进入 `Listening`（已开始吃麦克风），失败只结束本句；下一句走熔断后的下一档。系统若在 `Starting` 就失败（从未 `onReadyForSpeech`），同一次点按立即改试大模型，再失败试小模型。
-
-### 6.3 开口路径
+### 6.1 开口路径
 
 1. 点角色。操作任务执行中则忽略。
 2. 无麦克风：请求；拒绝则说明，不听、无假文本。
-3. `SpeechRouter.start()`：按 6.1–6.2 选档。
-4. partial 更新「正在听」；final 文本进确认/陪伴路由。禁止 `DEMO_TURNS`。
+3. `upgradeReady` 且 load 成功 → SenseVoice；否则 Zipformer。
+4. partial（Zipformer）或等待切句（SenseVoice）更新「正在听」；final 进确认/陪伴路由。禁止 `DEMO_TURNS`。
 
-小米 9 飞行模式必须能出字（系统档会失败或熔断，落到 builtin）。
+小米 9 飞行模式必须能出字（SenseVoice 未下完时用 Zipformer）。
 
-### 6.4 静默升级
+### 6.2 静默升级
 
-`SilentAsrUpgrade` 在应用进入前台或回到 Wi-Fi 时尝试：
+`SilentAsrUpgrade` 在前台或回到 Wi-Fi 时尝试下载 SenseVoice Small 官方 tar：
 
-- 网络是 Wi-Fi；
-- `asr.upgrade` 尚未通过校验；
-- 磁盘空间足够（钉死阈值：可用空间 ≥ 升级包 bytes × 2 + 50MB）；
-- 不与角色包用户下载抢同一临时文件名。
+- 仅 Wi-Fi；
+- 尚未通过校验；
+- 可用空间 ≥ archiveBytes × 2 + 50MB；
+- 不与角色包共用 part 文件名。
 
-过程不展示通知、横幅、进度。校验通过后置 `asr.upgradeReady=true`。解析规则：仅当 `upgradeReady` 且引擎 load 成功时使用 upgrade，否则 builtin；load 失败则把 `upgradeReady` 打回 `false` 并删坏文件。允许下次 Wi-Fi 再下。
+无通知、无进度。校验通过后 `asr.upgradeReady=true`。失败删临时文件，继续用 Zipformer。移动网络 / 未知网络 / 飞行模式不下。
 
-不得在移动网络、未知网络、飞行模式下下载。云端听写不是这条链路的一部分。
-
-说到一半不热切换档。下一句重新走路由器（系统若已熔断则从大模型开始）。
+说到一半不热切换。下一句重新解析：SenseVoice 就绪则用它，否则 Zipformer。
 
 ## 7. 错误处理
 
@@ -200,10 +176,9 @@ Sherpa-ONNX JNI，流式中文。
 | 无网冷启动 | 内置 3D，可听写 | 不请求任何外观/听写 URL |
 | glb 哈希失败或 GLTF 抛错 | 内置 3D | `activeId=builtin`，删坏包 |
 | 拒麦克风 | 权限说明 | 不听、无假文本 |
-| 系统识别不可用或熔断 | 无感知切到端侧 | 本句或下一句走大/小模型 |
-| 大模型未就绪或 load 失败 | 无 | 走小模型 |
-| 小模型初始化失败 | 明确失败，可打字 | 重试解压 assets；禁止 DEMO |
-| upgrade 下载/校验失败 | 无 | 不影响系统档和小模型 |
+| SenseVoice 未就绪或 load 失败 | 无 | 走 Zipformer |
+| Zipformer 初始化失败 | 明确失败，可打字 | 重试解压 assets；禁止 DEMO |
+| SenseVoice 下载/校验失败 | 无 | 不影响 Zipformer |
 | 角色下载取消或失败 | 列表保持未装，角色仍是当前可用项 | 不改其它包 |
 
 WebView / JNI 不得加载 http(s) 脚本。日志不写本地文件绝对路径以外的用户语音原文到非调试通道；调试日志可留 final 文本长度，不强制留全文。
@@ -221,13 +196,11 @@ WebView / JNI 不得加载 http(s) 脚本。日志不写本地文件绝对路径
 
 听写：
 
-- 装完立刻点角色：权限通过后能出字，无下载 UI。
-- 飞行模式能出字（落到 builtin）。
-- 系统档连续失败两次后，日志显示后续走 `upgrade` 或 `builtin`，不再打系统 `startListening`。
-- Wi-Fi 后台完成 upgrade 后，若系统已熔断，下一句引擎为 upgrade。
-- 人为损坏 upgrade 文件：无弹窗，下一句仍出字，引擎为 builtin。
-- 代码中不存在将 `DEMO_TURNS` 当作识别成功的路径。
-- 源码不含小爱/小布/Jovi/Bixby 的硬编码包名。
+- 装完立刻点角色：权限通过后能出字，无下载 UI。引擎为 Zipformer（SenseVoice 尚未就绪）。
+- 飞行模式能出字（Zipformer）。
+- Wi-Fi 后台完成 SenseVoice 后，下一句引擎为 `upgrade`，仍无下载 UI。
+- 人为损坏 SenseVoice 文件：无弹窗，下一句仍出字，引擎为 Zipformer。
+- 代码中不存在 `DEMO_TURNS` 成功路径，也不存在 `SpeechRecognizer` / `ACTION_RECOGNIZE_SPEECH`。
 
 边界：
 
@@ -241,11 +214,10 @@ WebView / JNI 不得加载 http(s) 脚本。日志不写本地文件绝对路径
 | `NonoAvatar3D` + `avatar.html` / `scene.js` | 只读运行时与 builtin 网格 |
 | `AvatarPackStore` | 外观目录、校验、activeId |
 | `AvatarArtifactPins` | 钉死的外观 url/哈希 |
-| `SpeechToTextModule` | 系统 SpeechRecognizer 探测、状态机、熔断 |
-| `SpeechRouter` | 系统 → upgrade → builtin |
-| `SherpaAsrModule` | 端侧大/小模型 JNI |
-| `AsrModelStore` | builtin 解压与 upgrade 校验 |
-| `SilentAsrUpgrade` | Wi-Fi 静默下载大模型 |
+| `SpeechRouter` | SenseVoice Small → Zipformer 14M |
+| `SherpaAsrModule` | SenseVoice 离线短句 + Zipformer 流式 JNI |
+| `AsrModelStore` | Zipformer 解压与 SenseVoice 校验 |
+| `SilentAsrUpgrade` | Wi-Fi 静默下载 SenseVoice Small |
 | `HomeScreen` | 权限、听写 UI、把 final 文本交给现有确认流 |
 
 不把外观或听写包写入现有 `@autoglm:models` / `@nono:models:*`。

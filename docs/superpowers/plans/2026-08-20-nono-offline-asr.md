@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 对着角色说一句短文本就能出字。优先系统 `SpeechRecognizer`，失败再用端侧大 ASR，最后用 APK 内小 ASR；大模型仅 Wi-Fi 静默升级；不用演示话轮，不绑厂商私有包名。
+**Goal:** 对着角色说一句短文本就能出字。优先 SenseVoice Small（Wi-Fi 静默下载），失败再用 APK 内 Zipformer 中文 14M；不用系统识别、不用演示话轮。
 
-**Architecture:** 原生 `SpeechToTextModule` 做探测、状态机和熔断。`SpeechRouter` 按 **系统 → upgrade → builtin** 选档；系统在 `Starting` 失败可同一次点按降级，一旦进入 `Listening` 则本句结束。Sherpa-ONNX 只负责两档端侧模型。`SilentAsrUpgrade` 仍只在 Wi-Fi 拉大模型。
+**Architecture:** Sherpa-ONNX JNI 提供两档：`upgrade` = Offline SenseVoice Small int8；`builtin` = Online Zipformer 中文 14M。`SpeechRouter` 只在 SenseVoice 未就绪或 load 失败时落到 Zipformer。`SilentAsrUpgrade` 仅 Wi-Fi 拉 SenseVoice 官方 tar。
 
-**Tech Stack:** React Native 0.73.6、Kotlin `SpeechRecognizer`、Sherpa-ONNX AAR、`react-native-permissions`、AsyncStorage、Jest。不用通用 RN 语音插件当唯一实现。下载复用 `LocalPackModule`。
+**Tech Stack:** React Native 0.73.6、Kotlin JNI、Sherpa-ONNX AAR、`react-native-permissions`、AsyncStorage、Jest。不用 `SpeechRecognizer`。下载复用 `LocalPackModule`。
 
 **Spec:** `docs/superpowers/specs/2026-08-19-nono-avatar-asr-local-packs-design.md` 听写部分。
 
@@ -14,12 +14,11 @@
 
 ## Global Constraints
 
-- 点角色即可听写。不依赖下载完成、不用 `DEMO_TURNS` 冒充成功。
-- 开口档位：**系统 SpeechRecognizer → 端侧大模型 → 端侧小模型**。
-- 不硬编码小爱/小布/Jovi/Bixby 包名。本版不接华为 SDK、不接自有云端 ASR、首页不拉 `ACTION_RECOGNIZE_SPEECH`。
-- 听写增强模型仅 Wi-Fi 静默下载；移动网络、未知网络、飞行模式不下。
-- 下载 / 校验 / load 失败：跳过大模型档，无进度、无弹窗、无通知。
-- 系统档连续失败 2 次（不含 NO_MATCH / SPEECH_TIMEOUT）后本进程熔断，改从端侧开始。
+- 点角色即可听写。不依赖 SenseVoice 下载完成、不用 `DEMO_TURNS` 冒充成功。
+- 开口档位：**SenseVoice Small → Zipformer 中文 14M**。
+- 不用 `SpeechRecognizer`、`ACTION_RECOGNIZE_SPEECH`、华为 ASR SDK、自有云端 ASR。
+- SenseVoice 仅 Wi-Fi 静默下载；移动网络、未知网络、飞行模式不下。
+- 下载 / 校验 / load 失败：跳过 SenseVoice，无进度、无弹窗、无通知。
 - MiniCPM 视觉包不套用这条静默升级。
 - 听写包不得写入 `@autoglm:models` / `@nono:models:*`。
 - 日志只记 final 文本长度，不把全文打到非调试通道。
@@ -38,18 +37,17 @@
 | `AwesomeProject/src/features/task/asr/AsrArtifactPins.ts` | builtin / upgrade 的 url、bytes、sha256、文件名 |
 | `AwesomeProject/src/features/task/asr/AsrModelStore.ts` | 解压 builtin、upgradeReady、resolve |
 | `AwesomeProject/src/features/task/asr/SilentAsrUpgrade.ts` | Wi-Fi 静默下载 |
-| `AwesomeProject/android/.../SpeechToTextModule.kt` | 系统识别探测、状态机、熔断 |
-| `AwesomeProject/src/features/task/asr/SpeechRouter.ts` | 系统 → upgrade → builtin |
-| `AwesomeProject/android/.../SherpaAsrModule.kt` | 端侧大/小模型 |
+| `AwesomeProject/src/features/task/asr/SpeechRouter.ts` | SenseVoice → Zipformer |
+| `AwesomeProject/android/.../SherpaAsrModule.kt` | SenseVoice 离线短句 + Zipformer 流式 |
 | `AwesomeProject/src/features/task/asr/SherpaAsr.ts` | Sherpa JS 封装 |
 | `AwesomeProject/src/features/task/screens/HomeScreen.tsx` | 权限、partial/final、删除 DEMO |
 
 钉死产物（官方 GitHub Release，不是 CDN 脚本）：
 
-- builtin：`https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23-mobile.tar.bz2`（约 51.8MB，适合进 APK）
-- upgrade：`https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20-mobile.tar.bz2`（约 330.9MB，只 Wi-Fi 静默）
+- builtin（Zipformer 中文 14M）：`https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-zh-14M-2023-02-23-mobile.tar.bz2`（约 51.8MB，进 APK）
+- upgrade（SenseVoice Small int8）：`https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2`（约 155.5MB，只 Wi-Fi 静默）
 
-模型目录内需要 `encoder*.onnx`、`decoder*.onnx`、`joiner*.onnx`、`tokens.txt`。具体文件名以 tar 内为准，写入 pins 的 `files` 数组。
+Zipformer 目录需要 encoder / decoder / joiner / `tokens.txt`。SenseVoice 目录需要 `model.int8.onnx`（或 pins 中的实际文件名）和 `tokens.txt`。具体文件名以 tar 内为准，写入 pins 的 `files` 数组。
 
 ---
 
@@ -286,94 +284,7 @@ EOF
 
 ---
 
-### Task 4: 系统 SpeechRecognizer
-
-**Files:**
-- Create: `AwesomeProject/android/app/src/main/java/com/awesomeproject/bridge/SpeechToTextModule.kt`
-- Modify: `AwesomeProject/android/app/src/main/java/com/awesomeproject/bridge/AccessibilityPackage.kt`
-- Modify: `AwesomeProject/android/app/src/main/AndroidManifest.xml` — `RECORD_AUDIO` 与：
-
-```xml
-<queries>
-    <intent>
-        <action android:name="android.speech.RecognitionService" />
-    </intent>
-</queries>
-```
-
-- Create: `AwesomeProject/src/features/task/asr/SpeechToText.ts`
-- Modify: `AwesomeProject/jest.setup.js` — `SpeechToTextModule: {}`
-- Test: `AwesomeProject/src/__tests__/features/task/asr/SpeechToText.test.ts`
-
-**Interfaces:**
-- Consumes: nothing
-- Produces:
-
-```ts
-export type SpeechEngine = 'system' | 'upgrade' | 'builtin';
-export type SpeechCapability = {
-  available: boolean;
-  onDeviceAvailable: boolean;
-  servicePackage?: string;
-};
-export type SpeechEvent =
-  | {type: 'ready'}
-  | {type: 'partial'; text: string}
-  | {type: 'final'; text: string; engine: SpeechEngine}
-  | {type: 'error'; code: 'busy' | 'no_match' | 'timeout' | 'network' | 'client' | 'unavailable'};
-
-export function getCapability(): Promise<SpeechCapability>;
-export function startSystemListen(): Promise<void>;
-export function stopSystemListen(): Promise<void>;
-export function destroySystemListen(): Promise<void>;
-export function isSystemFused(): boolean;
-```
-
-Native 必须：主线程 `createSpeechRecognizer` / `startListening`；API 31+ 先试 on-device；`queryIntentServices` 后才允许 `createSpeechRecognizer(context, component)`；3s 无 `onReadyForSpeech` → `unavailable`；`ERROR_NO_MATCH` / `ERROR_SPEECH_TIMEOUT` 不计入熔断；其它失败累计 2 次 `isSystemFused()==true`。禁止写死厂商包名。禁止 `ACTION_RECOGNIZE_SPEECH`。
-
-- [ ] **Step 1: Write the failing test**
-
-1. `startSystemListen` 在 fused 时立即 `error.unavailable` 且不调 native start。
-2. 两次 `error.client` 之后 `isSystemFused()` 为 true。
-3. `error.no_match` 不增加熔断计数。
-4. 仓库 `SpeechToTextModule.kt` 不含 `xiaoai` / `speechassist` / `jovi` / `bixby` 字符串（实现后用 `fs.readFileSync` 断言）。
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `cd AwesomeProject && npm test -- --testPathPattern=SpeechToText.test.ts`
-
-Expected: FAIL module not found.
-
-- [ ] **Step 3: Implement Kotlin + JS**
-
-`Intent` extras：`LANGUAGE_MODEL_FREE_FORM`、`zh-CN`、`EXTRA_PARTIAL_RESULTS=true`、`EXTRA_MAX_RESULTS=3`、`EXTRA_PREFER_OFFLINE=true`（偏好，不当事成）。用完 `destroy()`。
-
-- [ ] **Step 4: Run the tests and make sure they pass**
-
-Run: `cd AwesomeProject && npm test -- --testPathPattern=SpeechToText.test.ts`
-
-Expected: PASS
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add AwesomeProject/android/app/src/main/java/com/awesomeproject/bridge/SpeechToTextModule.kt \
-  AwesomeProject/android/app/src/main/java/com/awesomeproject/bridge/AccessibilityPackage.kt \
-  AwesomeProject/android/app/src/main/AndroidManifest.xml \
-  AwesomeProject/src/features/task/asr/SpeechToText.ts \
-  AwesomeProject/jest.setup.js \
-  AwesomeProject/src/__tests__/features/task/asr/SpeechToText.test.ts
-git commit -m "$(cat <<'EOF'
-feat: probe Android SpeechRecognizer with a fuse
-
-Prefer the system engine without binding vendor private components.
-EOF
-)"
-```
-
----
-
-### Task 5: Sherpa JNI 桥
+### Task 4: Sherpa JNI 桥
 
 **Files:**
 - Create: `AwesomeProject/android/app/src/main/java/com/awesomeproject/bridge/SherpaAsrModule.kt`
@@ -402,9 +313,9 @@ export function startListening(opts: {
 export function stopListening(): Promise<void>;
 ```
 
-Native：`AudioRecord` 16kHz mono；`OnlineRecognizer` + `OnlineStream`；endpoint 后 `final`。`packId` 在 `startListening` 时冻结，直到 `stopListening`。
+Native：`packId==='builtin'` 用 `OnlineRecognizer`（Zipformer 流式）。`packId==='upgrade'` 用 `OfflineRecognizer` + SenseVoice 配置，麦克风短句 + VAD 或静音超时后 `decode`。禁止 import `android.speech.SpeechRecognizer`。
 
-load 失败：emit `engine_failed`。upgrade 失败时 store 回滚 ready 标志。同一句是否改试下一档由 Task 6 的 Router 决定，Sherpa 模块自己不启动系统识别。
+load 失败：emit `engine_failed`。upgrade 失败时 store 回滚 ready 标志。同一句是否改试 Zipformer 由 Task 5 的 Router 决定。
 
 - [ ] **Step 1: Write the failing test**
 
@@ -418,7 +329,9 @@ Expected: FAIL
 
 - [ ] **Step 3: Implement module + wrapper**
 
-参考 sherpa-onnx `android/SherpaOnnx` 示例的 `OnlineRecognizerConfig` / `getModelConfig` 中文 14M 路径，但 encoder/decoder/joiner/tokens 必须来自 pins 的 `files[].name`，不要写死过期文件名。
+参考 sherpa-onnx Android 示例中的 SenseVoice `OfflineRecognizer` 与 Zipformer `OnlineRecognizer`。encoder/decoder/joiner/tokens 以及 SenseVoice 的 `model.int8.onnx` 必须来自 pins 的 `files[].name`。
+
+测试另加：`SherpaAsrModule.kt` 源码不含 `SpeechRecognizer`、`ACTION_RECOGNIZE_SPEECH`。
 
 - [ ] **Step 4: Run the tests and make sure they pass**
 
@@ -446,26 +359,25 @@ EOF
 
 ---
 
-### Task 6: SpeechRouter
+### Task 5: SpeechRouter
 
 **Files:**
 - Create: `AwesomeProject/src/features/task/asr/SpeechRouter.ts`
 - Test: `AwesomeProject/src/__tests__/features/task/asr/SpeechRouter.test.ts`
 
 **Interfaces:**
-- Consumes: `getCapability`, `startSystemListen`, `isSystemFused`, `resolveAsrPackId`, `getAsrDirUri`, Sherpa `startListening`
-- Produces: `startUtterance(onEvent)` / `stopUtterance()`，事件带 `engine: 'system' | 'upgrade' | 'builtin'`
+- Consumes: `resolveAsrPackId`, `getAsrDirUri`, Sherpa `startListening`
+- Produces: `startUtterance(onEvent)` / `stopUtterance()`，事件带 `engine: 'upgrade' | 'builtin'`
 
 规则：
 
-1. 未熔断则先系统。`error.unavailable|client|network` 且尚未 `ready` → 同一次调用改试 upgrade（若 ready）否则 builtin。
-2. 已 `ready` 后的失败：结束本句，不热切。
-3. 系统熔断或跳过：upgrade 可用则 Sherpa upgrade，否则 builtin。
-4. upgrade `engine_failed` 且尚未 `ready`：改 builtin。已 listening 则结束。
+1. `resolveAsrPackId()==='upgrade'` 则 SenseVoice。load 前 `engine_failed` → 同一次点按改 Zipformer。
+2. 已开始录音后失败：结束本句，不热切。
+3. 未就绪直接 Zipformer。
 
 - [ ] **Step 1: Write the failing test**
 
-覆盖：系统 ready+final；系统 Starting 失败落到 builtin；fused 时不调系统；upgrade 失败落到 builtin；listening 后失败不启动第二引擎。
+覆盖：upgrade ready → 调 Sherpa upgrade；upgrade load 失败且未 ready → builtin；listening 后失败不启动第二引擎；不调用任何 `SpeechToText` / `SpeechRecognizer` mock。
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -487,16 +399,16 @@ Expected: PASS
 git add AwesomeProject/src/features/task/asr/SpeechRouter.ts \
   AwesomeProject/src/__tests__/features/task/asr/SpeechRouter.test.ts
 git commit -m "$(cat <<'EOF'
-feat: route speech through system then large then small ASR
+feat: route speech SenseVoice first then Zipformer 14M
 
-Fall through only before the microphone is captured by an engine.
+Use the silently downloaded SenseVoice pack when ready, else the APK model.
 EOF
 )"
 ```
 
 ---
 
-### Task 7: 首页真实听写
+### Task 6: 首页真实听写
 
 **Files:**
 - Modify: `AwesomeProject/src/features/task/screens/HomeScreen.tsx`
@@ -559,16 +471,16 @@ git add AwesomeProject/src/features/task/screens/HomeScreen.tsx \
   AwesomeProject/src/shared/constants/permission.config.ts \
   AwesomeProject/src/__tests__/features/task/HomeScreenListen.test.tsx
 git commit -m "$(cat <<'EOF'
-feat: replace demo listen turns with the speech router
+feat: replace demo listen turns with on-device Sherpa ASR
 
-Ask for the mic, then system ASR before on-device large and small models.
+Ask for the mic, then SenseVoice if ready, else Zipformer 14M.
 EOF
 )"
 ```
 
 ---
 
-### Task 8: 小米 9 验收
+### Task 7: 小米 9 验收
 
 - [ ] **Step 1: 准备模型资产**
 
@@ -578,23 +490,19 @@ Expected: `android/app/src/main/assets/nono-asr/builtin/` 下有 onnx + tokens�
 
 - [ ] **Step 2: 安装并断网听写**
 
-飞行模式点角色，授予麦克风，说「打开设置」。Expected：出字（系统档在无网下应失败或熔断，落到 builtin）。无下载 UI。`logcat` 无 jsdelivr。
+飞行模式点角色，授予麦克风，说「打开设置」。Expected：出字，引擎为 Zipformer。无下载 UI。`logcat` 无 jsdelivr、无 `SpeechRecognizer`。
 
 - [ ] **Step 3: 拒麦克风**
 
 Expected：权限说明，不出现假句子。
 
-- [ ] **Step 4: 系统熔断**
+- [ ] **Step 4: Wi-Fi 静默升级 SenseVoice**
 
-若小米 9 上系统识别直接失败：连点两次失败后第三次 log 中 `engine` 为 `builtin` 或 `upgrade`，不再出现系统 `startListening`。
+连 Wi-Fi 使用 1 分钟，界面仍无下载文案。再用 `run-as` 看 `files/nono/asr/upgrade/` 是否出现。出现后下一句 `engine` 为 `upgrade`。
 
-- [ ] **Step 5: Wi-Fi 静默升级**
+人为截断 upgrade 文件，杀进程再听。Expected：无弹窗，仍能出字，引擎为 Zipformer。
 
-连 Wi-Fi 使用 1 分钟，界面仍无下载文案。再用 `run-as` 看 `files/nono/asr/upgrade/` 是否出现。出现后系统已熔断时下一句 `engine` 为 `upgrade`（log 只打 engine 与 text length）。
-
-人为截断 upgrade 文件，杀进程再听。Expected：无弹窗抱怨升级，仍能出字。
-
-- [ ] **Step 6: 移动网络**
+- [ ] **Step 5: 移动网络**
 
 关 Wi-Fi 开 4G，抓包或 logcat 确认没有 upgrade archive URL 请求。
 

@@ -2,6 +2,7 @@ import type {
   VisualAgentCapabilitySet,
   VisualAgentProfileV1,
   VisualAgentTaskEnvelopeV1,
+  VisualAgentTaskEvent,
 } from '@core/engine/operateRuntime/visualAgent/VisualAgentContracts';
 import type {
   VisualAgentBindingPort,
@@ -47,6 +48,26 @@ function makeSession(
 
 function makeBindings(binding: unknown): VisualAgentBindingPort {
   return {read: jest.fn(async () => binding)};
+}
+
+function makeCapturingSession(negotiated: VisualAgentCapabilitySet): {
+  session: VisualAgentUpstreamSession;
+  emit: (message: unknown) => void;
+} {
+  const captured: Array<(message: unknown) => void> = [];
+  const session: VisualAgentUpstreamSession = {
+    negotiate: async () => negotiated,
+    send: async () => undefined,
+    subscribe: listener => {
+      captured.push(listener);
+      return () => undefined;
+    },
+    close: async () => undefined,
+  };
+  return {
+    session,
+    emit: message => captured.forEach(listener => listener(message)),
+  };
 }
 
 const hermesBinding = (
@@ -141,6 +162,34 @@ describe('HermesAdapter', () => {
     await expect(execution.connect(hermesProfile, signal)).rejects.toThrow(
       'visual_agent_capability_unsupported',
     );
+  });
+
+  it('does not throw out of the subscribe listener on a malformed upstream frame', async () => {
+    const {session, emit} = makeCapturingSession(ALL_TRUE);
+    const adapter = new HermesAdapter(
+      makeBindings(hermesBinding('runs_http_sse')),
+      {open: jest.fn(async () => session)},
+    );
+    const execution = adapter.create(hermesProfile);
+    await execution.connect(hermesProfile, signal);
+    const events: VisualAgentTaskEvent[] = [];
+    execution.subscribe(event => events.push(event));
+    await execution.execute(envelope, signal);
+
+    expect(() => emit('{not-json')).not.toThrow();
+
+    expect(execution.getConnectionState()).toEqual({
+      status: 'failed',
+      errorCode: 'visual_agent_protocol_error',
+    });
+    const terminals = events.filter(event => event.type === 'terminal');
+    expect(terminals).toHaveLength(1);
+    expect(terminals[0]).toMatchObject({
+      status: 'failed',
+      errorCode: 'visual_agent_protocol_error',
+      taskId: 't1',
+      sessionRevision: 1,
+    });
   });
 
   it('passes the shared visual agent adapter conformance suite', async () => {

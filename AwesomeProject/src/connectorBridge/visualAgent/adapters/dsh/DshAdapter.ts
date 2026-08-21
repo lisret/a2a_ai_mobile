@@ -66,6 +66,9 @@ class DshExecutionPort implements VisualAgentExecutionPort {
   private negotiated: VisualAgentCapabilitySet | null = null;
   private tracker: VisualAgentProtocolTaskTracker | null = null;
   private requestSeq = 0;
+  private currentTask: {taskId: string; sessionRevision: number} | null = null;
+  private terminalDelivered = false;
+  private lastDeliveredSequence = -1;
   private readonly listeners = new Set<(event: VisualAgentTaskEvent) => void>();
 
   constructor(
@@ -110,9 +113,27 @@ class DshExecutionPort implements VisualAgentExecutionPort {
       this.handleUpstream(message),
     );
 
-    const negotiated = await session.negotiate(profile.requestedCapabilities);
+    const upstreamNegotiated = await session.negotiate(profile.requestedCapabilities);
+    // The binding's `declaredCapabilities` is a hard ceiling: a capability is only
+    // effective when the upstream negotiated it AND the DSH binding declares it.
+    const effective: Record<(typeof CAPABILITY_KEYS)[number], boolean> = {
+      imageInput: false,
+      structuredAction: false,
+      stream: false,
+      cancel: false,
+      approval: false,
+      resume: false,
+      steer: false,
+      preferences: false,
+    };
     for (const key of CAPABILITY_KEYS) {
-      if (profile.requestedCapabilities[key] && !negotiated[key]) {
+      effective[key] =
+        upstreamNegotiated[key] === true && binding.declaredCapabilities[key] === true;
+    }
+    // A requested capability that is not effective (missing from negotiation or
+    // above the declared ceiling) fails closed before the session becomes ready.
+    for (const key of CAPABILITY_KEYS) {
+      if (profile.requestedCapabilities[key] && !effective[key]) {
         this.state = {
           status: 'failed',
           errorCode: 'visual_agent_capability_unsupported',
@@ -122,26 +143,37 @@ class DshExecutionPort implements VisualAgentExecutionPort {
       }
     }
 
+    const negotiated: VisualAgentCapabilitySet = effective;
     this.negotiated = negotiated;
     this.state = {status: 'ready', negotiatedCapabilities: negotiated};
     return negotiated;
   }
 
   private handleUpstream(message: unknown): void {
-    if (typeof message !== 'string') {
+    // A malformed or mis-correlated frame must never throw out of the upstream
+    // subscribe listener. Decode/tracker rejections are caught and modeled as a
+    // `visual_agent_protocol_error` failed state; the raw frame is never leaked.
+    if (this.terminalDelivered) {
       return;
     }
-    const decoded = decodeVisualAgentMessage(message);
-    switch (decoded.type) {
-      case 'task.status':
-      case 'task.event':
-      case 'task.completed':
-      case 'task.failed':
-      case 'task.cancelled':
-        this.forward(decoded.event);
-        break;
-      default:
-        break;
+    try {
+      if (typeof message !== 'string') {
+        return;
+      }
+      const decoded = decodeVisualAgentMessage(message);
+      switch (decoded.type) {
+        case 'task.status':
+        case 'task.event':
+        case 'task.completed':
+        case 'task.failed':
+        case 'task.cancelled':
+          this.forward(decoded.event);
+          break;
+        default:
+          break;
+      }
+    } catch {
+      this.failWithProtocolError();
     }
   }
 
@@ -149,8 +181,32 @@ class DshExecutionPort implements VisualAgentExecutionPort {
     if (this.tracker) {
       this.tracker.accept(event);
     }
+    this.lastDeliveredSequence = event.sequence;
+    if (event.type === 'terminal') {
+      this.terminalDelivered = true;
+    }
     for (const listener of [...this.listeners]) {
       listener(event);
+    }
+  }
+
+  private failWithProtocolError(): void {
+    this.state = {status: 'failed', errorCode: 'visual_agent_protocol_error'};
+    if (!this.currentTask || this.terminalDelivered) {
+      return;
+    }
+    const terminal: VisualAgentTaskEvent = {
+      type: 'terminal',
+      taskId: this.currentTask.taskId,
+      sessionRevision: this.currentTask.sessionRevision,
+      sequence: this.lastDeliveredSequence + 1,
+      status: 'failed',
+      errorCode: 'visual_agent_protocol_error',
+    };
+    this.terminalDelivered = true;
+    this.lastDeliveredSequence = terminal.sequence;
+    for (const listener of [...this.listeners]) {
+      listener(terminal);
     }
   }
 
@@ -193,6 +249,12 @@ class DshExecutionPort implements VisualAgentExecutionPort {
       taskId: envelope.taskId,
       sessionRevision: envelope.sessionRevision,
     });
+    this.currentTask = {
+      taskId: envelope.taskId,
+      sessionRevision: envelope.sessionRevision,
+    };
+    this.terminalDelivered = false;
+    this.lastDeliveredSequence = -1;
     await session.send(
       encodeVisualAgentMessage({
         version: 1,
@@ -321,6 +383,7 @@ class DshExecutionPort implements VisualAgentExecutionPort {
   async disconnect(): Promise<void> {
     await this.closeSession();
     this.tracker = null;
+    this.currentTask = null;
     this.negotiated = null;
     this.state = {status: 'disconnected'};
   }

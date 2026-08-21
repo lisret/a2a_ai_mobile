@@ -137,8 +137,18 @@ class OpenClawExecutionPort implements VisualAgentExecutionPort {
     signal: AbortSignal,
   ): Promise<VisualAgentCapabilitySet> {
     this.state = {status: 'connecting'};
-    const rawBinding = await this.bindings.read(profile.connector.bindingId, 'openclaw');
-    const binding = parseOpenClawBindingV1(rawBinding);
+    let binding: ReturnType<typeof parseOpenClawBindingV1>;
+    try {
+      const rawBinding = await this.bindings.read(profile.connector.bindingId, 'openclaw');
+      binding = parseOpenClawBindingV1(rawBinding);
+    } catch (error) {
+      const errorCode: VisualAgentErrorCode =
+        error instanceof CapabilityError && isVisualAgentErrorCode(error.code)
+          ? error.code
+          : 'visual_agent_invalid_profile';
+      this.state = {status: 'failed', errorCode};
+      throw new CapabilityError(errorCode);
+    }
 
     this.state = {status: 'authenticating'};
     let session: VisualAgentUpstreamSession;

@@ -143,6 +143,35 @@ describe('OpenClawAdapter', () => {
     expect(upstream.open).not.toHaveBeenCalled();
   });
 
+  it('maps a binding-port rejection to a generic error and a failed state without leaking the raw message', async () => {
+    const session = makeSession();
+    const upstream = makeUpstream(session);
+    const bindings = makeBindings();
+    (bindings.read as jest.Mock).mockRejectedValue(
+      new Error('binding store offline: dsn=postgres://user:pw@internal-host/db'),
+    );
+    const adapter = new OpenClawAdapter(bindings, upstream, makeTimer());
+    const profile = makeProfile(allCapabilities);
+    const execution = adapter.create(profile);
+    const controller = new AbortController();
+
+    await expect(execution.connect(profile, controller.signal)).rejects.toThrow(
+      'visual_agent_invalid_profile',
+    );
+    try {
+      await execution.connect(profile, controller.signal);
+    } catch (error) {
+      expect(String((error as Error).message)).not.toMatch(/postgres|internal-host|binding store offline/);
+    }
+    expect(upstream.open).not.toHaveBeenCalled();
+    const state = execution.getConnectionState();
+    expect(state.status).not.toBe('connecting');
+    expect(state.status).toBe('failed');
+    if (state.status === 'failed') {
+      expect(state.errorCode).toBe('visual_agent_invalid_profile');
+    }
+  });
+
   it('maps a Gateway auth failure to the generic auth error code without leaking details', async () => {
     const session = makeSession();
     const upstream = makeUpstream(session);

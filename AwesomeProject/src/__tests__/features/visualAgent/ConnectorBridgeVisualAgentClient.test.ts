@@ -220,6 +220,20 @@ describe('ConnectorBridgeVisualAgentClient', () => {
     expect(events.every(e => e.taskId === 't-1' && e.sessionRevision === 1)).toBe(true);
   });
 
+  it('rejects cancel with not_ready before connect rather than throwing synchronously', async () => {
+    const bridge = makeBridge(allCapabilities);
+    const signal = new AbortController().signal;
+    const client = new ConnectorBridgeVisualAgentClient(
+      bridge.transport as unknown as ConnectorBridgeTransport,
+      makeTimer(),
+      makeIds(),
+    );
+
+    const pending = client.cancel({taskId: 't-1', sessionRevision: 1}, signal);
+    expect(pending).toBeInstanceOf(Promise);
+    await expect(pending).rejects.toThrow('visual_agent_not_ready');
+  });
+
   it('rejects a pending cancel with a cancel timeout when the bridge is silent', async () => {
     const bridge = makeBridge(allCapabilities);
     const timer = makeTimer();

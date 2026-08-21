@@ -391,4 +391,14 @@ describe('VisualAgentProfileController.list/readActiveProjection', () => {
     const {controller} = makeController({runtimeConfig});
     await expect(controller.readActiveProjection()).resolves.toBeNull();
   });
+
+  it('reads the global visualAgent.enabled flag from the active route', async () => {
+    const {controller} = makeController();
+    await expect(controller.readEnabled()).resolves.toBe(true);
+
+    const runtimeConfig = makeRuntimeConfig();
+    runtimeConfig.load.mockResolvedValue(envelope({enabled: false}));
+    const disabled = makeController({runtimeConfig});
+    await expect(disabled.controller.readEnabled()).resolves.toBe(false);
+  });
 });

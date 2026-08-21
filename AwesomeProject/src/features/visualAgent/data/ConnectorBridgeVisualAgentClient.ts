@@ -128,7 +128,7 @@ export class ConnectorBridgeVisualAgentClient implements VisualAgentExecutionPor
     return {taskId: envelope.taskId};
   }
 
-  cancel(
+  async cancel(
     input: {taskId: string; sessionRevision: number},
     _signal: AbortSignal,
   ): Promise<void> {
@@ -208,7 +208,7 @@ export class ConnectorBridgeVisualAgentClient implements VisualAgentExecutionPor
     }));
   }
 
-  requestPreferences(
+  async requestPreferences(
     command: VisualAgentPreferenceCommand,
     signal: AbortSignal,
   ): Promise<unknown> {
@@ -216,7 +216,7 @@ export class ConnectorBridgeVisualAgentClient implements VisualAgentExecutionPor
     this.assertCapability('preferences');
     const session = this.session;
     if (!session) {
-      return Promise.reject(new CapabilityError('visual_agent_disconnected'));
+      throw new CapabilityError('visual_agent_disconnected');
     }
     const requestId = this.ids.next();
     return new Promise<unknown>((resolve, reject) => {

@@ -100,10 +100,12 @@ export class VisualAgentFacade {
 
   private async project(): Promise<VisualAgentViewState> {
     let projection: Awaited<ReturnType<VisualAgentProfileController['readActiveProjection']>>;
-    let profiles: readonly VisualAgentProfileV1[];
+    let enabled: boolean;
     try {
-      projection = await this.profiles.readActiveProjection();
-      profiles = await this.profiles.list();
+      [enabled, projection] = await Promise.all([
+        this.profiles.readEnabled(),
+        this.profiles.readActiveProjection(),
+      ]);
     } catch {
       return {
         status: 'error',
@@ -118,10 +120,6 @@ export class VisualAgentFacade {
     }
 
     const connection = this.execution.getConnectionState();
-    const activeFull = projection
-      ? profiles.find(profile => profile.profileId === projection?.profileId)
-      : undefined;
-    const enabled = activeFull?.enabled === true;
     const negotiatedCapabilities =
       connection.status === 'ready' ? connection.negotiatedCapabilities : null;
     const canExecute =

@@ -121,6 +121,11 @@ export class VisualAgentProfileController {
     return envelope.active.visualAgent.profiles;
   }
 
+  async readEnabled(): Promise<boolean> {
+    const envelope = await this.runtimeConfig.load();
+    return envelope.active.visualAgent.enabled;
+  }
+
   async readActiveProjection(): Promise<VisualAgentProfileProjectionV1 | null> {
     const envelope = await this.runtimeConfig.load();
     const activeProfileId = envelope.active.visualAgent.activeProfileId;

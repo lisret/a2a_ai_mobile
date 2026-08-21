@@ -37,20 +37,27 @@ const activeProfileFull: VisualAgentProfileV1 = {
   requestedCapabilities: allCapabilities,
 };
 
-function makeController(): jest.Mocked<
-  Pick<
-    VisualAgentProfileController,
-    'readActiveProjection' | 'list' | 'setEnabled' | 'setActive'
-  >
-> {
+interface ControllerStub {
+  readEnabled: jest.Mock;
+  readActiveProjection: jest.Mock;
+  list: jest.Mock;
+  setEnabled: jest.Mock;
+  setActive: jest.Mock;
+}
+
+function makeController(): ControllerStub {
+  let enabled = true;
   return {
+    readEnabled: jest.fn(async () => enabled),
     readActiveProjection: jest.fn().mockResolvedValue({
       profileId: 'codex-main',
       toolId: 'codex',
       connectorRef: {kind: 'connector_bridge', bindingId: 'b-1'},
     }),
     list: jest.fn().mockResolvedValue([activeProfileFull]),
-    setEnabled: jest.fn().mockResolvedValue(undefined),
+    setEnabled: jest.fn(async (value: boolean) => {
+      enabled = value;
+    }),
     setActive: jest.fn().mockResolvedValue(undefined),
   };
 }
@@ -105,6 +112,24 @@ describe('VisualAgentFacade', () => {
     expect(JSON.stringify(state)).not.toMatch(
       /secretRef|token|command|args|gatewayUrl|raw|stack/i,
     );
+  });
+
+  it('reflects the global enabled flag written by setEnabled', async () => {
+    const controller = makeController();
+    const {port} = makeExecution();
+    const facade = new VisualAgentFacade(
+      controller as unknown as VisualAgentProfileController,
+      port,
+    );
+
+    const afterDisable = await facade.setEnabled(false, 7);
+    expect(controller.setEnabled).toHaveBeenCalledWith(false, 7);
+    expect(afterDisable.enabled).toBe(false);
+    expect(afterDisable.canExecute).toBe(false);
+
+    const reread = await facade.read();
+    expect(reread.enabled).toBe(false);
+    expect(reread.canExecute).toBe(false);
   });
 
   it('connects through the execution port with the active profile and reflects readiness', async () => {

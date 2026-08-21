@@ -84,7 +84,8 @@ class TaskExecutionHeadlessService : HeadlessJsTaskService() {
             return null
         }
 
-        Log.d(TAG, "任务数据: $taskData")
+        // 不打印原始 taskData（可能含敏感数据）；仅由 JS 侧解析最小载荷
+        Log.d(TAG, "已接收后台任务载荷")
 
         // 创建任务配置
         // 将任务数据（JSON 字符串）传递给 JavaScript

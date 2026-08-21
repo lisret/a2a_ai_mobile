@@ -3,7 +3,10 @@
 // session recovery, and retired-ref reconciliation BEFORE any `createSession`
 // is admitted. A ref held by active/draft config or a nonterminal session is
 // never deleted, and a failed cleanup keeps the gate closed.
-import type {OperateRuntime, OperateSessionCreateOutcome} from './OperateRuntime';
+import type {
+  OperateRuntime,
+  OperateSessionCreateOutcome,
+} from './OperateRuntime';
 import type {RuntimeConfigRepository} from './contracts/RuntimeConfigContracts';
 import type {OperateSessionStore} from './session/OperateSessionStore';
 import type {CredentialReferenceGarbageCollector} from './session/CredentialReferenceGarbageCollector';

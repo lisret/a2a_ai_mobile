@@ -52,18 +52,28 @@ function visualProfile(secretRef: string | null): VisualAgentProfileV1 {
   };
 }
 
-function route(overrides: {
-  modelSecretRefs?: (string | null)[];
-  visualSecretRefs?: (string | null)[];
-} = {}): RuntimeRouteConfigV1 {
+function route(
+  overrides: {
+    modelSecretRefs?: (string | null)[];
+    visualSecretRefs?: (string | null)[];
+  } = {},
+): RuntimeRouteConfigV1 {
   return {
     capabilities: {phoneOperate: true, errands: false},
-    privacy: {memoryEnabled: false, memoryLocation: 'device', memoryProfileId: null},
+    privacy: {
+      memoryEnabled: false,
+      memoryLocation: 'device',
+      memoryProfileId: null,
+    },
     modelAPI: {
       agentConfig: {
         version: 2,
         activeMode: 'cloud_direct',
-        modeDrafts: {cloudDirect: {}, cloudSplit: {}, localVisionCloudPlanner: {}},
+        modeDrafts: {
+          cloudDirect: {},
+          cloudSplit: {},
+          localVisionCloudPlanner: {},
+        },
         maxSteps: 20,
       } as RuntimeRouteConfigV1['modelAPI']['agentConfig'],
       profiles: (overrides.modelSecretRefs ?? []).map(modelProfile),
@@ -102,7 +112,12 @@ function bindingSnapshot(secretRef: string | null) {
     secretRef,
     inputModalities: ['text', 'image'],
     outputModalities: ['text'],
-    capabilities: {chat: true, vision: true, toolCalls: true, reasoning: 'unknown'},
+    capabilities: {
+      chat: true,
+      vision: true,
+      toolCalls: true,
+      reasoning: 'unknown',
+    },
     capabilityTrust: 'verified_remote',
   } as ProviderExecutionTargetV1 & {
     role: 'direct';
@@ -131,7 +146,9 @@ function committed(
 ): CredentialRetirementRecordV1 {
   return {
     schemaVersion: 1,
-    retirementId: `ret:${oldSecretRef ?? 'null'}:${replacementSecretRef ?? 'null'}`,
+    retirementId: `ret:${oldSecretRef ?? 'null'}:${
+      replacementSecretRef ?? 'null'
+    }`,
     state: 'committed',
     oldSecretRef,
     replacementSecretRef,
@@ -193,7 +210,9 @@ describe('CredentialReferenceGarbageCollector', () => {
   it('completes a committed create record with a null old ref without deleting', async () => {
     const h = makeHarness();
     h.retirements.list.mockResolvedValue([committed(null, 'model:new')]);
-    h.configLoad.mockResolvedValue(envelope(route({modelSecretRefs: ['model:new']})));
+    h.configLoad.mockResolvedValue(
+      envelope(route({modelSecretRefs: ['model:new']})),
+    );
     await h.collector.reconcileBeforeAcceptingTasks();
     expect(h.credentials.delete).not.toHaveBeenCalled();
     expect(h.retirements.complete).toHaveBeenCalledWith('ret:null:model:new');
@@ -215,9 +234,15 @@ describe('CredentialReferenceGarbageCollector', () => {
 
   it('keeps a committed ref pinned by active or draft config', async () => {
     const h = makeHarness(
-      envelope(route({modelSecretRefs: ['model:kept']}), route({visualSecretRefs: ['visual:kept']})),
+      envelope(
+        route({modelSecretRefs: ['model:kept']}),
+        route({visualSecretRefs: ['visual:kept']}),
+      ),
     );
-    h.retirements.list.mockResolvedValue([committed('model:kept'), committed('visual:kept')]);
+    h.retirements.list.mockResolvedValue([
+      committed('model:kept'),
+      committed('visual:kept'),
+    ]);
     await h.collector.reconcileBeforeAcceptingTasks();
     expect(h.credentials.delete).not.toHaveBeenCalled();
   });
@@ -228,7 +253,9 @@ describe('CredentialReferenceGarbageCollector', () => {
     await h.collector.reconcileBeforeAcceptingTasks();
     expect(h.credentials.delete).toHaveBeenCalledWith('model:old');
     expect(h.credentials.delete).not.toHaveBeenCalledWith('model:new');
-    expect(h.retirements.complete).toHaveBeenCalledWith('ret:model:old:model:new');
+    expect(h.retirements.complete).toHaveBeenCalledWith(
+      'ret:model:old:model:new',
+    );
   });
 
   it('deletes the orphan replacement and rolls back an unreferenced staged replacement', async () => {
@@ -237,7 +264,9 @@ describe('CredentialReferenceGarbageCollector', () => {
     await h.collector.reconcileBeforeAcceptingTasks();
     expect(h.credentials.delete).toHaveBeenCalledWith('model:orphan');
     expect(h.credentials.delete).not.toHaveBeenCalledWith('model:old');
-    expect(h.retirements.rollback).toHaveBeenCalledWith('ret:model:old:model:orphan');
+    expect(h.retirements.rollback).toHaveBeenCalledWith(
+      'ret:model:old:model:orphan',
+    );
     expect(h.retirements.complete).not.toHaveBeenCalled();
   });
 
@@ -252,7 +281,9 @@ describe('CredentialReferenceGarbageCollector', () => {
   it('commits and waits on a staged removal pinned only by a nonterminal session', async () => {
     const h = makeHarness();
     h.retirements.list.mockResolvedValue([staged('model:pinned', null)]);
-    h.sessions.listNonterminal.mockResolvedValue([sessionUsing('model:pinned')]);
+    h.sessions.listNonterminal.mockResolvedValue([
+      sessionUsing('model:pinned'),
+    ]);
     await h.collector.reconcileBeforeAcceptingTasks();
     expect(h.credentials.delete).not.toHaveBeenCalled();
     expect(h.retirements.commit).toHaveBeenCalledWith('ret:model:pinned:null');
@@ -280,8 +311,12 @@ describe('CredentialReferenceGarbageCollector', () => {
   it('does not log any credential ref', async () => {
     const h = makeHarness();
     h.retirements.list.mockResolvedValue([committed('model:secret-ref')]);
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const info = jest.spyOn(console, 'info').mockImplementation(() => undefined);
+    const warn = jest
+      .spyOn(console, 'warn')
+      .mockImplementation(() => undefined);
+    const info = jest
+      .spyOn(console, 'info')
+      .mockImplementation(() => undefined);
     const log = jest.spyOn(console, 'log').mockImplementation(() => undefined);
     await h.collector.reconcileBeforeAcceptingTasks();
     const emitted = [...warn.mock.calls, ...info.mock.calls, ...log.mock.calls]

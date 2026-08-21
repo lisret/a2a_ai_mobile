@@ -22,7 +22,8 @@ const CREDENTIAL_KEY_PATTERN =
 const CONTENT_KEY_PATTERN =
   /(screenshot|image|instruction|prompt|response|history|conversation|stack|task[-_]?data)/i;
 
-const DATA_IMAGE_PATTERN = /data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+/gi;
+const DATA_IMAGE_PATTERN =
+  /data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]+/gi;
 
 const DOUBLE_QUOTED_AUTHORIZATION_PATTERN =
   /("Authorization"\s*:\s*")((?:\\.|[^"\\])*)"/gi;
@@ -61,7 +62,9 @@ export function sanitizeLogText(value: string): string {
   return redacted;
 }
 
-function sanitizeError(error: Error): SanitizedLogEntry & {readonly name: string} {
+function sanitizeError(
+  error: Error,
+): SanitizedLogEntry & {readonly name: string} {
   return {
     name: typeof error.name === 'string' ? error.name : 'Error',
     message: sanitizeLogText(
@@ -161,7 +164,10 @@ function safeStringify(value: unknown): string {
   }
 }
 
-export function sanitizeLog(message: unknown, data?: unknown): SanitizedLogEntry {
+export function sanitizeLog(
+  message: unknown,
+  data?: unknown,
+): SanitizedLogEntry {
   const sanitizedMessage =
     typeof message === 'string'
       ? sanitizeLogText(message)

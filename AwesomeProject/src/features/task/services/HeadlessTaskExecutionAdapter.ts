@@ -34,7 +34,11 @@ export function parseTaskExecutionData(
   }
   const record = parsed as Record<string, unknown>;
   const keys = Object.keys(record);
-  if (keys.length !== 2 || !('taskId' in record) || !('sessionRevision' in record)) {
+  if (
+    keys.length !== 2 ||
+    !('taskId' in record) ||
+    !('sessionRevision' in record)
+  ) {
     return null;
   }
   const {taskId, sessionRevision} = record;
@@ -51,7 +55,9 @@ export function parseTaskExecutionData(
   return {taskId, sessionRevision};
 }
 
-export function serializeHeadlessTaskData(data: HeadlessTaskExecutionData): string {
+export function serializeHeadlessTaskData(
+  data: HeadlessTaskExecutionData,
+): string {
   return JSON.stringify({
     taskId: data.taskId,
     sessionRevision: data.sessionRevision,
@@ -59,7 +65,11 @@ export function serializeHeadlessTaskData(data: HeadlessTaskExecutionData): stri
 }
 
 export type HeadlessTaskExecutionResult =
-  | {readonly ok: true; readonly taskId: string; readonly outcome: OperateTaskOutcome}
+  | {
+      readonly ok: true;
+      readonly taskId: string;
+      readonly outcome: OperateTaskOutcome;
+    }
   | {readonly ok: false; readonly code: string; readonly taskId?: string};
 
 export interface HeadlessTaskExecutionAdapterDeps {

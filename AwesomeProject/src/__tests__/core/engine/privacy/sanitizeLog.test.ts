@@ -6,14 +6,23 @@ import {
 
 describe('sanitizeLogText', () => {
   it('redacts Authorization headers and secret assignments', () => {
-    expect(sanitizeLogText('Authorization: Bearer sk-abc123')).toContain('[REDACTED]');
-    expect(sanitizeLogText('Authorization: Bearer sk-abc123')).not.toContain('sk-abc123');
-    expect(sanitizeLogText('apiKey=super-secret-value')).toContain('[REDACTED]');
-    expect(sanitizeLogText('apiKey=super-secret-value')).not.toContain('super-secret-value');
+    expect(sanitizeLogText('Authorization: Bearer sk-abc123')).toContain(
+      '[REDACTED]',
+    );
+    expect(sanitizeLogText('Authorization: Bearer sk-abc123')).not.toContain(
+      'sk-abc123',
+    );
+    expect(sanitizeLogText('apiKey=super-secret-value')).toContain(
+      '[REDACTED]',
+    );
+    expect(sanitizeLogText('apiKey=super-secret-value')).not.toContain(
+      'super-secret-value',
+    );
   });
 
   it('redacts base64 image data URIs', () => {
-    const text = 'shot data:image/jpeg;base64,/9j/4AAQSkZJRgABAgAAAQABAAD/2wBD end';
+    const text =
+      'shot data:image/jpeg;base64,/9j/4AAQSkZJRgABAgAAAQABAAD/2wBD end';
     const result = sanitizeLogText(text);
     expect(result).toContain('[CONTENT_REDACTED]');
     expect(result).not.toContain('/9j/4AAQSkZJRgABAgAAAQABAAD');
@@ -81,7 +90,9 @@ describe('sanitizeLogValue', () => {
   });
 
   it('bounds large arrays at 50 entries', () => {
-    const result = sanitizeLogValue(Array.from({length: 200}, (_, i) => i)) as unknown[];
+    const result = sanitizeLogValue(
+      Array.from({length: 200}, (_, i) => i),
+    ) as unknown[];
     expect(result.length).toBeLessThanOrEqual(51);
     expect(result[result.length - 1]).toBe('[Truncated]');
   });
@@ -98,7 +109,10 @@ describe('sanitizeLog', () => {
   it('returns a sanitized message and data pair', () => {
     const entry = sanitizeLog('user prompt', {apiKey: 'sk', instruction: 'go'});
     expect(entry.message).toBe('user prompt');
-    expect(entry.data).toEqual({apiKey: '[REDACTED]', instruction: '[CONTENT_REDACTED]'});
+    expect(entry.data).toEqual({
+      apiKey: '[REDACTED]',
+      instruction: '[CONTENT_REDACTED]',
+    });
   });
 
   it('omits data when none is provided', () => {

@@ -71,7 +71,11 @@ export class CredentialReferenceGarbageCollector {
       // Staged replacement: a referenced replacement proves the CAS committed;
       // an unreferenced replacement is a CAS/crash orphan.
       if (allRefs.has(replacementSecretRef)) {
-        await this.reconcileCommittedOldRef(retirementId, oldSecretRef, allRefs);
+        await this.reconcileCommittedOldRef(
+          retirementId,
+          oldSecretRef,
+          allRefs,
+        );
       } else {
         await this.deleteAndVerify(replacementSecretRef);
         await this.retirements.rollback(retirementId);
@@ -150,7 +154,10 @@ export class CredentialReferenceGarbageCollector {
     }
   }
 
-  private addSessionRefs(session: ResolvedOperateSessionV1, into: Set<string>): void {
+  private addSessionRefs(
+    session: ResolvedOperateSessionV1,
+    into: Set<string>,
+  ): void {
     const {direct, vision, planner} = session.modelBindings;
     for (const binding of [direct, vision, planner]) {
       if (binding && binding.secretRef !== null) {

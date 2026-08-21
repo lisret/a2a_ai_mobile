@@ -9,7 +9,10 @@ import type {OperateTaskOutcome} from '@core/engine/operateRuntime/runner/Operat
 export type OperateSessionCreateOutcome =
   | {
       readonly ok: true;
-      readonly session: {readonly taskId: string; readonly sessionRevision: number};
+      readonly session: {
+        readonly taskId: string;
+        readonly sessionRevision: number;
+      };
     }
   | {readonly ok: false; readonly code: string};
 

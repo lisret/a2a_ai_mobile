@@ -183,6 +183,28 @@ describe('TaskHistoryService', () => {
       expect(prefixCalls).toHaveLength(0);
     });
 
+    it('does not persist output.finalScreenshot', async () => {
+      const finalScreenshot = 'data:image/png;base64,FINAL_SCREENSHOT';
+      const taskWithFinalScreenshot: Task = {
+        ...mockTask,
+        id: 'task_final_screenshot',
+        output: {
+          steps: [],
+          finalScreenshot,
+        },
+      };
+
+      await taskHistoryService.saveTask(taskWithFinalScreenshot);
+
+      const rawStoredJson = store[STORAGE_KEYS.TASKS];
+      expect(rawStoredJson).toBeDefined();
+      expect(rawStoredJson).not.toContain('FINAL_SCREENSHOT');
+      expect(rawStoredJson).not.toMatch(/data:image/);
+
+      const stored = await taskHistoryService.getTaskById('task_final_screenshot');
+      expect(stored?.output?.finalScreenshot).toBeUndefined();
+    });
+
     it('never persists apiKey, secretRef, screenshot data URIs, or raw model responses', async () => {
       const sensitiveTask: Task = {
         ...mockTask,

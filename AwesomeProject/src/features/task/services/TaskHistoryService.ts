@@ -48,10 +48,11 @@ function projectTaskForStorage(task: Task): Task {
   if (!task.output) {
     return task;
   }
+  const {finalScreenshot, ...safeOutput} = task.output;
   return {
     ...task,
     output: {
-      ...task.output,
+      ...safeOutput,
       steps: task.output.steps.map(projectStepForStorage),
       summary: task.output.summary?.slice(0, MAX_OUTPUT_SUMMARY_LENGTH),
     },

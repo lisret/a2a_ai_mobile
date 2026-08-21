@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS } from '@shared/constants';
+import { sanitizeLog, sanitizeLogValue } from '@core/engine/privacy/sanitizeLog';
 
 const DEBUG_LOG_KEY = STORAGE_KEYS.DEBUG_LOG;
 const MAX_LOG_LINES = 10000; // 调试日志最大行数，可考虑移到配置中
@@ -18,6 +19,8 @@ export interface DebugLogEntry {
 class DebugLogService {
   private logs: DebugLogEntry[] = [];
   private initialized = false;
+  // Rejection-safe write queue so concurrent additions never overwrite newer logs.
+  private saveQueue: Promise<void> = Promise.resolve();
   private originalConsole: {
     log: typeof console.log;
     info: typeof console.info;
@@ -65,34 +68,35 @@ class DebugLogService {
       debug: console.debug,
     };
 
-    // 重写 console.log
+    // 重写 console 方法：在写入平台 console 与内存日志前先脱敏
     console.log = (...args: any[]) => {
-      this.originalConsole!.log(...args);
-      this.addLog('log', this.formatMessage(args));
+      const safe = args.map(sanitizeLogValue);
+      this.originalConsole!.log(...safe);
+      this.addLog('log', this.formatMessage(safe));
     };
 
-    // 重写 console.info
     console.info = (...args: any[]) => {
-      this.originalConsole!.info(...args);
-      this.addLog('info', this.formatMessage(args));
+      const safe = args.map(sanitizeLogValue);
+      this.originalConsole!.info(...safe);
+      this.addLog('info', this.formatMessage(safe));
     };
 
-    // 重写 console.warn
     console.warn = (...args: any[]) => {
-      this.originalConsole!.warn(...args);
-      this.addLog('warn', this.formatMessage(args));
+      const safe = args.map(sanitizeLogValue);
+      this.originalConsole!.warn(...safe);
+      this.addLog('warn', this.formatMessage(safe));
     };
 
-    // 重写 console.error
     console.error = (...args: any[]) => {
-      this.originalConsole!.error(...args);
-      this.addLog('error', this.formatMessage(args));
+      const safe = args.map(sanitizeLogValue);
+      this.originalConsole!.error(...safe);
+      this.addLog('error', this.formatMessage(safe));
     };
 
-    // 重写 console.debug
     console.debug = (...args: any[]) => {
-      this.originalConsole!.debug(...args);
-      this.addLog('debug', this.formatMessage(args));
+      const safe = args.map(sanitizeLogValue);
+      this.originalConsole!.debug(...safe);
+      this.addLog('debug', this.formatMessage(safe));
     };
   }
 
@@ -118,11 +122,12 @@ class DebugLogService {
    * 添加日志
    */
   addLog(level: DebugLogEntry['level'], message: string, data?: any): void {
+    const sanitized = sanitizeLog(message, data);
     const entry: DebugLogEntry = {
       timestamp: Date.now(),
       level,
-      message,
-      data,
+      message: sanitized.message,
+      data: sanitized.data,
     };
 
     // 新日志添加到开头
@@ -174,17 +179,30 @@ class DebugLogService {
       const jsonValue = await AsyncStorage.getItem(DEBUG_LOG_KEY);
       if (jsonValue) {
         const loadedLogs = JSON.parse(jsonValue) as DebugLogEntry[];
-        
+
+        // 迁移/脱敏旧数据：对每条历史日志重新执行脱敏，避免旧明文残留
+        const sanitizedLogs = loadedLogs.map(entry => {
+          const sanitized = sanitizeLog(entry.message, entry.data);
+          return {
+            timestamp: entry.timestamp,
+            level: entry.level,
+            message: sanitized.message,
+            data: sanitized.data,
+          } as DebugLogEntry;
+        });
+
         // 确保按照时间倒序排序（最新在前）
         // 这兼容了旧数据的顺序（如果有的话）
-        loadedLogs.sort((a, b) => b.timestamp - a.timestamp);
+        sanitizedLogs.sort((a, b) => b.timestamp - a.timestamp);
 
         // 确保不超过最大行数
-        if (loadedLogs.length > MAX_LOG_LINES) {
-          this.logs = loadedLogs.slice(0, MAX_LOG_LINES);
-        } else {
-          this.logs = loadedLogs;
-        }
+        this.logs =
+          sanitizedLogs.length > MAX_LOG_LINES
+            ? sanitizedLogs.slice(0, MAX_LOG_LINES)
+            : sanitizedLogs;
+
+        // 将脱敏后的数据回写，替换 AsyncStorage 中可能包含明文的旧记录
+        await this.saveLogs();
       }
     } catch (error) {
       console.error('加载调试日志失败:', error);
@@ -195,16 +213,20 @@ class DebugLogService {
   /**
    * 保存日志
    */
-  private async saveLogs(): Promise<void> {
-    try {
-      const jsonValue = JSON.stringify(this.logs);
-      await AsyncStorage.setItem(DEBUG_LOG_KEY, jsonValue);
-    } catch (error) {
-      // 如果保存失败，只记录错误，不影响应用运行
-      if (this.originalConsole) {
-        this.originalConsole.error('保存调试日志失败:', error);
+  private saveLogs(): Promise<void> {
+    // 串行化写入：即使某次写入失败，也不会阻断后续更新的落盘
+    const run = this.saveQueue.then(async () => {
+      try {
+        const jsonValue = JSON.stringify(this.logs);
+        await AsyncStorage.setItem(DEBUG_LOG_KEY, jsonValue);
+      } catch (error) {
+        if (this.originalConsole) {
+          this.originalConsole.error('保存调试日志失败:', error);
+        }
       }
-    }
+    });
+    this.saveQueue = run.catch(() => undefined);
+    return run;
   }
 
   /**

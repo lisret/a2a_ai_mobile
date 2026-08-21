@@ -1,5 +1,6 @@
 package com.awesomeproject.bridge
 
+import com.awesomeproject.localmodel.UnavailableLocalModelOperations
 import com.facebook.react.ReactPackage
 import com.facebook.react.bridge.NativeModule
 import com.facebook.react.bridge.ReactApplicationContext
@@ -25,7 +26,9 @@ class AccessibilityPackage : ReactPackage {
             AccessibilityModule(reactContext),
             AccessibilityActionModule(reactContext),
             ADBModule(reactContext),
-            FloatingWindowModule(reactContext)
+            FloatingWindowModule(reactContext),
+            SecureCredentialModule(reactContext),
+            LocalModelEligibilityModule(reactContext, UnavailableLocalModelOperations())
         )
     }
 

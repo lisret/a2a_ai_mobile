@@ -24,7 +24,14 @@ class TaskExecutionService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "task_execution_channel"
         private const val CHANNEL_NAME = "任务执行"
+        // V1 任务事件通道：取消请求事件名（与 JS TaskUiEventNames 保持一致）
+        private const val CANCEL_REQUEST_EVENT = "NonoTaskCancelRequestedV1"
     }
+
+    // 本次运行的不可变会话标识；start 时写入，cancel PendingIntent 与
+    // sendCancelTaskEvent 都精确使用它，绝不广播通配取消。
+    private var currentTaskId: String? = null
+    private var currentSessionRevision: Double = -1.0
 
     override fun onCreate() {
         super.onCreate()
@@ -36,14 +43,29 @@ class TaskExecutionService : Service() {
         // 处理停止服务的请求（中断任务）
         if (intent?.action == "STOP_SERVICE" || intent?.action == "CANCEL_TASK") {
             Log.d(TAG, "收到中断任务请求")
-            // 发送事件到 JS，通知任务中断
-            sendCancelTaskEvent()
+            // 优先使用 cancel Intent 携带的 identity，回退到本次运行保存的 identity
+            val cancelTaskId = intent.getStringExtra("taskId") ?: currentTaskId
+            val cancelSessionRevision =
+                if (intent.hasExtra("sessionRevision")) {
+                    intent.getDoubleExtra("sessionRevision", -1.0)
+                } else {
+                    currentSessionRevision
+                }
+            // 发送事件到 JS，通知任务中断（仅在有精确 identity 时）
+            sendCancelTaskEvent(cancelTaskId, cancelSessionRevision)
             stopSelf()
             return START_NOT_STICKY
         }
 
         Log.d(TAG, "任务执行服务已启动")
         val statusText = intent?.getStringExtra("statusText") ?: "任务执行中..."
+        currentTaskId = intent?.getStringExtra("taskId") ?: currentTaskId
+        currentSessionRevision =
+            if (intent?.hasExtra("sessionRevision") == true) {
+                intent.getDoubleExtra("sessionRevision", currentSessionRevision)
+            } else {
+                currentSessionRevision
+            }
         
         try {
             // 【关键】必须即时创建并显示通知
@@ -139,9 +161,14 @@ class TaskExecutionService : Service() {
      * 5. 点击通知不打开应用 - 避免打断后台任务执行
      */
     private fun createNotification(statusText: String): Notification {
-        // 中断任务的 Intent
+        // 中断任务的 Intent（携带本次运行的精确 identity）
+        val identityExtras = android.os.Bundle().apply {
+            currentTaskId?.let { putString("taskId", it) }
+            putDouble("sessionRevision", currentSessionRevision)
+        }
         val cancelIntent = Intent(this, TaskExecutionService::class.java).apply {
             action = "CANCEL_TASK"
+            putExtras(identityExtras)
         }
         val cancelPendingIntent = PendingIntent.getService(
             this,
@@ -185,36 +212,40 @@ class TaskExecutionService : Service() {
     }
 
     /**
-     * 发送任务中断事件到 JS
+     * 发送任务中断事件到 JS。
+     * 只针对精确的 {taskId, sessionRevision}，缺少任一 identity 时拒绝广播，
+     * 避免误取消其它会话。
      */
-    private fun sendCancelTaskEvent() {
+    private fun sendCancelTaskEvent(taskId: String?, sessionRevision: Double) {
+        if (taskId.isNullOrEmpty() || sessionRevision <= 0.0 || sessionRevision % 1.0 != 0.0) {
+            Log.w(TAG, "缺少精确任务 identity，拒绝发送取消事件")
+            return
+        }
         try {
             // 获取 ReactContext（通过 Application）
             val application = applicationContext as? MainApplication
             val reactContext = application?.reactNativeHost?.reactInstanceManager?.currentReactContext as? ReactContext
-            
-            reactContext?.let { context ->
+
+            val emitTo: (ReactContext) -> Unit = { context ->
                 val params: WritableMap = Arguments.createMap()
-                params.putString("action", "cancelTask")
-                
+                params.putString("taskId", taskId)
+                params.putDouble("sessionRevision", sessionRevision)
+
                 context
                     .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-                    .emit("TaskCancelRequested", params)
-                
+                    .emit(CANCEL_REQUEST_EVENT, params)
+            }
+
+            reactContext?.let { context ->
+                emitTo(context)
                 Log.d(TAG, "已发送任务中断事件到 JS")
             } ?: run {
                 // 如果无法获取 ReactContext，尝试通过 reactHost
                 try {
                     val reactHost = application?.reactHost
-                    val reactContext = reactHost?.currentReactContext as? ReactContext
-                    reactContext?.let { context ->
-                        val params: WritableMap = Arguments.createMap()
-                        params.putString("action", "cancelTask")
-                        
-                        context
-                            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-                            .emit("TaskCancelRequested", params)
-                        
+                    val hostReactContext = reactHost?.currentReactContext as? ReactContext
+                    hostReactContext?.let { context ->
+                        emitTo(context)
                         Log.d(TAG, "已发送任务中断事件到 JS（通过 reactHost）")
                     } ?: Log.w(TAG, "无法获取 ReactContext，无法发送事件")
                 } catch (e: Exception) {

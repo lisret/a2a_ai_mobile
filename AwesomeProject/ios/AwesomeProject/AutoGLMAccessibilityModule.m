@@ -166,7 +166,18 @@ RCT_EXPORT_METHOD(requestScreenshotPermission:(RCTPromiseResolveBlock)resolve
 
 // MARK: - 前台/后台服务
 
-RCT_EXPORT_METHOD(startTaskExecutionService:(NSString *)statusText
+// 任务通知 identifier 前缀，格式 `TaskExecutionService.${taskId}.${sessionRevision}`，
+// 使每次不可变会话拥有唯一 identifier，避免跨会话误更新/误清除。
+static NSString *const kTaskNotificationPrefix = @"TaskExecutionService.";
+
+static NSString *TaskNotificationIdentifier(NSString *taskId, NSNumber *sessionRevision)
+{
+  return [NSString stringWithFormat:@"%@%@.%@", kTaskNotificationPrefix, taskId, sessionRevision];
+}
+
+RCT_EXPORT_METHOD(startTaskExecutionService:(NSString *)taskId
+                  sessionRevision:(nonnull NSNumber *)sessionRevision
+                  statusText:(NSString *)statusText
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
@@ -177,7 +188,8 @@ RCT_EXPORT_METHOD(startTaskExecutionService:(NSString *)statusText
     content.body = statusText ?: @"正在执行自动化任务...";
     content.sound = nil;
 
-    UNNotificationRequest *request = [UNNotificationRequest requestWithIdentifier:@"TaskExecutionService"
+    NSString *identifier = TaskNotificationIdentifier(taskId, sessionRevision);
+    UNNotificationRequest *request = [UNNotificationRequest requestWithIdentifier:identifier
                                                                           content:content
                                                                           trigger:nil];
     [center addNotificationRequest:request withCompletionHandler:^(NSError *error) {
@@ -192,19 +204,23 @@ RCT_EXPORT_METHOD(startTaskExecutionService:(NSString *)statusText
   });
 }
 
-RCT_EXPORT_METHOD(updateTaskExecutionService:(NSString *)statusText
+RCT_EXPORT_METHOD(updateTaskExecutionService:(NSString *)taskId
+                  sessionRevision:(nonnull NSNumber *)sessionRevision
+                  statusText:(NSString *)statusText
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
   dispatch_async(dispatch_get_main_queue(), ^{
     UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
-    [center removeDeliveredNotificationsWithIdentifiers:@[@"TaskExecutionService"]];
+    NSString *identifier = TaskNotificationIdentifier(taskId, sessionRevision);
+    // 只操作本次会话的 exact identifier
+    [center removeDeliveredNotificationsWithIdentifiers:@[identifier]];
 
     UNMutableNotificationContent *content = [[UNMutableNotificationContent alloc] init];
     content.title = @"任务执行中";
     content.body = statusText ?: @"正在执行自动化任务...";
 
-    UNNotificationRequest *request = [UNNotificationRequest requestWithIdentifier:@"TaskExecutionService"
+    UNNotificationRequest *request = [UNNotificationRequest requestWithIdentifier:identifier
                                                                           content:content
                                                                           trigger:nil];
     [center addNotificationRequest:request withCompletionHandler:^(NSError *error) {
@@ -218,14 +234,28 @@ RCT_EXPORT_METHOD(updateTaskExecutionService:(NSString *)statusText
   });
 }
 
+// stop 由不可编辑的 HomeScreen 以无参形式调用，因此这里清理本次运行的任务
+// 通知（按 `TaskExecutionService.` 前缀精确匹配已投递的任务会话通知），
+// 不影响任务完成通知等其它 identifier。
 RCT_EXPORT_METHOD(stopTaskExecutionService:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
   dispatch_async(dispatch_get_main_queue(), ^{
     UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
-    [center removeDeliveredNotificationsWithIdentifiers:@[@"TaskExecutionService"]];
-    RCTLogInfo(@"[AutoGLM iOS] 前台服务已停止");
-    resolve(@YES);
+    [center getDeliveredNotificationsWithCompletionHandler:^(NSArray<UNNotification *> *notifications) {
+      NSMutableArray<NSString *> *identifiers = [NSMutableArray array];
+      for (UNNotification *notification in notifications) {
+        NSString *identifier = notification.request.identifier;
+        if ([identifier hasPrefix:kTaskNotificationPrefix]) {
+          [identifiers addObject:identifier];
+        }
+      }
+      if (identifiers.count > 0) {
+        [center removeDeliveredNotificationsWithIdentifiers:identifiers];
+      }
+      RCTLogInfo(@"[AutoGLM iOS] 前台服务已停止");
+      resolve(@YES);
+    }];
   });
 }
 

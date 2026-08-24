@@ -143,18 +143,32 @@ class AccessibilityService {
     return await AccessibilityModule.requestNotificationPermission();
   }
 
-  async startTaskExecutionService(statusText: string): Promise<void> {
+  async startTaskExecutionService(
+    taskId: string,
+    sessionRevision: number,
+    statusText: string,
+  ): Promise<void> {
     if (!AccessibilityModule) throw new Error('当前平台不支持此操作');
-    await AccessibilityModule.startTaskExecutionService(statusText);
+    await AccessibilityModule.startTaskExecutionService(taskId, sessionRevision, statusText);
   }
 
-  async updateTaskExecutionService(statusText: string): Promise<void> {
+  async updateTaskExecutionService(
+    taskId: string,
+    sessionRevision: number,
+    statusText: string,
+  ): Promise<void> {
     if (!AccessibilityModule) return;
-    try { await AccessibilityModule.updateTaskExecutionService(statusText); }
+    try { await AccessibilityModule.updateTaskExecutionService(taskId, sessionRevision, statusText); }
     catch (error) { console.warn('更新前台服务失败:', error); }
   }
 
-  async stopTaskExecutionService(): Promise<void> {
+  // Identity is optional so the legacy no-arg stop (Home) still compiles; the
+  // native service already holds the running session's identity from start, so
+  // stop targets it by instance and never broadcasts a wildcard cancel.
+  async stopTaskExecutionService(
+    _taskId?: string,
+    _sessionRevision?: number,
+  ): Promise<void> {
     if (!AccessibilityModule) return;
     try { await AccessibilityModule.stopTaskExecutionService(); }
     catch (error) { console.warn('停止前台服务失败:', error); }

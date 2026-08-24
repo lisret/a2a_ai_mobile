@@ -361,9 +361,9 @@ class AccessibilityModule(reactContext: ReactApplicationContext) :
      * 启动任务执行前台服务
      */
     @ReactMethod
-    fun startTaskExecutionService(statusText: String, promise: Promise) {
+    fun startTaskExecutionService(taskId: String, sessionRevision: Double, statusText: String, promise: Promise) {
         try {
-            val success = serviceManager.startTaskExecutionService(statusText)
+            val success = serviceManager.startTaskExecutionService(taskId, sessionRevision, statusText)
             if (success) {
                 promise.resolve(true)
             } else {
@@ -379,9 +379,9 @@ class AccessibilityModule(reactContext: ReactApplicationContext) :
      * 更新任务执行前台服务通知
      */
     @ReactMethod
-    fun updateTaskExecutionService(statusText: String, promise: Promise) {
+    fun updateTaskExecutionService(taskId: String, sessionRevision: Double, statusText: String, promise: Promise) {
         try {
-            val success = serviceManager.updateTaskExecutionService(statusText)
+            val success = serviceManager.updateTaskExecutionService(taskId, sessionRevision, statusText)
             if (success) {
                 promise.resolve(true)
             } else {

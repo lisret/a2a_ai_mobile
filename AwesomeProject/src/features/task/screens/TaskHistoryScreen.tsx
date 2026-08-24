@@ -27,6 +27,8 @@ import { accessibilityService, appMappingService, floatingWindowService } from '
 import { useTaskHistory } from '../hooks/useTaskHistory';
 import { useTaskExecution } from '../hooks/useTaskExecution';
 import { useTaskExecutionWithBackground } from '../useTaskExecutionWithBackground';
+import { useAppFacades } from '../../../application/facades/AppFacadesContext';
+import type { Unsubscribe } from '../../../application/facades/UiRuntimeContracts';
 import { AppIcon, IconNames } from '@shared/components/Icon';
 import { ConfirmModal } from '@shared/components/ConfirmModal';
 import { ChatMessage } from '../components/ChatMessage';
@@ -47,6 +49,11 @@ export const TaskHistoryScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<RoutePropType>();
   const { modelId } = route.params;
+  const { operate } = useAppFacades();
+  // The currently running immutable session; the stop button and the scoped
+  // event subscription both target this exact {taskId, sessionRevision}.
+  const activeSessionRef = useRef<{ taskId: string; sessionRevision: number } | null>(null);
+  const scopedTaskSubRef = useRef<Unsubscribe | null>(null);
 
   const [model, setModel] = useState<AIModel | null>(null);
   const [historyPanelVisible, setHistoryPanelVisible] = useState(false);
@@ -158,15 +165,54 @@ export const TaskHistoryScreen: React.FC = () => {
     }
   }, [foregroundExecuting, foregroundStep, foregroundInstruction, selectedTask, executing]);
 
+  // 关闭当前任务的作用域订阅
+  const clearScopedTaskSub = React.useCallback(() => {
+    scopedTaskSubRef.current?.();
+    scopedTaskSubRef.current = null;
+    activeSessionRef.current = null;
+  }, []);
+
+  // 订阅当前不可变会话的任务事件（仅此 taskId + sessionRevision）
+  const subscribeToActiveTask = React.useCallback(
+    (taskId: string, sessionRevision: number) => {
+      activeSessionRef.current = { taskId, sessionRevision };
+      scopedTaskSubRef.current?.();
+      scopedTaskSubRef.current = operate.subscribeTask(
+        taskId,
+        sessionRevision,
+        event => {
+          if (event.type === 'step_started' || event.type === 'step_completed') {
+            setCurrentStep(event.step);
+          }
+          if (event.type === 'step_completed') {
+            setModelMessages(prev => {
+              const updated = [...prev];
+              const index = updated.findIndex(msg => msg.step === event.step);
+              if (index >= 0) {
+                updated[index] = { ...updated[index], content: event.actionLabel };
+              } else {
+                updated.push({ step: event.step, content: event.actionLabel, timestamp: Date.now() });
+              }
+              return updated;
+            });
+          }
+        },
+      );
+    },
+    [operate],
+  );
+
   // 后台任务执行 Hook
   const { startBackgroundTask } = useTaskExecutionWithBackground({
     model,
-    onTaskStart: async (taskId) => {
+    onTaskStart: async (taskId, sessionRevision) => {
       setExecuting(true);
       setShowInput(true); // 任务开始时显示输入框
+      subscribeToActiveTask(taskId, sessionRevision);
       await loadTasks();
     },
     onTaskComplete: async (task) => {
+      clearScopedTaskSub();
       setExecuting(false);
       setShowInput(false); // 任务结束后隐藏输入框
       await loadTasks();
@@ -185,6 +231,7 @@ export const TaskHistoryScreen: React.FC = () => {
       }
     },
     onTaskFailed: (error, isCancelled) => {
+      clearScopedTaskSub();
       setExecuting(false);
       setShowInput(false); // 任务结束后隐藏输入框
       Alert.alert(isCancelled ? '任务已中断' : '执行失败', error);
@@ -240,118 +287,12 @@ export const TaskHistoryScreen: React.FC = () => {
     }).start();
   }, [historyPanelVisible, historyPanelAnim]);
 
-  // 监听后台任务事件（Headless JS）
+  // 组件卸载时关闭任务作用域订阅（生命周期事件由 hook 的回调驱动）
   useEffect(() => {
-    const { DeviceEventEmitter } = require('react-native');
-
-    // 任务开始
-    const taskStartedSub = DeviceEventEmitter.addListener('TaskStarted', (data: { taskId: string; step: number; instruction: string }) => {
-      console.info('[任务执行] Headless JS 任务开始:', data);
-      if (data.taskId) {
-        setExecuting(true);
-        setCurrentStep(data.step);
-        setCurrentInstruction(data.instruction);
-        setModelMessages([]);
-        setSelectedTask(null);
-      }
-    });
-
-    // 步骤开始
-    const stepStartedSub = DeviceEventEmitter.addListener('TaskStepStarted', (data: { taskId: string; step: number; maxSteps: number }) => {
-      console.info('[任务执行] 步骤开始:', data);
-      setCurrentStep(data.step);
-    });
-
-    // 流式更新
-    const streamUpdateSub = DeviceEventEmitter.addListener('TaskStreamUpdate', (data: { taskId: string; step: number; content: string }) => {
-      setModelMessages(prev => {
-        const updated = [...prev];
-        const index = updated.findIndex(msg => msg.step === data.step);
-        if (index >= 0) {
-          updated[index] = { ...updated[index], content: data.content };
-        } else {
-          updated.push({ step: data.step, content: data.content, timestamp: Date.now() });
-        }
-        return updated;
-      });
-    });
-
-    // 模型响应
-    const modelResponseSub = DeviceEventEmitter.addListener('TaskModelResponse', (data: { taskId: string; step: number; response: string }) => {
-      setModelMessages(prev => {
-        const updated = [...prev];
-        const index = updated.findIndex(msg => msg.step === data.step);
-        if (index >= 0) {
-          updated[index] = { ...updated[index], content: data.response };
-        } else {
-          updated.push({ step: data.step, content: data.response, timestamp: Date.now() });
-        }
-        return updated;
-      });
-    });
-
-    // 步骤完成
-    const stepCompletedSub = DeviceEventEmitter.addListener('TaskStepCompleted', async (data: { taskId: string; step: number; action: string }) => {
-      await loadTasks();
-    });
-
-    // 任务完成
-    const taskCompletedSub = DeviceEventEmitter.addListener('TaskCompleted', async (data: { taskId: string; step: number; task: Task }) => {
-      setExecuting(false);
-      setCurrentStep(0);
-      setShowInput(false); // 任务结束后隐藏输入框
-      await loadTasks();
-      if (data.task) {
-        setSelectedTask(data.task);
-        if (data.task.output?.steps && data.task.output.steps.length > 0) {
-          const lastStep = data.task.output.steps[data.task.output.steps.length - 1];
-          setExpandedSteps(new Set([lastStep.step]));
-        }
-
-        // 显示任务完成 Toast 提示（手机屏幕提示窗）
-        try {
-          const userCommand = data.task.instruction || '任务执行完成';
-          await accessibilityService.showToast(`任务完成：${userCommand}`, 'long');
-        } catch (error) {
-          console.warn('显示任务完成 Toast 失败:', error);
-        }
-      }
-    });
-
-    // 任务失败
-    const taskFailedSub = DeviceEventEmitter.addListener('TaskFailed', async (data: { taskId: string; error: string; isCancelled?: boolean; task?: Task }) => {
-      setExecuting(false);
-      setCurrentStep(0);
-      setShowInput(false); // 任务结束后隐藏输入框
-      await loadTasks();
-
-      // 如果有任务数据，自动选择并显示
-      if (data.task) {
-        setSelectedTask(data.task);
-        if (data.task.output?.steps && data.task.output.steps.length > 0) {
-          const lastStep = data.task.output.steps[data.task.output.steps.length - 1];
-          setExpandedSteps(new Set([lastStep.step]));
-        }
-      }
-
-      if (data.isCancelled) {
-        // 中断时不显示弹窗，直接显示任务记录（包含已执行的步骤）
-        console.info('[任务中断] 任务已中断，已保存的步骤数:', data.task?.output?.steps?.length || 0);
-      } else {
-        Alert.alert('执行失败', data.error);
-      }
-    });
-
     return () => {
-      taskStartedSub.remove();
-      stepStartedSub.remove();
-      streamUpdateSub.remove();
-      modelResponseSub.remove();
-      stepCompletedSub.remove();
-      taskCompletedSub.remove();
-      taskFailedSub.remove();
+      clearScopedTaskSub();
     };
-  }, [loadTasks]);
+  }, [clearScopedTaskSub]);
 
   // 监听 AppState 变化，控制悬浮窗显示
   useEffect(() => {
@@ -385,20 +326,6 @@ export const TaskHistoryScreen: React.FC = () => {
       subscription.remove();
     };
   }, [executing, currentStep]);
-
-  // 监听任务中断事件（从通知按钮触发）
-  useEffect(() => {
-    const { DeviceEventEmitter } = require('react-native');
-    const subscription = DeviceEventEmitter.addListener('TaskCancelRequested', () => {
-      console.info('[任务执行] 收到任务中断请求（来自通知按钮）');
-      if (executing) {
-        cancelTask();
-      }
-    });
-    return () => {
-      subscription.remove();
-    };
-  }, [executing, cancelTask]);
 
   // 处理任务选择
   const handleTaskPress = (task: Task) => {
@@ -575,13 +502,18 @@ export const TaskHistoryScreen: React.FC = () => {
           style: 'destructive',
           onPress: async () => {
             try {
-              // 发送中断事件到后台任务
-              const { DeviceEventEmitter } = require('react-native');
-              DeviceEventEmitter.emit('TaskCancelRequested', { taskId: 'current' });
+              // 只取消当前不可变会话（精确 taskId），不使用通配/current
+              const active = activeSessionRef.current;
+              if (active) {
+                await operate.cancel(active.taskId);
+              }
 
               // 停止后台服务（强制后台运行，始终执行）
               try {
-                await accessibilityService.stopTaskExecutionService();
+                await accessibilityService.stopTaskExecutionService(
+                  active?.taskId,
+                  active?.sessionRevision,
+                );
                 await accessibilityService.releaseWakeLock();
                 await floatingWindowService.hideFloatingWindow();
               } catch (error) {
@@ -590,6 +522,7 @@ export const TaskHistoryScreen: React.FC = () => {
 
               // 调用前台任务的取消方法（如果有）
               cancelTask();
+              clearScopedTaskSub();
 
               // 更新状态
               setExecuting(false);

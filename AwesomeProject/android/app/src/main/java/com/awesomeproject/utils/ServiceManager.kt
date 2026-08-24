@@ -16,9 +16,11 @@ class ServiceManager(private val context: Context) {
     /**
      * 启动任务执行前台服务
      */
-    fun startTaskExecutionService(statusText: String): Boolean {
+    fun startTaskExecutionService(taskId: String, sessionRevision: Double, statusText: String): Boolean {
         return try {
             val intent = Intent(context, TaskExecutionService::class.java).apply {
+                putExtra("taskId", taskId)
+                putExtra("sessionRevision", sessionRevision)
                 putExtra("statusText", statusText)
             }
             
@@ -54,9 +56,11 @@ class ServiceManager(private val context: Context) {
     /**
      * 更新任务执行前台服务通知
      */
-    fun updateTaskExecutionService(statusText: String): Boolean {
+    fun updateTaskExecutionService(taskId: String, sessionRevision: Double, statusText: String): Boolean {
         return try {
             val intent = Intent(context, TaskExecutionService::class.java).apply {
+                putExtra("taskId", taskId)
+                putExtra("sessionRevision", sessionRevision)
                 putExtra("statusText", statusText)
             }
             context.startService(intent)

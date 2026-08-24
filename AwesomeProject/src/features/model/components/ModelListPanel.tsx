@@ -3,11 +3,15 @@ import {View, Text, TouchableOpacity, StyleSheet} from 'react-native';
 import {useFocusEffect, useNavigation} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import type {RootStackParamList} from '@shared/types/navigation';
-import type {AIModel, ModelListKey} from '@shared/types/Model';
+import type {ModelListKey} from '@shared/types/Model';
+import type {
+  ModelConfigListItemViewState,
+  ModelConfigListViewState,
+} from '../../../application/facades/UiRuntimeContracts';
+import {useAppFacades} from '../../../application/facades/AppFacadesContext';
 import {ModelItem} from './ModelItem';
 import {ConfirmModal} from '@shared/components/ConfirmModal';
 import {COLORS} from '@shared/constants';
-import {modelService} from '../services/ModelService';
 import {showCustomAlert} from '@shared/utils/alert';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
@@ -22,18 +26,14 @@ export const ModelListPanel: React.FC<ModelListPanelProps> = ({
   listKey,
 }) => {
   const navigation = useNavigation<NavigationProp>();
-  const [models, setModels] = useState<AIModel[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<AIModel | null>(null);
+  const {modelConfig} = useAppFacades();
+  const [listView, setListView] = useState<ModelConfigListViewState | null>(null);
+  const [deleteTarget, setDeleteTarget] =
+    useState<ModelConfigListItemViewState | null>(null);
 
   const load = useCallback(async () => {
-    const [items, active] = await Promise.all([
-      modelService.getAllModels(listKey),
-      modelService.getSelectedModel(listKey),
-    ]);
-    setModels(items);
-    setSelectedId(active?.id || null);
-  }, [listKey]);
+    setListView(await modelConfig.getListViewState(listKey));
+  }, [modelConfig, listKey]);
 
   useFocusEffect(
     useCallback(() => {
@@ -41,21 +41,37 @@ export const ModelListPanel: React.FC<ModelListPanelProps> = ({
     }, [load]),
   );
 
-  const handleSelect = async (model: AIModel) => {
-    setSelectedId(model.id);
-    await modelService.setSelectedModel(model.id, listKey);
+  const handleSelect = async (item: ModelConfigListItemViewState) => {
+    if (!listView) {
+      return;
+    }
+    setListView(
+      await modelConfig.selectBinding({
+        list: listKey,
+        bindingId: item.bindingId,
+        expectedRevision: listView.revision,
+      }),
+    );
   };
 
   const confirmDelete = async () => {
-    if (!deleteTarget) return;
+    if (!deleteTarget || !listView) {
+      return;
+    }
     try {
-      await modelService.deleteModel(deleteTarget.id, listKey);
+      const next = await modelConfig.deleteBinding({
+        list: listKey,
+        bindingId: deleteTarget.bindingId,
+        expectedRevision: listView.revision,
+      });
       setDeleteTarget(null);
-      await load();
+      setListView(next);
     } catch {
       showCustomAlert('错误', '删除模型失败');
     }
   };
+
+  const items = listView?.items ?? [];
 
   return (
     <View style={styles.wrap}>
@@ -67,20 +83,22 @@ export const ModelListPanel: React.FC<ModelListPanelProps> = ({
           <Text style={styles.addText}>＋ 新增</Text>
         </TouchableOpacity>
       </View>
-      {models.length === 0 ? (
+      {items.length === 0 ? (
         <View style={styles.empty}>
           <Text style={styles.emptyTitle}>还没有配置</Text>
           <Text style={styles.emptyBody}>新增一条后才能启用。</Text>
         </View>
       ) : (
-        models.map(item => (
+        items.map(item => (
           <ModelItem
-            key={item.id}
-            model={item}
-            isActive={item.id === selectedId}
+            key={item.bindingId}
+            item={item}
             onPress={() => handleSelect(item)}
             onEdit={() =>
-              navigation.navigate('EditModel', {modelId: item.id, list: listKey})
+              navigation.navigate('EditModel', {
+                bindingId: item.bindingId,
+                list: listKey,
+              })
             }
             onDelete={() => setDeleteTarget(item)}
           />
@@ -89,7 +107,7 @@ export const ModelListPanel: React.FC<ModelListPanelProps> = ({
       <ConfirmModal
         visible={!!deleteTarget}
         title="删除这个模型配置？"
-        message={`${deleteTarget?.name || '该模型'} 将从本机移除。此操作不可撤销。`}
+        message={`${deleteTarget?.displayName || '该模型'} 将从本机移除。此操作不可撤销。`}
         confirmText="确认删除"
         cancelText="取消"
         onConfirm={confirmDelete}

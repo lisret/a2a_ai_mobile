@@ -4,13 +4,11 @@ import {useFocusEffect, useNavigation} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import type {RootStackParamList} from '@shared/types/navigation';
 import {PageLayout} from '@shared/components/PageLayout';
-import {ModelListPanel} from '@features/model/components/ModelListPanel';
 import {COLORS} from '@shared/constants';
 import type {AgentModeId} from '@shared/types/Model';
-import {settingsService} from '@features/settings/services/SettingsService';
-import {nonoConfigService} from '../services/NonoConfigService';
+import {useAppFacades} from '../../../application/facades/AppFacadesContext';
+import type {PhoneOperateViewState} from '../../../application/facades/UiRuntimeContracts';
 import {requestAdbFallbackPermission} from '../services/operatePermissions';
-import {MODE_LABELS, type AgentModeState} from '../types';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -20,46 +18,46 @@ const MODES: AgentModeId[] = [
   'local_vision_cloud_planner',
 ];
 
-const PIPELINE: Record<AgentModeId, {nodes: string[]; caption: string}> = {
-  cloud_direct: {
-    nodes: ['截图', '云端一体', '动作'],
-    caption: '一个云端或网关模型既看屏幕，也决定下一步。',
-  },
-  cloud_split: {
-    nodes: ['截图', '云端视觉', '云端编排', '动作'],
-    caption: '视觉模型和编排模型分开。编排只拿结构化观察，不看原图。',
-  },
-  local_vision_cloud_planner: {
-    nodes: ['截图', '本地视觉', '云端编排', '动作'],
-    caption: 'MiniCPM 在手机里看截图；云端只做编排。失败不会自动改走云端视觉。',
-  },
-};
-
 export const PhoneOperateScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
-  const [mode, setMode] = useState<AgentModeState | null>(null);
+  const {phoneOperate} = useAppFacades();
+  const [viewState, setViewState] = useState<PhoneOperateViewState | null>(null);
   const [adbFallbackEnabled, setAdbFallbackEnabled] = useState(false);
-
-  const load = useCallback(async () => {
-    const [nextMode, adbEnabled] = await Promise.all([
-      nonoConfigService.getAgentMode(),
-      settingsService.getADBFallbackEnabled(),
-    ]);
-    setMode(nextMode);
-    setAdbFallbackEnabled(adbEnabled);
-  }, []);
 
   useFocusEffect(
     useCallback(() => {
-      load();
-    }, [load]),
+      let active = true;
+      phoneOperate.getViewState().then(next => {
+        if (active) {
+          setViewState(next);
+          setAdbFallbackEnabled(next.adbFallbackEnabled);
+        }
+      });
+      return () => {
+        active = false;
+      };
+    }, [phoneOperate]),
   );
 
-  if (!mode) return null;
+  if (!viewState) {
+    return null;
+  }
 
-  const draft = mode.draftMode;
-  const pipeline = PIPELINE[draft];
-  const showSave = draft !== mode.activeMode;
+  const draft = viewState.draftMode;
+  const option = viewState.modes[draft];
+  const runnable = option.runnable;
+  const showSave = draft !== viewState.activeMode;
+
+  const selectMode = async (mode: AgentModeId) => {
+    setViewState(await phoneOperate.selectDraftMode(mode));
+  };
+
+  const activate = async () => {
+    if (!option.runnable) {
+      return;
+    }
+    setViewState(await phoneOperate.activateDraftMode(viewState.revision));
+  };
 
   return (
     <PageLayout
@@ -72,25 +70,21 @@ export const PhoneOperateScreen: React.FC = () => {
             {MODES.map(item => (
               <TouchableOpacity
                 key={item}
+                testID={`mode-${item}`}
                 style={[
                   styles.segBtn,
                   draft === item && styles.segBtnSelected,
-                  mode.activeMode === item &&
+                  viewState.activeMode === item &&
                     draft !== item &&
                     styles.segBtnCurrent,
                 ]}
-                onPress={() => {
-                  setMode(current =>
-                    current ? {...current, draftMode: item} : current,
-                  );
-                  nonoConfigService.setDraftMode(item);
-                }}>
+                onPress={() => selectMode(item)}>
                 <Text
                   style={[
                     styles.segText,
                     draft === item && styles.segTextSelected,
                   ]}>
-                  {MODE_LABELS[item]}
+                  {viewState.modes[item].label}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -101,7 +95,7 @@ export const PhoneOperateScreen: React.FC = () => {
         </View>
 
         <View style={styles.pipeline}>
-          {pipeline.nodes.map((node, index) => (
+          {option.nodes.map((node, index) => (
             <React.Fragment key={node}>
               {index ? <View style={styles.pipeLine} /> : null}
               <Text
@@ -115,63 +109,36 @@ export const PhoneOperateScreen: React.FC = () => {
             </React.Fragment>
           ))}
         </View>
-        <Text style={styles.caption}>{pipeline.caption}</Text>
+        <Text style={styles.caption}>{option.caption}</Text>
 
-        {draft === 'cloud_direct' ? (
-          <ModelListPanel title="一体化模型" listKey="unified" />
-        ) : null}
-        {draft === 'cloud_split' ? (
-          <>
-            <ModelListPanel title="云端视觉" listKey="splitVision" />
-            <ModelListPanel title="云端编排" listKey="splitPlanner" />
-          </>
-        ) : null}
-        {draft === 'local_vision_cloud_planner' ? (
-          <>
-            <View style={styles.heading}>
-              <Text style={styles.headingTitle}>本地视觉</Text>
-              <Text style={styles.headingHint}>无 API Key</Text>
-            </View>
-            <View style={styles.card}>
-              <View style={styles.topline}>
-                <View>
-                  <Text style={styles.title}>MiniCPM-V 4.6</Text>
-                  <Text style={styles.body}>约 1.64 GB · 截图不离机</Text>
-                </View>
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>待下载</Text>
-                </View>
+        {option.blockers.length > 0 ? (
+          <View style={styles.blockers}>
+            {option.blockers.map(blocker => (
+              <View key={blocker.code} style={styles.blockerRow}>
+                <Text style={styles.blockerText}>{blocker.message}</Text>
               </View>
-              <Text style={styles.body}>
-                本机运行时尚未接通。当前任务仍走云端一体里已选中的模型。
-              </Text>
-            </View>
-            <ModelListPanel title="云端编排" listKey="localPlanner" />
-          </>
-        ) : null}
-
-        {draft === 'cloud_direct' ? (
-          <TouchableOpacity
-            style={styles.guide}
-            onPress={() => navigation.navigate('APIKeyGuide')}>
-            <Text style={styles.guideText}>API Key 获取指南</Text>
-            <Text style={styles.guideChevron}>›</Text>
-          </TouchableOpacity>
-        ) : null}
-
-        {showSave ? (
-          <View style={styles.save}>
-            <Text style={styles.caption}>保存后从下一次任务生效</Text>
-            <TouchableOpacity
-              style={styles.primary}
-              onPress={async () => {
-                const next = await nonoConfigService.saveActiveMode(draft);
-                setMode(next);
-              }}>
-              <Text style={styles.primaryText}>使用此模式</Text>
-            </TouchableOpacity>
+            ))}
           </View>
         ) : null}
+
+        <TouchableOpacity
+          style={styles.guide}
+          onPress={() => navigation.navigate('APIKeyGuide')}>
+          <Text style={styles.guideText}>API Key 获取指南</Text>
+          <Text style={styles.guideChevron}>›</Text>
+        </TouchableOpacity>
+
+        {showSave ? (
+          <Text style={styles.caption}>保存后从下一次任务生效</Text>
+        ) : null}
+        <TouchableOpacity
+          testID="activate-operate-mode"
+          style={[styles.primary, !runnable && styles.primaryDisabled]}
+          disabled={!runnable}
+          accessibilityState={{disabled: !runnable}}
+          onPress={activate}>
+          <Text style={styles.primaryText}>使用此模式</Text>
+        </TouchableOpacity>
 
         <View style={styles.heading}>
           <Text style={styles.headingTitle}>兜底</Text>
@@ -196,7 +163,7 @@ export const PhoneOperateScreen: React.FC = () => {
                     return;
                   }
                 }
-                await settingsService.setADBFallbackEnabled(value);
+                setViewState(await phoneOperate.setAdbFallbackEnabled(value));
               })();
             }}
             trackColor={{false: '#d8d7df', true: COLORS.violet}}
@@ -288,7 +255,24 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 16,
   },
+  blockers: {
+    marginBottom: 16,
+    gap: 8,
+  },
+  blockerRow: {
+    paddingVertical: 12,
+    paddingHorizontal: 13,
+    borderRadius: 15,
+    backgroundColor: '#fff0ec',
+  },
+  blockerText: {
+    color: COLORS.error,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '600',
+  },
   heading: {
+    marginTop: 8,
     marginBottom: 12,
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -302,17 +286,6 @@ const styles = StyleSheet.create({
     color: COLORS.text.secondary,
     fontSize: 10,
   },
-  card: {
-    padding: 15,
-    marginBottom: 16,
-    borderRadius: 21,
-    backgroundColor: 'rgba(255,255,255,0.84)',
-  },
-  topline: {
-    marginBottom: 8,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
   title: {
     color: COLORS.text.primary,
     fontSize: 13,
@@ -323,18 +296,6 @@ const styles = StyleSheet.create({
     color: COLORS.text.secondary,
     fontSize: 10,
     lineHeight: 14,
-  },
-  badge: {
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 999,
-    backgroundColor: '#e9e6ff',
-    alignSelf: 'flex-start',
-  },
-  badgeText: {
-    color: '#5d55cb',
-    fontSize: 8,
-    fontWeight: '800',
   },
   guide: {
     minHeight: 62,
@@ -355,16 +316,17 @@ const styles = StyleSheet.create({
     color: '#9a9ca7',
     fontSize: 18,
   },
-  save: {
-    marginTop: 12,
-    marginBottom: 24,
-  },
   primary: {
     minHeight: 52,
+    marginTop: 12,
+    marginBottom: 24,
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: COLORS.violet,
+  },
+  primaryDisabled: {
+    backgroundColor: '#c9c6dd',
   },
   primaryText: {
     color: '#ffffff',

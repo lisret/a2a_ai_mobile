@@ -1,7 +1,8 @@
 import React, { useEffect, useRef } from 'react';
 import { Platform, AppState, AppStateStatus } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, useNavigation } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { HomeIcon, CapabilitiesIcon, HistoryIcon, SettingsIcon } from '../shared/components/TabIcons';
 import { CustomTabBar } from './CustomTabBar';
@@ -32,6 +33,18 @@ import {
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
+
+// `OpenClaw` is kept only as a compatibility alias: it owns no state and simply
+// replaces itself with the canonical `VisualAgentTools` route so any legacy
+// deep link resolves to a single canonical screen.
+const OpenClawAliasScreen: React.FC = () => {
+  const navigation =
+    useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  useEffect(() => {
+    navigation.replace('VisualAgentTools', { initialPreset: 'openclaw' });
+  }, [navigation]);
+  return null;
+};
 
 const MainTabs = () => {
   return (
@@ -152,7 +165,8 @@ export const AppNavigator: React.FC = () => {
         />
         <Stack.Screen name="DebugLog" component={DebugLogScreen} />
         <Stack.Screen name="PhoneOperate" component={PhoneOperateScreen} />
-        <Stack.Screen name="OpenClaw" component={OpenClawScreen} />
+        <Stack.Screen name="VisualAgentTools" component={OpenClawScreen} />
+        <Stack.Screen name="OpenClaw" component={OpenClawAliasScreen} />
         <Stack.Screen name="Errands" component={ErrandsScreen} />
         <Stack.Screen name="Privacy" component={PrivacyScreen} />
         <Stack.Screen name="CompanionConfig" component={CompanionConfigScreen} />

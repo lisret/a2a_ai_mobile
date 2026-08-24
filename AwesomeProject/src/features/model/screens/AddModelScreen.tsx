@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, {useCallback, useRef, useState} from 'react';
 import {
   View,
   Text,
@@ -9,76 +9,113 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { RouteProp } from '@react-navigation/native';
-import type { RootStackParamList } from '@shared/types/navigation';
-import { modelService } from '../services/ModelService';
-import { COLORS } from '@shared/constants';
-import { PageLayout } from '@shared/components/PageLayout';
-import type { AIModelFormData } from '@shared/types/Model';
-import { showCustomAlert } from '@shared/utils/alert';
+import {useNavigation, useRoute, useFocusEffect} from '@react-navigation/native';
+import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import type {RouteProp} from '@react-navigation/native';
+import type {RootStackParamList} from '@shared/types/navigation';
+import {COLORS} from '@shared/constants';
+import {PageLayout} from '@shared/components/PageLayout';
+import {showCustomAlert} from '@shared/utils/alert';
+import {useAppFacades} from '../../../application/facades/AppFacadesContext';
+import {ApiProviderSelector} from '../components/ApiProviderSelector';
+import {ModelNameSelector} from '../components/ModelNameSelector';
+import {
+  DEFAULT_CUSTOM_PROVIDER,
+  buildRefreshInput,
+  buildSaveInput,
+  type ModelDraftState,
+} from '../services/ModelListService';
+import type {ModelCatalogViewState} from '../../../application/facades/UiRuntimeContracts';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 type RoutePropType = RouteProp<RootStackParamList, 'AddModel'>;
 
+const EMPTY_CATALOG: ModelCatalogViewState = {
+  requestGeneration: 0,
+  status: 'empty',
+  models: [],
+};
+
 export const AddModelScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<RoutePropType>();
-  const importedData = route.params?.importedData;
-  const list = route.params?.list || 'unified';
+  const list = route.params?.list ?? 'unified';
   const companion = list === 'companion';
+  const {modelConfig} = useAppFacades();
 
-  const [provider, setProvider] = useState<'openai' | 'zhipu' | 'modelscope' | 'huggingface' | 'custom'>('openai');
-
-  const [formData, setFormData] = useState<AIModelFormData>({
-    name: importedData?.name || '',
-    provider: importedData?.provider || 'openai',
-    apiUrl: importedData?.apiUrl || 'https://api.openai.com/v1',
-    apiKey: importedData?.apiKey || '',
-    modelName:
-      importedData?.modelName ||
-      (companion ? '' : 'ZhipuAI/AutoGLM-Phone-9B'),
-    maxSteps: importedData?.maxSteps || 99,
-    description: importedData?.description || '',
+  const [revision, setRevision] = useState(0);
+  const [draft, setDraft] = useState<ModelDraftState>({
+    mode: 'preset',
+    presetId: 'openai',
+    baseUrlOverride: '',
+    custom: DEFAULT_CUSTOM_PROVIDER,
+    modelId: '',
   });
+  const [catalog, setCatalog] = useState<ModelCatalogViewState>(EMPTY_CATALOG);
+  // Add always starts a fresh credential (replace with empty input); never keep.
+  const [secret, setSecret] = useState('');
+  const [presets, setPresets] = useState(
+    [] as Awaited<ReturnType<typeof modelConfig.getViewState>>['presets'],
+  );
+  const generation = useRef(0);
 
-  const updateProviderSettings = (newProvider: 'openai' | 'zhipu' | 'modelscope' | 'huggingface' | 'custom') => {
-    setProvider(newProvider);
-    let newUrl = '';
-    if (newProvider === 'openai') {
-      newUrl = 'https://api.openai.com/v1';
-    } else if (newProvider === 'zhipu') {
-      newUrl = 'https://open.bigmodel.cn/api/paas/v4';
-    } else if (newProvider === 'modelscope') {
-      newUrl = 'https://api-inference.modelscope.cn/v1';
-    } else if (newProvider === 'huggingface') {
-      newUrl = 'https://api-inference.huggingface.co';
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      modelConfig.getViewState({list}).then(next => {
+        if (!active) {
+          return;
+        }
+        setRevision(next.revision);
+        setPresets(next.presets);
+        setDraft(current => ({
+          ...current,
+          mode: next.mode,
+          presetId: next.selectedPresetId ?? next.presets[0]?.id ?? 'openai',
+          baseUrlOverride: next.baseUrl,
+          custom: next.custom ?? DEFAULT_CUSTOM_PROVIDER,
+          modelId: next.modelId,
+        }));
+        setCatalog(next.catalog);
+      });
+      return () => {
+        active = false;
+      };
+    }, [modelConfig, list]),
+  );
+
+  const refresh = async () => {
+    generation.current += 1;
+    const requestGeneration = generation.current;
+    const next = await modelConfig.refreshCatalog(
+      buildRefreshInput(draft, {
+        list,
+        requestGeneration,
+        credential: {action: 'replace', plaintext: secret},
+      }),
+    );
+    if (next.requestGeneration >= catalog.requestGeneration) {
+      setCatalog(next);
     }
-    
-    setFormData(prev => ({ ...prev, provider: newProvider, apiUrl: newUrl }));
   };
 
   const handleSave = async () => {
-    if (!formData.name.trim() || !formData.apiKey.trim()) {
-      showCustomAlert('提示', '请填写完整信息');
+    if (!draft.modelId.trim()) {
+      showCustomAlert('提示', '请填写模型 ID');
       return;
     }
-
     try {
-      await modelService.addModel(
-        {
-          ...formData,
-          provider: provider,
-          name: formData.name.trim(),
-          apiUrl: formData.apiUrl.trim(),
-          apiKey: formData.apiKey.trim(),
-        },
-        list,
+      await modelConfig.save(
+        buildSaveInput(draft, {
+          list,
+          expectedRevision: revision,
+          credential: {action: 'replace', plaintext: secret},
+        }),
       );
+      setSecret('');
       navigation.goBack();
     } catch (error) {
-      console.error('保存模型失败:', error);
+      console.error('保存模型失败');
       showCustomAlert('错误', '保存失败');
     }
   };
@@ -96,92 +133,42 @@ export const AddModelScreen: React.FC = () => {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}>
           <View style={styles.formCard}>
-            <View style={styles.field}>
-              <Text style={styles.label}>配置名称</Text>
-              <TextInput
-                style={styles.input}
-                placeholder={companion ? '例如：NoNo Chat' : '例如：NoNo Vision'}
-                value={formData.name}
-                onChangeText={text => setFormData({ ...formData, name: text })}
-                placeholderTextColor={COLORS.text.disabled}
-              />
-            </View>
-
-            <View style={styles.field}>
-              <Text style={styles.label}>服务商</Text>
-              <View style={styles.providerRow}>
-                {['openai', 'zhipu', 'modelscope', 'huggingface', 'custom'].map((p) => (
-                  <TouchableOpacity
-                    key={p}
-                    style={[
-                      styles.providerChip,
-                      provider === p && styles.providerChipActive
-                    ]}
-                    onPress={() => updateProviderSettings(p as any)}>
-                    <Text style={[
-                      styles.providerText,
-                      provider === p && styles.providerTextActive
-                    ]}>
-                      {p === 'openai' ? 'OpenAI' :
-                       p === 'zhipu' ? '智谱' :
-                       p === 'modelscope' ? '魔搭' :
-                       p === 'huggingface' ? 'HuggingFace' :
-                       '自定义'}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            <View style={styles.field}>
-              <Text style={styles.label}>服务地址</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.apiUrl}
-                onChangeText={text => setFormData({ ...formData, apiUrl: text })}
-                placeholder={companion ? 'chat.example.ai/v1' : 'gateway.example.ai/v1'}
-                placeholderTextColor={COLORS.text.disabled}
-                autoCapitalize="none"
-              />
-            </View>
+            <ApiProviderSelector
+              mode={draft.mode}
+              presets={presets}
+              selectedPresetId={draft.presetId}
+              onSelectPreset={id =>
+                setDraft(current => ({...current, mode: 'preset', presetId: id}))
+              }
+              onSelectCustom={() =>
+                setDraft(current => ({...current, mode: 'custom'}))
+              }
+              custom={draft.custom}
+              onCustomChange={custom => setDraft(current => ({...current, custom}))}
+            />
 
             <View style={styles.field}>
               <Text style={styles.label}>API Key</Text>
               <TextInput
+                testID="credential-input"
                 style={styles.input}
-                value={formData.apiKey}
-                onChangeText={text => setFormData({ ...formData, apiKey: text })}
+                value={secret}
+                onChangeText={setSecret}
                 placeholder="仅保存在这台手机"
                 placeholderTextColor={COLORS.text.disabled}
                 secureTextEntry
               />
             </View>
 
-            <View style={styles.field}>
-              <Text style={styles.label}>模型标识</Text>
-              <TextInput
-                style={styles.input}
-                value={formData.modelName}
-                onChangeText={text => setFormData({ ...formData, modelName: text })}
-                placeholder={companion ? '例如：nono-chat-2' : '例如：nono-vision-2'}
-                placeholderTextColor={COLORS.text.disabled}
-                autoCapitalize="none"
-              />
-            </View>
+            <ModelNameSelector
+              catalog={catalog}
+              modelId={draft.modelId}
+              onModelIdChange={modelId =>
+                setDraft(current => ({...current, modelId}))
+              }
+              onRefresh={refresh}
+            />
 
-            {companion ? null : (
-            <View style={styles.field}>
-              <Text style={styles.label}>最大执行步数</Text>
-              <TextInput
-                style={styles.input}
-                value={String(formData.maxSteps)}
-                onChangeText={text => setFormData({ ...formData, maxSteps: parseInt(text) || 99 })}
-                keyboardType="number-pad"
-                placeholder="99"
-                placeholderTextColor={COLORS.text.disabled}
-              />
-            </View>
-            )}
             <Text style={styles.note}>
               {companion
                 ? '这条配置只用于首页说话，不会拿去看屏或点应用。'
@@ -234,29 +221,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     fontSize: 12,
     color: COLORS.text.primary,
-  },
-  providerRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  providerChip: {
-    minHeight: 36,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    backgroundColor: '#f1f0f7',
-    justifyContent: 'center',
-  },
-  providerChipActive: {
-    backgroundColor: COLORS.violet,
-  },
-  providerText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#5d6070',
-  },
-  providerTextActive: {
-    color: '#ffffff',
   },
   note: {
     paddingVertical: 12,

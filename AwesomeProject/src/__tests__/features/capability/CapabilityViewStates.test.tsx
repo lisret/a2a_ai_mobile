@@ -1,7 +1,8 @@
 import React from 'react';
-import {render, waitFor} from '@testing-library/react-native';
+import {render, waitFor, fireEvent} from '@testing-library/react-native';
 import {VisualAgentToolsScreen} from '../../../features/capability/screens/VisualAgentToolsScreen';
 import {PrivacyScreen} from '../../../features/capability/screens/PrivacyScreen';
+import {ErrandsScreen} from '../../../features/capability/screens/ErrandsScreen';
 import {AppFacadesProvider} from '../../../application/facades/AppFacadesContext';
 import type {
   AppFacades,
@@ -69,7 +70,79 @@ test('renders actual tool readiness/capabilities and privacy-channel states', as
   const facades = makeFacades();
   const tools = render(<AppFacadesProvider value={facades}><VisualAgentToolsScreen /></AppFacadesProvider>);
   await waitFor(() => expect(tools.getByText('OpenClaw 未连接，操作会暂停')).toBeTruthy());
-  expect(tools.getByText('审批：支持')).toBeTruthy();
+  // 审批 is supported by several adapters and the active profile, so it appears
+  // multiple times; the DSH adapter shows the unsupported label for the same
+  // capability because its full canonical set is rendered.
+  expect(tools.getAllByText('审批：支持').length).toBeGreaterThan(0);
+  expect(tools.getByText('审批：不支持')).toBeTruthy();
   const privacy = render(<AppFacadesProvider value={facades}><PrivacyScreen /></AppFacadesProvider>);
   await waitFor(() => expect(privacy.getByText('结构化观察')).toBeTruthy());
+});
+
+test('visual-agent tools screen surfaces a safe load error with a working 重试', async () => {
+  const getViewState = jest
+    .fn()
+    .mockRejectedValueOnce(new Error('boom'))
+    .mockResolvedValue({
+      status: 'ready', revision: 1, enabled: false, adapters: [], profiles: [], canOperate: false,
+    });
+  const facades = {
+    visualAgentTools: {
+      getViewState,
+      setEnabled: jest.fn(), saveProfile: jest.fn(), deleteProfile: jest.fn(), setActiveProfile: jest.fn(), refreshProfile: jest.fn(),
+    },
+  } as unknown as AppFacades;
+
+  const screen = render(
+    <AppFacadesProvider value={facades}>
+      <VisualAgentToolsScreen />
+    </AppFacadesProvider>,
+  );
+  await waitFor(() => expect(screen.getByText('暂时读不到视觉工具配置')).toBeTruthy());
+  expect(screen.getByText('重试')).toBeTruthy();
+  expect(getViewState).toHaveBeenCalledTimes(1);
+  fireEvent.press(screen.getByText('重试'));
+  await waitFor(() => expect(getViewState).toHaveBeenCalledTimes(2));
+});
+
+test('privacy screen surfaces a safe load error with a working 重试', async () => {
+  const getViewState = jest.fn().mockRejectedValue(new Error('boom'));
+  const facades = {
+    privacy: {
+      getViewState,
+      setMemoryEnabled: jest.fn(), setMemoryLocation: jest.fn(), forgetAllPreferences: jest.fn(),
+    },
+  } as unknown as AppFacades;
+
+  const screen = render(
+    <AppFacadesProvider value={facades}>
+      <PrivacyScreen />
+    </AppFacadesProvider>,
+  );
+  await waitFor(() => expect(screen.getByText('暂时读不到隐私设置')).toBeTruthy());
+  expect(screen.getByText('重试')).toBeTruthy();
+  expect(getViewState).toHaveBeenCalledTimes(1);
+  fireEvent.press(screen.getByText('重试'));
+  await waitFor(() => expect(getViewState).toHaveBeenCalledTimes(2));
+});
+
+test('errands screen surfaces a safe load error with a working 重试', async () => {
+  const getViewState = jest.fn().mockRejectedValue(new Error('boom'));
+  const facades = {
+    errands: {
+      getViewState,
+      setEnabled: jest.fn(), update: jest.fn(), cancel: jest.fn(),
+    },
+  } as unknown as AppFacades;
+
+  const screen = render(
+    <AppFacadesProvider value={facades}>
+      <ErrandsScreen />
+    </AppFacadesProvider>,
+  );
+  await waitFor(() => expect(screen.getByText('暂时读不到交代列表')).toBeTruthy());
+  expect(screen.getByText('重试')).toBeTruthy();
+  expect(getViewState).toHaveBeenCalledTimes(1);
+  fireEvent.press(screen.getByText('重试'));
+  await waitFor(() => expect(getViewState).toHaveBeenCalledTimes(2));
 });

@@ -11,6 +11,7 @@ import {useFocusEffect} from '@react-navigation/native';
 import {PageLayout} from '@shared/components/PageLayout';
 import {COLORS} from '@shared/constants';
 import {SettingToggle} from '../components/CapabilityCards';
+import {LoadErrorView} from '@shared/components/LoadErrorView';
 import {useAppFacades} from '../../../application/facades/AppFacadesContext';
 import type {PrivacyViewState} from '../../../application/facades/UiRuntimeContracts';
 
@@ -53,6 +54,14 @@ export const PrivacyScreen: React.FC = () => {
 
   const state = viewState ?? LOADING_STATE;
 
+  const retry = useCallback(() => {
+    setViewState(LOADING_STATE);
+    privacy
+      .getViewState()
+      .then(setViewState)
+      .catch(() => setViewState(ERROR_STATE));
+  }, [privacy]);
+
   const setMemoryEnabled = (value: boolean) => {
     setViewState(current => (current ? {...current, memoryEnabled: value} : current));
     void privacy
@@ -72,7 +81,7 @@ export const PrivacyScreen: React.FC = () => {
     return (
       <PageLayout title="隐私" showBackButton>
         <View style={styles.content}>
-          <Text style={styles.heading}>暂时读不到隐私设置</Text>
+          <LoadErrorView title="暂时读不到隐私设置" onRetry={retry} />
         </View>
       </PageLayout>
     );

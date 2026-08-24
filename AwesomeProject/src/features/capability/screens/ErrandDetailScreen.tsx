@@ -13,6 +13,7 @@ import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import type {RouteProp} from '@react-navigation/native';
 import type {RootStackParamList} from '@shared/types/navigation';
 import {PageLayout} from '@shared/components/PageLayout';
+import {LoadErrorView} from '@shared/components/LoadErrorView';
 import {COLORS} from '@shared/constants';
 import {useAppFacades} from '../../../application/facades/AppFacadesContext';
 import type {ErrandItemViewState} from '../../../application/facades/UiRuntimeContracts';
@@ -34,24 +35,31 @@ export const ErrandDetailScreen: React.FC = () => {
   const {errands} = useAppFacades();
   const [item, setItem] = useState<ErrandItemViewState | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     let active = true;
+    setLoadError(false);
+    setNotFound(false);
     errands
       .getViewState()
       .then(state => {
         if (!active) {
           return;
         }
+        // A successful read that simply lacks the id is genuinely not-found;
+        // a rejected read is a transient error and must stay retryable.
         const match = state.items.find(entry => entry.id === errandId) ?? null;
         setItem(match);
         setNotFound(match === null);
       })
-      .catch(() => active && setNotFound(true));
+      .catch(() => active && setLoadError(true));
     return () => {
       active = false;
     };
   }, [errandId, errands]);
+
+  useEffect(() => load(), [load]);
 
   const editable = item?.status === 'pending';
 
@@ -71,6 +79,16 @@ export const ErrandDetailScreen: React.FC = () => {
     await errands.update({...item, title});
     navigation.goBack();
   }, [item, editable, errands, navigation]);
+
+  if (loadError) {
+    return (
+      <PageLayout title="交代详情" showBackButton>
+        <View style={styles.content}>
+          <LoadErrorView title="暂时读不到这件交代" onRetry={() => load()} />
+        </View>
+      </PageLayout>
+    );
+  }
 
   if (notFound) {
     return (

@@ -6,6 +6,7 @@ import type {RootStackParamList} from '@shared/types/navigation';
 import {PageLayout} from '@shared/components/PageLayout';
 import {COLORS} from '@shared/constants';
 import {SettingToggle, InfoCard} from '../components/CapabilityCards';
+import {LoadErrorView} from '@shared/components/LoadErrorView';
 import {useAppFacades} from '../../../application/facades/AppFacadesContext';
 import type {
   ErrandItemViewState,
@@ -58,6 +59,14 @@ export const ErrandsScreen: React.FC = () => {
 
   const state = viewState ?? LOADING_STATE;
 
+  const retry = useCallback(() => {
+    setViewState(LOADING_STATE);
+    errands
+      .getViewState()
+      .then(setViewState)
+      .catch(() => setViewState(ERROR_STATE));
+  }, [errands]);
+
   const toggle = (value: boolean) => {
     setViewState(current => (current ? {...current, enabled: value} : current));
     void errands
@@ -77,7 +86,7 @@ export const ErrandsScreen: React.FC = () => {
         />
 
         {state.status === 'error' ? (
-          <InfoCard title="暂时读不到交代列表" body="请稍后再试。" />
+          <LoadErrorView title="暂时读不到交代列表" onRetry={retry} />
         ) : (
           <>
             <View style={styles.head}>

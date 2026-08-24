@@ -426,10 +426,10 @@ const AdapterCard: React.FC<{adapter: VisualAgentToolOptionViewState}> = ({
     <Text style={styles.body}>
       已配置连接 {adapter.configuredProfileCount} 个
     </Text>
-    <View style={styles.chips}>
-      {CAPABILITY_LABELS.filter(cap => adapter.capabilities[cap.key]).map(cap => (
-        <Text key={cap.key} style={styles.chip}>
-          {cap.label}
+    <View style={styles.caps}>
+      {CAPABILITY_LABELS.map(cap => (
+        <Text key={cap.key} style={styles.capLine}>
+          {cap.label}：{adapter.capabilities[cap.key] ? '支持' : '不支持'}
         </Text>
       ))}
     </View>
@@ -717,16 +717,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 6,
-  },
-  chip: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 999,
-    overflow: 'hidden',
-    color: COLORS.text.secondary,
-    backgroundColor: '#eceaf6',
-    fontSize: 10,
-    fontWeight: '700',
   },
   caps: {
     marginTop: 8,

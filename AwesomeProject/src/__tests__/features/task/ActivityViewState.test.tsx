@@ -1,5 +1,5 @@
 import React from 'react';
-import {render, waitFor} from '@testing-library/react-native';
+import {render, waitFor, fireEvent} from '@testing-library/react-native';
 import {TaskHistoryScreenTab} from '../../../features/task/screens/TaskHistoryScreenTab';
 import {AppFacadesProvider} from '../../../application/facades/AppFacadesContext';
 import type {AppFacades} from '../../../application/facades/UiRuntimeContracts';
@@ -51,4 +51,24 @@ test('renders empty activity states from the facade without injecting seed memor
   );
   await waitFor(() => expect(activity.getByText('还没有称呼或偏好')).toBeTruthy());
   expect(activity.queryByText('咖啡少糖')).toBeNull();
+});
+
+test('surfaces a safe load error with a working 重试 instead of empty-store copy', async () => {
+  const getViewState = jest.fn().mockRejectedValue(new Error('boom'));
+  const facades = {
+    activity: {getViewState, forgetPreference: jest.fn(), deleteTask: jest.fn()},
+  } as unknown as AppFacades;
+
+  const screen = render(
+    <AppFacadesProvider value={facades}>
+      <TaskHistoryScreenTab />
+    </AppFacadesProvider>,
+  );
+  await waitFor(() => expect(screen.getByText('暂时读不到活动记录')).toBeTruthy());
+  // A failed load must not masquerade as a genuinely empty store.
+  expect(screen.queryByText('还没有称呼或偏好')).toBeNull();
+  expect(screen.getByText('重试')).toBeTruthy();
+  expect(getViewState).toHaveBeenCalledTimes(1);
+  fireEvent.press(screen.getByText('重试'));
+  await waitFor(() => expect(getViewState).toHaveBeenCalledTimes(2));
 });

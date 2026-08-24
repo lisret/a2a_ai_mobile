@@ -16,6 +16,13 @@ import {requestOperatePermissions} from '../services/operatePermissions';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
+interface CardErrors {
+  phone: boolean;
+  errand: boolean;
+  tools: boolean;
+  privacy: boolean;
+}
+
 export const CapabilitiesScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
   const {phoneOperate, errands, visualAgentTools, privacy} = useAppFacades();
@@ -24,29 +31,52 @@ export const CapabilitiesScreen: React.FC = () => {
   const [errand, setErrand] = useState<ErrandsViewState | null>(null);
   const [tools, setTools] = useState<VisualAgentToolsViewState | null>(null);
   const [privacyState, setPrivacyState] = useState<PrivacyViewState | null>(null);
+  const [errors, setErrors] = useState<CardErrors>({
+    phone: false,
+    errand: false,
+    tools: false,
+    privacy: false,
+  });
+
+  const reloadPhone = useCallback(() => {
+    setErrors(prev => ({...prev, phone: false}));
+    phoneOperate
+      .getViewState()
+      .then(setPhone)
+      .catch(() => setErrors(prev => ({...prev, phone: true})));
+  }, [phoneOperate]);
+
+  const reloadErrand = useCallback(() => {
+    setErrors(prev => ({...prev, errand: false}));
+    errands
+      .getViewState()
+      .then(setErrand)
+      .catch(() => setErrors(prev => ({...prev, errand: true})));
+  }, [errands]);
+
+  const reloadTools = useCallback(() => {
+    setErrors(prev => ({...prev, tools: false}));
+    visualAgentTools
+      .getViewState()
+      .then(setTools)
+      .catch(() => setErrors(prev => ({...prev, tools: true})));
+  }, [visualAgentTools]);
+
+  const reloadPrivacy = useCallback(() => {
+    setErrors(prev => ({...prev, privacy: false}));
+    privacy
+      .getViewState()
+      .then(setPrivacyState)
+      .catch(() => setErrors(prev => ({...prev, privacy: true})));
+  }, [privacy]);
 
   useFocusEffect(
     useCallback(() => {
-      let active = true;
-      const load = <T,>(
-        read: () => Promise<T>,
-        apply: (value: T) => void,
-      ) => {
-        read()
-          .then(next => active && apply(next))
-          .catch(() => {
-            // A rejected read leaves that card blank rather than fabricating a
-            // success; each Facade is independent.
-          });
-      };
-      load(() => phoneOperate.getViewState(), setPhone);
-      load(() => errands.getViewState(), setErrand);
-      load(() => visualAgentTools.getViewState(), setTools);
-      load(() => privacy.getViewState(), setPrivacyState);
-      return () => {
-        active = false;
-      };
-    }, [phoneOperate, errands, visualAgentTools, privacy]),
+      reloadPhone();
+      reloadErrand();
+      reloadTools();
+      reloadPrivacy();
+    }, [reloadPhone, reloadErrand, reloadTools, reloadPrivacy]),
   );
 
   const phoneMeta = phone
@@ -123,7 +153,11 @@ export const CapabilitiesScreen: React.FC = () => {
           <Text style={styles.body}>
             这台机自己看屏、点应用。对话模型在设置里单独配。
           </Text>
-          <Text style={styles.meta}>{phoneMeta}</Text>
+          {errors.phone ? (
+            <RetryMeta onRetry={reloadPhone} />
+          ) : (
+            <Text style={styles.meta}>{phoneMeta}</Text>
+          )}
         </TouchableOpacity>
 
         <CapabilityCard
@@ -133,6 +167,8 @@ export const CapabilitiesScreen: React.FC = () => {
           value={errand?.enabled ?? false}
           onToggle={toggleErrands}
           onPress={() => navigation.navigate('Errands')}
+          error={errors.errand}
+          onRetry={reloadErrand}
         />
 
         <CapabilityCard
@@ -142,6 +178,8 @@ export const CapabilitiesScreen: React.FC = () => {
           value={tools?.enabled ?? false}
           onToggle={toggleTools}
           onPress={() => navigation.navigate('VisualAgentTools')}
+          error={errors.tools}
+          onRetry={reloadTools}
         />
 
         <TouchableOpacity
@@ -150,7 +188,11 @@ export const CapabilitiesScreen: React.FC = () => {
           activeOpacity={0.85}>
           <Text style={styles.title}>隐私</Text>
           <Text style={styles.body}>截图去哪、记忆存在哪、诊断包含什么。</Text>
-          <Text style={styles.meta}>{privacyMeta}</Text>
+          {errors.privacy ? (
+            <RetryMeta onRetry={reloadPrivacy} />
+          ) : (
+            <Text style={styles.meta}>{privacyMeta}</Text>
+          )}
         </TouchableOpacity>
 
         <View style={styles.card}>
@@ -162,6 +204,12 @@ export const CapabilitiesScreen: React.FC = () => {
   );
 };
 
+const RetryMeta = ({onRetry}: {onRetry: () => void}) => (
+  <TouchableOpacity onPress={onRetry} activeOpacity={0.7}>
+    <Text style={styles.retryMeta}>读取失败，点此重试</Text>
+  </TouchableOpacity>
+);
+
 const CapabilityCard = ({
   title,
   body,
@@ -169,6 +217,8 @@ const CapabilityCard = ({
   value,
   onToggle,
   onPress,
+  error,
+  onRetry,
 }: {
   title: string;
   body: string;
@@ -176,17 +226,24 @@ const CapabilityCard = ({
   value: boolean;
   onToggle: (value: boolean) => void;
   onPress: () => void;
+  error: boolean;
+  onRetry: () => void;
 }) => (
   <View style={[styles.card, value && styles.cardActive]}>
     <View style={styles.topline}>
       <TouchableOpacity style={styles.copy} onPress={onPress} activeOpacity={0.8}>
         <Text style={styles.title}>{title}</Text>
         <Text style={styles.body}>{body}</Text>
-        <Text style={styles.meta}>{meta}</Text>
+        {error ? (
+          <RetryMeta onRetry={onRetry} />
+        ) : (
+          <Text style={styles.meta}>{meta}</Text>
+        )}
       </TouchableOpacity>
       <Switch
         value={value}
         onValueChange={onToggle}
+        disabled={error}
         trackColor={{false: '#d8d7df', true: COLORS.violet}}
         thumbColor="#ffffff"
       />
@@ -232,6 +289,12 @@ const styles = StyleSheet.create({
   meta: {
     marginTop: 8,
     color: COLORS.text.secondary,
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  retryMeta: {
+    marginTop: 8,
+    color: COLORS.error,
     fontSize: 10,
     fontWeight: '700',
   },

@@ -15,6 +15,7 @@ import {PageLayout} from '@shared/components/PageLayout';
 import {NoNoMascot} from '@shared/components/NoNoMascot';
 import {COLORS} from '@shared/constants';
 import {ConfirmModal} from '@shared/components/ConfirmModal';
+import {LoadErrorView} from '@shared/components/LoadErrorView';
 import {useAppFacades} from '../../../application/facades/AppFacadesContext';
 import type {
   ActivityTaskViewState,
@@ -69,6 +70,14 @@ export const TaskHistoryScreenTab: React.FC = () => {
   );
 
   const state = viewState ?? LOADING_STATE;
+
+  const retry = useCallback(() => {
+    setViewState(LOADING_STATE);
+    activity
+      .getViewState()
+      .then(setViewState)
+      .catch(() => setViewState(ERROR_STATE));
+  }, [activity]);
 
   const confirmDelete = async () => {
     if (!deleteTaskId) {
@@ -160,6 +169,20 @@ export const TaskHistoryScreenTab: React.FC = () => {
       ))}
     </View>
   );
+
+  if (state.status === 'error') {
+    return (
+      <PageLayout
+        title="活动"
+        kicker="共同经历"
+        headerAccessory={<NoNoMascot size={50} />}
+        backgroundColor={COLORS.background.default}>
+        <View style={styles.listContent}>
+          <LoadErrorView title="暂时读不到活动记录" onRetry={retry} />
+        </View>
+      </PageLayout>
+    );
+  }
 
   return (
     <PageLayout

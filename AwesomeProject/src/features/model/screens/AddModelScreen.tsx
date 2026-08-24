@@ -57,7 +57,9 @@ export const AddModelScreen: React.FC = () => {
   const [presets, setPresets] = useState(
     [] as Awaited<ReturnType<typeof modelConfig.getViewState>>['presets'],
   );
-  const generation = useRef(0);
+  // Seed from a wall-clock stamp so a fresh mount is always greater than any
+  // generation the singleton facade has already observed; never reset to 0.
+  const generation = useRef(Date.now());
 
   useFocusEffect(
     useCallback(() => {

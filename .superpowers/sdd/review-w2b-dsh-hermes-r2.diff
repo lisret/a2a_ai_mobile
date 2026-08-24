@@ -1,0 +1,1899 @@
+# Review package: a5e36ddec7635a2aa4406ee6bda4852b742d9c93..HEAD
+
+## Commits
+e81e973 fix: harden dsh/hermes upstream listeners and enforce dsh declared-capability ceiling
+50e44f5 feat: add dsh and hermes visual agent adapters
+
+## Files changed
+ .../visualAgent/dsh/DshAdapter.test.ts             | 199 ++++++++++
+ .../visualAgent/hermes/HermesAdapter.test.ts       | 201 ++++++++++
+ .../visualAgent/adapters/dsh/DshAdapter.ts         | 408 +++++++++++++++++++++
+ .../visualAgent/adapters/dsh/DshBinding.ts         |  93 +++++
+ .../visualAgent/adapters/dsh/conformanceFixture.ts | 237 ++++++++++++
+ .../visualAgent/adapters/hermes/HermesAdapter.ts   | 384 +++++++++++++++++++
+ .../visualAgent/adapters/hermes/HermesBinding.ts   |  69 ++++
+ .../adapters/hermes/conformanceFixture.ts          | 242 ++++++++++++
+ 8 files changed, 1833 insertions(+)
+
+## Diff
+diff --git a/AwesomeProject/src/__tests__/connectorBridge/visualAgent/dsh/DshAdapter.test.ts b/AwesomeProject/src/__tests__/connectorBridge/visualAgent/dsh/DshAdapter.test.ts
+new file mode 100644
+index 0000000..9aee2d4
+--- /dev/null
++++ b/AwesomeProject/src/__tests__/connectorBridge/visualAgent/dsh/DshAdapter.test.ts
+@@ -0,0 +1,199 @@
++import type {
++  VisualAgentCapabilitySet,
++  VisualAgentProfileV1,
++  VisualAgentTaskEnvelopeV1,
++  VisualAgentTaskEvent,
++} from '@core/engine/operateRuntime/visualAgent/VisualAgentContracts';
++import type {
++  VisualAgentBindingPort,
++  VisualAgentUpstreamPort,
++  VisualAgentUpstreamSession,
++} from '../../../../connectorBridge/visualAgent/ports/VisualAgentUpstreamPort';
++import {defineVisualAgentAdapterConformance} from '../../../../connectorBridge/visualAgent/conformance/VisualAgentAdapterConformance';
++import {DshAdapter} from '../../../../connectorBridge/visualAgent/adapters/dsh/DshAdapter';
++import type {DshBindingV1} from '../../../../connectorBridge/visualAgent/adapters/dsh/DshBinding';
++import {
++  dshConformanceFixture,
++  dshRequiredConformance,
++} from '../../../../connectorBridge/visualAgent/adapters/dsh/conformanceFixture';
++
++const ALL_FALSE: VisualAgentCapabilitySet = {
++  imageInput: false,
++  structuredAction: false,
++  stream: false,
++  cancel: false,
++  approval: false,
++  resume: false,
++  steer: false,
++  preferences: false,
++};
++
++const caps = (
++  overrides: Partial<VisualAgentCapabilitySet>,
++): VisualAgentCapabilitySet => ({...ALL_FALSE, ...overrides});
++
++function makeSession(
++  negotiated: VisualAgentCapabilitySet,
++): VisualAgentUpstreamSession {
++  return {
++    negotiate: async () => negotiated,
++    send: async () => undefined,
++    subscribe: () => () => undefined,
++    close: async () => undefined,
++  };
++}
++
++function makeUpstream(session: VisualAgentUpstreamSession): VisualAgentUpstreamPort {
++  return {open: jest.fn(async () => session)};
++}
++
++function makeCapturingSession(negotiated: VisualAgentCapabilitySet): {
++  session: VisualAgentUpstreamSession;
++  emit: (message: unknown) => void;
++} {
++  const captured: Array<(message: unknown) => void> = [];
++  const session: VisualAgentUpstreamSession = {
++    negotiate: async () => negotiated,
++    send: async () => undefined,
++    subscribe: listener => {
++      captured.push(listener);
++      return () => undefined;
++    },
++    close: async () => undefined,
++  };
++  return {
++    session,
++    emit: message => captured.forEach(listener => listener(message)),
++  };
++}
++
++function makeBindings(binding: unknown): VisualAgentBindingPort {
++  return {read: jest.fn(async () => binding)};
++}
++
++const enabledBinding: DshBindingV1 = {
++  schemaVersion: 1,
++  toolId: 'dsh',
++  product: 'deepseek-harness',
++  protocol: 'custom_bridge',
++  version: '1.0.0',
++  endpointOrExecutable: 'bridge://dsh',
++  cwd: null,
++  args: [],
++  secretRef: null,
++  enabled: true,
++  declaredCapabilities: caps({structuredAction: true, stream: true, cancel: true}),
++};
++
++const profileRequiringStream: VisualAgentProfileV1 = {
++  schemaVersion: 1,
++  profileId: 'p-dsh',
++  toolId: 'dsh',
++  enabled: true,
++  connector: {
++    kind: 'connector_bridge',
++    bridgeUrl: 'https://bridge.example',
++    bindingId: 'b-dsh',
++    secretRef: null,
++  },
++  requestedCapabilities: caps({stream: true}),
++};
++
++const streamEnvelope: VisualAgentTaskEnvelopeV1 = {
++  protocolVersion: 1,
++  taskId: 't1',
++  sessionRevision: 1,
++  profileId: 'p-dsh',
++  instruction: 'do the thing',
++  idempotencyKey: 'k1',
++  requiredCapabilities: caps({stream: true}),
++};
++
++const signal = new AbortController().signal;
++
++describe('DshAdapter', () => {
++  it('binds dsh only to an explicit DeepSeek Harness binding and remains disabled by default', () => {
++    const adapter = new DshAdapter(
++      makeBindings(enabledBinding),
++      makeUpstream(makeSession(caps({}))),
++    );
++    expect(() =>
++      adapter.validateBinding({product: 'dify', protocol: 'custom_bridge'}),
++    ).toThrow('visual_agent_invalid_profile');
++    expect(
++      adapter.validateBinding({
++        product: 'deepseek-harness',
++        protocol: 'dsh_cli',
++        enabled: false,
++      }),
++    ).toEqual(expect.objectContaining({enabled: false}));
++  });
++
++  it('does not infer unsupported capabilities from unstructured CLI text', async () => {
++    const noCapabilities = caps({});
++    const adapter = new DshAdapter(
++      makeBindings(enabledBinding),
++      makeUpstream(makeSession(noCapabilities)),
++    );
++    const execution = adapter.create(profileRequiringStream);
++    await expect(
++      execution.connect(profileRequiringStream, new AbortController().signal),
++    ).rejects.toThrow('visual_agent_capability_unsupported');
++  });
++
++  it('treats declaredCapabilities as a hard ceiling above negotiation', async () => {
++    // Upstream negotiates `cancel`, but the binding does not declare it.
++    const cappedBinding: DshBindingV1 = {
++      ...enabledBinding,
++      declaredCapabilities: caps({stream: true}),
++    };
++    const profileRequiringCancel: VisualAgentProfileV1 = {
++      ...profileRequiringStream,
++      requestedCapabilities: caps({stream: true, cancel: true}),
++    };
++    const adapter = new DshAdapter(
++      makeBindings(cappedBinding),
++      makeUpstream(makeSession(caps({stream: true, cancel: true}))),
++    );
++    const execution = adapter.create(profileRequiringCancel);
++    await expect(
++      execution.connect(profileRequiringCancel, signal),
++    ).rejects.toThrow('visual_agent_capability_unsupported');
++  });
++
++  it('does not throw out of the subscribe listener on a malformed upstream frame', async () => {
++    const {session, emit} = makeCapturingSession(
++      caps({structuredAction: true, stream: true, cancel: true}),
++    );
++    const adapter = new DshAdapter(makeBindings(enabledBinding), {
++      open: jest.fn(async () => session),
++    });
++    const execution = adapter.create(profileRequiringStream);
++    await execution.connect(profileRequiringStream, signal);
++    const events: VisualAgentTaskEvent[] = [];
++    execution.subscribe(event => events.push(event));
++    await execution.execute(streamEnvelope, signal);
++
++    expect(() => emit('this is not a valid frame')).not.toThrow();
++
++    expect(execution.getConnectionState()).toEqual({
++      status: 'failed',
++      errorCode: 'visual_agent_protocol_error',
++    });
++    const terminals = events.filter(event => event.type === 'terminal');
++    expect(terminals).toHaveLength(1);
++    expect(terminals[0]).toMatchObject({
++      status: 'failed',
++      errorCode: 'visual_agent_protocol_error',
++      taskId: 't1',
++      sessionRevision: 1,
++    });
++  });
++
++  it('passes the shared visual agent adapter conformance suite', async () => {
++    await defineVisualAgentAdapterConformance(
++      dshConformanceFixture,
++      dshRequiredConformance,
++    );
++  });
++});
+diff --git a/AwesomeProject/src/__tests__/connectorBridge/visualAgent/hermes/HermesAdapter.test.ts b/AwesomeProject/src/__tests__/connectorBridge/visualAgent/hermes/HermesAdapter.test.ts
+new file mode 100644
+index 0000000..b068482
+--- /dev/null
++++ b/AwesomeProject/src/__tests__/connectorBridge/visualAgent/hermes/HermesAdapter.test.ts
+@@ -0,0 +1,201 @@
++import type {
++  VisualAgentCapabilitySet,
++  VisualAgentProfileV1,
++  VisualAgentTaskEnvelopeV1,
++  VisualAgentTaskEvent,
++} from '@core/engine/operateRuntime/visualAgent/VisualAgentContracts';
++import type {
++  VisualAgentBindingPort,
++  VisualAgentUpstreamPort,
++  VisualAgentUpstreamSession,
++} from '../../../../connectorBridge/visualAgent/ports/VisualAgentUpstreamPort';
++import {defineVisualAgentAdapterConformance} from '../../../../connectorBridge/visualAgent/conformance/VisualAgentAdapterConformance';
++import {HermesAdapter} from '../../../../connectorBridge/visualAgent/adapters/hermes/HermesAdapter';
++import type {HermesBindingV1} from '../../../../connectorBridge/visualAgent/adapters/hermes/HermesBinding';
++import {
++  hermesConformanceFixture,
++  hermesRequiredConformance,
++} from '../../../../connectorBridge/visualAgent/adapters/hermes/conformanceFixture';
++
++const ALL_TRUE: VisualAgentCapabilitySet = {
++  imageInput: true,
++  structuredAction: true,
++  stream: true,
++  cancel: true,
++  approval: true,
++  resume: true,
++  steer: true,
++  preferences: true,
++};
++
++const HERMES_PROTOCOLS = [
++  'acp_json_rpc_stdio',
++  'gateway_json_rpc_stdio',
++  'gateway_json_rpc_ws',
++  'runs_http_sse',
++] as const;
++
++function makeSession(
++  negotiated: VisualAgentCapabilitySet,
++): VisualAgentUpstreamSession {
++  return {
++    negotiate: async () => negotiated,
++    send: async () => undefined,
++    subscribe: () => () => undefined,
++    close: async () => undefined,
++  };
++}
++
++function makeBindings(binding: unknown): VisualAgentBindingPort {
++  return {read: jest.fn(async () => binding)};
++}
++
++function makeCapturingSession(negotiated: VisualAgentCapabilitySet): {
++  session: VisualAgentUpstreamSession;
++  emit: (message: unknown) => void;
++} {
++  const captured: Array<(message: unknown) => void> = [];
++  const session: VisualAgentUpstreamSession = {
++    negotiate: async () => negotiated,
++    send: async () => undefined,
++    subscribe: listener => {
++      captured.push(listener);
++      return () => undefined;
++    },
++    close: async () => undefined,
++  };
++  return {
++    session,
++    emit: message => captured.forEach(listener => listener(message)),
++  };
++}
++
++const hermesBinding = (
++  protocol: HermesBindingV1['protocol'],
++): HermesBindingV1 => ({
++  schemaVersion: 1,
++  toolId: 'hermes',
++  protocol,
++  endpointOrExecutable:
++    protocol === 'runs_http_sse' || protocol === 'gateway_json_rpc_ws'
++      ? 'wss://hermes.example/runs'
++      : '/usr/local/bin/hermes',
++  cwd: null,
++  args: [],
++  secretRef: null,
++});
++
++const hermesProfile: VisualAgentProfileV1 = {
++  schemaVersion: 1,
++  profileId: 'p-hermes',
++  toolId: 'hermes',
++  enabled: true,
++  connector: {
++    kind: 'connector_bridge',
++    bridgeUrl: 'https://bridge.example',
++    bindingId: 'b-hermes',
++    secretRef: null,
++  },
++  requestedCapabilities: ALL_TRUE,
++};
++
++const envelope: VisualAgentTaskEnvelopeV1 = {
++  protocolVersion: 1,
++  taskId: 't1',
++  sessionRevision: 1,
++  profileId: 'p-hermes',
++  instruction: 'do the thing',
++  idempotencyKey: 'k1',
++  requiredCapabilities: ALL_TRUE,
++};
++
++const signal = new AbortController().signal;
++
++describe('HermesAdapter', () => {
++  it.each(HERMES_PROTOCOLS)('maps one Hermes mode: %s', async protocol => {
++    const session = makeSession(ALL_TRUE);
++    const upstream: VisualAgentUpstreamPort = {open: jest.fn(async () => session)};
++    const adapter = new HermesAdapter(makeBindings(hermesBinding(protocol)), upstream);
++    const execution = adapter.create(hermesProfile);
++    await execution.connect(hermesProfile, signal);
++    await execution.execute(envelope, signal);
++    expect(upstream.open).toHaveBeenCalledWith(expect.objectContaining({protocol}));
++  });
++
++  it('maps run approval, steer/cancel, resume, and inline images only when negotiated', async () => {
++    const session = makeSession(ALL_TRUE);
++    const upstream: VisualAgentUpstreamPort = {open: jest.fn(async () => session)};
++    const adapter = new HermesAdapter(
++      makeBindings(hermesBinding('runs_http_sse')),
++      upstream,
++    );
++    const execution = adapter.create(hermesProfile);
++    const negotiated = await execution.connect(hermesProfile, signal);
++    expect(negotiated).toEqual(
++      expect.objectContaining({imageInput: true, approval: true, resume: true}),
++    );
++  });
++
++  it('rejects hermes mcp serve as an unsupported mode', () => {
++    const adapter = new HermesAdapter(
++      makeBindings(hermesBinding('runs_http_sse')),
++      {open: jest.fn(async () => makeSession(ALL_TRUE))},
++    );
++    expect(() =>
++      adapter.validateBinding({
++        schemaVersion: 1,
++        toolId: 'hermes',
++        protocol: 'mcp',
++        endpointOrExecutable: '/usr/local/bin/hermes',
++      }),
++    ).toThrow('visual_agent_invalid_profile');
++  });
++
++  it('refuses to connect when a requested capability is not negotiated', async () => {
++    const session = makeSession({...ALL_TRUE, imageInput: false});
++    const upstream: VisualAgentUpstreamPort = {open: jest.fn(async () => session)};
++    const adapter = new HermesAdapter(
++      makeBindings(hermesBinding('runs_http_sse')),
++      upstream,
++    );
++    const execution = adapter.create(hermesProfile);
++    await expect(execution.connect(hermesProfile, signal)).rejects.toThrow(
++      'visual_agent_capability_unsupported',
++    );
++  });
++
++  it('does not throw out of the subscribe listener on a malformed upstream frame', async () => {
++    const {session, emit} = makeCapturingSession(ALL_TRUE);
++    const adapter = new HermesAdapter(
++      makeBindings(hermesBinding('runs_http_sse')),
++      {open: jest.fn(async () => session)},
++    );
++    const execution = adapter.create(hermesProfile);
++    await execution.connect(hermesProfile, signal);
++    const events: VisualAgentTaskEvent[] = [];
++    execution.subscribe(event => events.push(event));
++    await execution.execute(envelope, signal);
++
++    expect(() => emit('{not-json')).not.toThrow();
++
++    expect(execution.getConnectionState()).toEqual({
++      status: 'failed',
++      errorCode: 'visual_agent_protocol_error',
++    });
++    const terminals = events.filter(event => event.type === 'terminal');
++    expect(terminals).toHaveLength(1);
++    expect(terminals[0]).toMatchObject({
++      status: 'failed',
++      errorCode: 'visual_agent_protocol_error',
++      taskId: 't1',
++      sessionRevision: 1,
++    });
++  });
++
++  it('passes the shared visual agent adapter conformance suite', async () => {
++    await defineVisualAgentAdapterConformance(
++      hermesConformanceFixture,
++      hermesRequiredConformance,
++    );
++  });
++});
+diff --git a/AwesomeProject/src/connectorBridge/visualAgent/adapters/dsh/DshAdapter.ts b/AwesomeProject/src/connectorBridge/visualAgent/adapters/dsh/DshAdapter.ts
+new file mode 100644
+index 0000000..d925ec7
+--- /dev/null
++++ b/AwesomeProject/src/connectorBridge/visualAgent/adapters/dsh/DshAdapter.ts
+@@ -0,0 +1,408 @@
++// DeepSeek Harness Visual Agent adapter. Disabled by default and conservative by
++// construction: it opens only the transport-neutral `VisualAgentUpstreamPort`
++// (never spawning `dsh` or opening a product endpoint), binds strictly to
++// `product: 'deepseek-harness'`, and grants a capability only when the upstream
++// negotiation explicitly reports it. Requested-but-not-negotiated capabilities
++// fail closed with a generic `visual_agent_capability_unsupported` before send.
++import {CapabilityError} from '@core/engine/capabilities/shared/CapabilityError';
++import type {
++  VisualAgentCapabilitySet,
++  VisualAgentConnectionState,
++  VisualAgentExecutionPort,
++  VisualAgentPreferenceCommand,
++  VisualAgentProfileV1,
++  VisualAgentTaskEnvelopeV1,
++  VisualAgentTaskEvent,
++  VisualAgentToolAdapter,
++  VisualAgentToolManifestV1,
++} from '@core/engine/operateRuntime/visualAgent/VisualAgentContracts';
++import type {
++  VisualAgentBindingPort,
++  VisualAgentUpstreamPort,
++  VisualAgentUpstreamProtocol,
++  VisualAgentUpstreamSession,
++} from '../../ports/VisualAgentUpstreamPort';
++import {
++  createVisualAgentProtocolTaskTracker,
++  decodeVisualAgentMessage,
++  encodeVisualAgentMessage,
++  type VisualAgentProtocolTaskTracker,
++} from '../../protocol/VisualAgentProtocolCodec';
++import {validateDshBinding, type DshBindingV1} from './DshBinding';
++
++const CAPABILITY_KEYS = [
++  'imageInput',
++  'structuredAction',
++  'stream',
++  'cancel',
++  'approval',
++  'resume',
++  'steer',
++  'preferences',
++] as const;
++
++export const dshManifest: VisualAgentToolManifestV1 = {
++  toolId: 'dsh',
++  displayName: 'DeepSeek Harness',
++  maturity: 'experimental',
++  adapterVersion: '1.0.0',
++  protocolVersions: [1],
++  declaredCapabilities: {
++    imageInput: false,
++    structuredAction: true,
++    stream: true,
++    cancel: true,
++    approval: false,
++    resume: false,
++    steer: false,
++    preferences: false,
++  },
++};
++
++class DshExecutionPort implements VisualAgentExecutionPort {
++  private state: VisualAgentConnectionState = {status: 'disconnected'};
++  private session: VisualAgentUpstreamSession | null = null;
++  private unsubscribeUpstream: (() => void) | null = null;
++  private negotiated: VisualAgentCapabilitySet | null = null;
++  private tracker: VisualAgentProtocolTaskTracker | null = null;
++  private requestSeq = 0;
++  private currentTask: {taskId: string; sessionRevision: number} | null = null;
++  private terminalDelivered = false;
++  private lastDeliveredSequence = -1;
++  private readonly listeners = new Set<(event: VisualAgentTaskEvent) => void>();
++
++  constructor(
++    private readonly bindings: VisualAgentBindingPort,
++    private readonly upstream: VisualAgentUpstreamPort,
++  ) {}
++
++  getConnectionState(): VisualAgentConnectionState {
++    return this.state;
++  }
++
++  async connect(
++    profile: VisualAgentProfileV1,
++    signal: AbortSignal,
++  ): Promise<VisualAgentCapabilitySet> {
++    this.state = {status: 'connecting'};
++    let binding: DshBindingV1;
++    try {
++      const raw = await this.bindings.read(profile.connector.bindingId, 'dsh');
++      binding = validateDshBinding(raw);
++    } catch (error) {
++      this.state = {status: 'failed', errorCode: 'visual_agent_invalid_profile'};
++      throw error instanceof CapabilityError
++        ? error
++        : new CapabilityError('visual_agent_invalid_profile');
++    }
++    // Disabled-by-default and unknown/blank versions fail closed before any IO.
++    if (!binding.enabled || binding.version.trim().length === 0) {
++      this.state = {status: 'failed', errorCode: 'visual_agent_invalid_profile'};
++      throw new CapabilityError('visual_agent_invalid_profile');
++    }
++
++    this.state = {status: 'negotiating'};
++    const protocol: VisualAgentUpstreamProtocol = binding.protocol;
++    const session = await this.upstream.open({
++      protocol,
++      binding: binding as unknown as Readonly<Record<string, unknown>>,
++      signal,
++    });
++    this.session = session;
++    this.unsubscribeUpstream = session.subscribe(message =>
++      this.handleUpstream(message),
++    );
++
++    const upstreamNegotiated = await session.negotiate(profile.requestedCapabilities);
++    // The binding's `declaredCapabilities` is a hard ceiling: a capability is only
++    // effective when the upstream negotiated it AND the DSH binding declares it.
++    const effective: Record<(typeof CAPABILITY_KEYS)[number], boolean> = {
++      imageInput: false,
++      structuredAction: false,
++      stream: false,
++      cancel: false,
++      approval: false,
++      resume: false,
++      steer: false,
++      preferences: false,
++    };
++    for (const key of CAPABILITY_KEYS) {
++      effective[key] =
++        upstreamNegotiated[key] === true && binding.declaredCapabilities[key] === true;
++    }
++    // A requested capability that is not effective (missing from negotiation or
++    // above the declared ceiling) fails closed before the session becomes ready.
++    for (const key of CAPABILITY_KEYS) {
++      if (profile.requestedCapabilities[key] && !effective[key]) {
++        this.state = {
++          status: 'failed',
++          errorCode: 'visual_agent_capability_unsupported',
++        };
++        await this.closeSession();
++        throw new CapabilityError('visual_agent_capability_unsupported');
++      }
++    }
++
++    const negotiated: VisualAgentCapabilitySet = effective;
++    this.negotiated = negotiated;
++    this.state = {status: 'ready', negotiatedCapabilities: negotiated};
++    return negotiated;
++  }
++
++  private handleUpstream(message: unknown): void {
++    // A malformed or mis-correlated frame must never throw out of the upstream
++    // subscribe listener. Decode/tracker rejections are caught and modeled as a
++    // `visual_agent_protocol_error` failed state; the raw frame is never leaked.
++    if (this.terminalDelivered) {
++      return;
++    }
++    try {
++      if (typeof message !== 'string') {
++        return;
++      }
++      const decoded = decodeVisualAgentMessage(message);
++      switch (decoded.type) {
++        case 'task.status':
++        case 'task.event':
++        case 'task.completed':
++        case 'task.failed':
++        case 'task.cancelled':
++          this.forward(decoded.event);
++          break;
++        default:
++          break;
++      }
++    } catch {
++      this.failWithProtocolError();
++    }
++  }
++
++  private forward(event: VisualAgentTaskEvent): void {
++    if (this.tracker) {
++      this.tracker.accept(event);
++    }
++    this.lastDeliveredSequence = event.sequence;
++    if (event.type === 'terminal') {
++      this.terminalDelivered = true;
++    }
++    for (const listener of [...this.listeners]) {
++      listener(event);
++    }
++  }
++
++  private failWithProtocolError(): void {
++    this.state = {status: 'failed', errorCode: 'visual_agent_protocol_error'};
++    if (!this.currentTask || this.terminalDelivered) {
++      return;
++    }
++    const terminal: VisualAgentTaskEvent = {
++      type: 'terminal',
++      taskId: this.currentTask.taskId,
++      sessionRevision: this.currentTask.sessionRevision,
++      sequence: this.lastDeliveredSequence + 1,
++      status: 'failed',
++      errorCode: 'visual_agent_protocol_error',
++    };
++    this.terminalDelivered = true;
++    this.lastDeliveredSequence = terminal.sequence;
++    for (const listener of [...this.listeners]) {
++      listener(terminal);
++    }
++  }
++
++  subscribe(listener: (event: VisualAgentTaskEvent) => void): () => void {
++    this.listeners.add(listener);
++    return () => {
++      this.listeners.delete(listener);
++    };
++  }
++
++  private ensureReady(): {
++    session: VisualAgentUpstreamSession;
++    negotiated: VisualAgentCapabilitySet;
++  } {
++    if (this.state.status !== 'ready' || !this.session || !this.negotiated) {
++      throw new CapabilityError('visual_agent_not_ready');
++    }
++    return {session: this.session, negotiated: this.negotiated};
++  }
++
++  private nextRequestId(): string {
++    this.requestSeq += 1;
++    return `dsh-req-${this.requestSeq}`;
++  }
++
++  async execute(
++    envelope: VisualAgentTaskEnvelopeV1,
++    _signal: AbortSignal,
++  ): Promise<{taskId: string}> {
++    const {session, negotiated} = this.ensureReady();
++    for (const key of CAPABILITY_KEYS) {
++      if (envelope.requiredCapabilities[key] && !negotiated[key]) {
++        throw new CapabilityError('visual_agent_capability_unsupported');
++      }
++    }
++    if (envelope.image && !negotiated.imageInput) {
++      throw new CapabilityError('visual_agent_capability_unsupported');
++    }
++    this.tracker = createVisualAgentProtocolTaskTracker({
++      taskId: envelope.taskId,
++      sessionRevision: envelope.sessionRevision,
++    });
++    this.currentTask = {
++      taskId: envelope.taskId,
++      sessionRevision: envelope.sessionRevision,
++    };
++    this.terminalDelivered = false;
++    this.lastDeliveredSequence = -1;
++    await session.send(
++      encodeVisualAgentMessage({
++        version: 1,
++        type: 'task.start',
++        requestId: this.nextRequestId(),
++        envelope,
++      }),
++    );
++    return {taskId: envelope.taskId};
++  }
++
++  async cancel(
++    input: {taskId: string; sessionRevision: number},
++    _signal: AbortSignal,
++  ): Promise<void> {
++    const {session, negotiated} = this.ensureReady();
++    if (!negotiated.cancel) {
++      throw new CapabilityError('visual_agent_capability_unsupported');
++    }
++    await session.send(
++      encodeVisualAgentMessage({
++        version: 1,
++        type: 'task.cancel',
++        requestId: this.nextRequestId(),
++        taskId: input.taskId,
++        sessionRevision: input.sessionRevision,
++      }),
++    );
++  }
++
++  async resolveApproval(
++    input: {
++      taskId: string;
++      sessionRevision: number;
++      approvalId: string;
++      decision: 'approve' | 'reject';
++    },
++    _signal: AbortSignal,
++  ): Promise<void> {
++    const {session, negotiated} = this.ensureReady();
++    if (!negotiated.approval) {
++      throw new CapabilityError('visual_agent_capability_unsupported');
++    }
++    await session.send(
++      encodeVisualAgentMessage({
++        version: 1,
++        type: 'task.approval.resolve',
++        requestId: this.nextRequestId(),
++        taskId: input.taskId,
++        sessionRevision: input.sessionRevision,
++        approvalId: input.approvalId,
++        decision: input.decision,
++      }),
++    );
++  }
++
++  async resume(
++    input: {taskId: string; sessionRevision: number; resumeToken: string},
++    _signal: AbortSignal,
++  ): Promise<void> {
++    const {session, negotiated} = this.ensureReady();
++    if (!negotiated.resume) {
++      throw new CapabilityError('visual_agent_resume_unsupported');
++    }
++    await session.send(
++      encodeVisualAgentMessage({
++        version: 1,
++        type: 'task.resume',
++        requestId: this.nextRequestId(),
++        taskId: input.taskId,
++        sessionRevision: input.sessionRevision,
++        resumeToken: input.resumeToken,
++      }),
++    );
++  }
++
++  async steer(
++    input: {taskId: string; sessionRevision: number; instruction: string},
++    _signal: AbortSignal,
++  ): Promise<void> {
++    const {session, negotiated} = this.ensureReady();
++    if (!negotiated.steer) {
++      throw new CapabilityError('visual_agent_capability_unsupported');
++    }
++    await session.send(
++      encodeVisualAgentMessage({
++        version: 1,
++        type: 'task.steer',
++        requestId: this.nextRequestId(),
++        taskId: input.taskId,
++        sessionRevision: input.sessionRevision,
++        instruction: input.instruction,
++      }),
++    );
++  }
++
++  async requestPreferences(
++    command: VisualAgentPreferenceCommand,
++    _signal: AbortSignal,
++  ): Promise<unknown> {
++    const {session, negotiated} = this.ensureReady();
++    if (!negotiated.preferences) {
++      throw new CapabilityError('visual_agent_capability_unsupported');
++    }
++    await session.send(
++      encodeVisualAgentMessage({
++        version: 1,
++        type: 'preference.request',
++        requestId: this.nextRequestId(),
++        command,
++      }),
++    );
++    return undefined;
++  }
++
++  private async closeSession(): Promise<void> {
++    const session = this.session;
++    this.unsubscribeUpstream?.();
++    this.unsubscribeUpstream = null;
++    this.session = null;
++    if (session) {
++      await session.close();
++    }
++  }
++
++  async disconnect(): Promise<void> {
++    await this.closeSession();
++    this.tracker = null;
++    this.currentTask = null;
++    this.negotiated = null;
++    this.state = {status: 'disconnected'};
++  }
++}
++
++export class DshAdapter implements VisualAgentToolAdapter {
++  readonly toolId = 'dsh' as const;
++  readonly manifest = dshManifest;
++
++  constructor(
++    private readonly bindings: VisualAgentBindingPort,
++    private readonly upstream: VisualAgentUpstreamPort,
++  ) {}
++
++  validateBinding(input: unknown): DshBindingV1 {
++    return validateDshBinding(input);
++  }
++
++  create(_profile: VisualAgentProfileV1): VisualAgentExecutionPort {
++    return new DshExecutionPort(this.bindings, this.upstream);
++  }
++}
+diff --git a/AwesomeProject/src/connectorBridge/visualAgent/adapters/dsh/DshBinding.ts b/AwesomeProject/src/connectorBridge/visualAgent/adapters/dsh/DshBinding.ts
+new file mode 100644
+index 0000000..29af1bc
+--- /dev/null
++++ b/AwesomeProject/src/connectorBridge/visualAgent/adapters/dsh/DshBinding.ts
+@@ -0,0 +1,93 @@
++// DeepSeek Harness (`dsh`) binding schema and its conservative validator.
++// `dsh` is a frozen product id bound *only* to `product: 'deepseek-harness'`.
++// Dify (or any other product) is never aliased onto `dsh`. Bindings are disabled
++// by default and never infer capabilities from unstructured CLI text: an explicit
++// `declaredCapabilities` set is the only source of truth, defaulting to all-false.
++import {CapabilityError} from '@core/engine/capabilities/shared/CapabilityError';
++import type {VisualAgentCapabilitySet} from '@core/engine/operateRuntime/visualAgent/VisualAgentContracts';
++
++export type DshBindingV1 = {
++  readonly schemaVersion: 1;
++  readonly toolId: 'dsh';
++  readonly product: 'deepseek-harness';
++  readonly protocol: 'dsh_cli' | 'custom_bridge';
++  readonly version: string;
++  readonly endpointOrExecutable: string;
++  readonly cwd: string | null;
++  readonly args: readonly string[];
++  readonly secretRef: string | null;
++  readonly enabled: boolean;
++  readonly declaredCapabilities: VisualAgentCapabilitySet;
++};
++
++const CAPABILITY_KEYS = [
++  'imageInput',
++  'structuredAction',
++  'stream',
++  'cancel',
++  'approval',
++  'resume',
++  'steer',
++  'preferences',
++] as const;
++
++const ALL_FALSE_CAPABILITIES: VisualAgentCapabilitySet = {
++  imageInput: false,
++  structuredAction: false,
++  stream: false,
++  cancel: false,
++  approval: false,
++  resume: false,
++  steer: false,
++  preferences: false,
++};
++
++const isObject = (value: unknown): value is Record<string, unknown> =>
++  typeof value === 'object' && value !== null && !Array.isArray(value);
++
++function normalizeDeclaredCapabilities(value: unknown): VisualAgentCapabilitySet {
++  const out = {...ALL_FALSE_CAPABILITIES};
++  if (isObject(value)) {
++    for (const key of CAPABILITY_KEYS) {
++      if (value[key] === true) {
++        out[key] = true;
++      }
++    }
++  }
++  return out;
++}
++
++/**
++ * Normalizes an untrusted binding record into a `DshBindingV1`. Rejects any
++ * product other than DeepSeek Harness and any protocol outside the DSH set. The
++ * result defaults `enabled` to false and never widens capabilities beyond what
++ * the binding explicitly declares.
++ */
++export function validateDshBinding(input: unknown): DshBindingV1 {
++  if (!isObject(input)) {
++    throw new CapabilityError('visual_agent_invalid_profile');
++  }
++  if (input.product !== 'deepseek-harness') {
++    throw new CapabilityError('visual_agent_invalid_profile');
++  }
++  const protocol = input.protocol;
++  if (protocol !== 'dsh_cli' && protocol !== 'custom_bridge') {
++    throw new CapabilityError('visual_agent_invalid_profile');
++  }
++  return {
++    schemaVersion: 1,
++    toolId: 'dsh',
++    product: 'deepseek-harness',
++    protocol,
++    version: typeof input.version === 'string' ? input.version : '',
++    endpointOrExecutable:
++      typeof input.endpointOrExecutable === 'string' ? input.endpointOrExecutable : '',
++    cwd: typeof input.cwd === 'string' ? input.cwd : null,
++    args: Array.isArray(input.args)
++      ? input.args.filter((arg): arg is string => typeof arg === 'string')
++      : [],
++    secretRef: typeof input.secretRef === 'string' ? input.secretRef : null,
++    enabled: input.enabled === true,
++    declaredCapabilities: normalizeDeclaredCapabilities(input.declaredCapabilities),
++  };
++}
+diff --git a/AwesomeProject/src/connectorBridge/visualAgent/adapters/dsh/conformanceFixture.ts b/AwesomeProject/src/connectorBridge/visualAgent/adapters/dsh/conformanceFixture.ts
+new file mode 100644
+index 0000000..5d5641d
+--- /dev/null
++++ b/AwesomeProject/src/connectorBridge/visualAgent/adapters/dsh/conformanceFixture.ts
+@@ -0,0 +1,237 @@
++// Self-contained conformance fixture for the DSH adapter. It wires a fake
++// `VisualAgentUpstreamPort` whose emit helpers push correlated, strictly
++// increasing protocol frames (encoded through the shared codec) so the frozen
++// `defineVisualAgentAdapterConformance` runner can drive connect → execute →
++// status/delta → exactly one terminal → disconnect. `fallbackSpy` is always 0:
++// the DSH adapter has no second execution path.
++import type {
++  VisualAgentAdapterConformanceFixture,
++  VisualAgentConformanceOptions,
++} from '../../conformance/VisualAgentAdapterConformance';
++import type {
++  VisualAgentBindingPort,
++  VisualAgentUpstreamPort,
++  VisualAgentUpstreamSession,
++} from '../../ports/VisualAgentUpstreamPort';
++import {encodeVisualAgentMessage} from '../../protocol/VisualAgentProtocolCodec';
++import type {
++  VisualAgentCapabilitySet,
++  VisualAgentErrorCode,
++  VisualAgentProfileV1,
++  VisualAgentProtocolV1,
++  VisualAgentResultV1,
++  VisualAgentStructuredAction,
++} from '@core/engine/operateRuntime/visualAgent/VisualAgentContracts';
++import {DshAdapter} from './DshAdapter';
++import type {DshBindingV1} from './DshBinding';
++
++const TASK_ID = 'conformance-task';
++const SESSION_REVISION = 1;
++
++const negotiatedCapabilities: VisualAgentCapabilitySet = {
++  imageInput: false,
++  structuredAction: true,
++  stream: true,
++  cancel: true,
++  approval: false,
++  resume: false,
++  steer: false,
++  preferences: false,
++};
++
++const binding: DshBindingV1 = {
++  schemaVersion: 1,
++  toolId: 'dsh',
++  product: 'deepseek-harness',
++  protocol: 'custom_bridge',
++  version: '1.0.0',
++  endpointOrExecutable: 'bridge://deepseek-harness',
++  cwd: null,
++  args: [],
++  secretRef: null,
++  enabled: true,
++  declaredCapabilities: negotiatedCapabilities,
++};
++
++const profile: VisualAgentProfileV1 = {
++  schemaVersion: 1,
++  profileId: 'dsh-conformance',
++  toolId: 'dsh',
++  enabled: true,
++  connector: {
++    kind: 'connector_bridge',
++    bridgeUrl: 'https://bridge.example',
++    bindingId: 'b-dsh-conformance',
++    secretRef: null,
++  },
++  requestedCapabilities: negotiatedCapabilities,
++};
++
++function buildFixture(): VisualAgentAdapterConformanceFixture {
++  let listeners = new Set<(message: unknown) => void>();
++  let sequence = 0;
++
++  const emitFrame = (message: VisualAgentProtocolV1): void => {
++    const raw = encodeVisualAgentMessage(message);
++    for (const listener of [...listeners]) {
++      listener(raw);
++    }
++  };
++  const nextSequence = (): number => {
++    const current = sequence;
++    sequence += 1;
++    return current;
++  };
++
++  const upstream: VisualAgentUpstreamPort = {
++    open: async () => {
++      listeners = new Set();
++      sequence = 0;
++      const session: VisualAgentUpstreamSession = {
++        negotiate: async () => negotiatedCapabilities,
++        send: async () => undefined,
++        subscribe: listener => {
++          listeners.add(listener);
++          return () => {
++            listeners.delete(listener);
++          };
++        },
++        close: async () => undefined,
++      };
++      return session;
++    },
++  };
++
++  const bindings: VisualAgentBindingPort = {
++    read: async () => binding,
++  };
++
++  const adapter = new DshAdapter(bindings, upstream);
++
++  return {
++    toolId: 'dsh',
++    adapter,
++    profile,
++    binding: binding as unknown as Readonly<Record<string, unknown>>,
++    upstream,
++    supportedCapabilities: negotiatedCapabilities,
++    fallbackSpy: {callCount: () => 0},
++    emitStatus(status: 'queued' | 'running') {
++      const seq = nextSequence();
++      emitFrame({
++        version: 1,
++        type: 'task.status',
++        requestId: `dsh-evt-${seq}`,
++        event: {
++          type: 'status',
++          taskId: TASK_ID,
++          sessionRevision: SESSION_REVISION,
++          sequence: seq,
++          status,
++        },
++      });
++    },
++    emitApproval(approvalId: string) {
++      const seq = nextSequence();
++      emitFrame({
++        version: 1,
++        type: 'task.status',
++        requestId: `dsh-evt-${seq}`,
++        event: {
++          type: 'status',
++          taskId: TASK_ID,
++          sessionRevision: SESSION_REVISION,
++          sequence: seq,
++          status: 'waiting_approval',
++          approvalId,
++        },
++      });
++    },
++    emitDelta(input: {
++      textDelta?: string;
++      visualUnderstandingDelta?: string;
++      structuredAction?: VisualAgentStructuredAction;
++    }) {
++      const seq = nextSequence();
++      emitFrame({
++        version: 1,
++        type: 'task.event',
++        requestId: `dsh-evt-${seq}`,
++        event: {
++          type: 'delta',
++          taskId: TASK_ID,
++          sessionRevision: SESSION_REVISION,
++          sequence: seq,
++          ...(input.textDelta !== undefined ? {textDelta: input.textDelta} : {}),
++          ...(input.visualUnderstandingDelta !== undefined
++            ? {visualUnderstandingDelta: input.visualUnderstandingDelta}
++            : {}),
++          ...(input.structuredAction
++            ? {structuredAction: input.structuredAction}
++            : {}),
++        },
++      });
++    },
++    emitCompleted(result: VisualAgentResultV1) {
++      const seq = nextSequence();
++      emitFrame({
++        version: 1,
++        type: 'task.completed',
++        requestId: `dsh-evt-${seq}`,
++        event: {
++          type: 'terminal',
++          taskId: TASK_ID,
++          sessionRevision: SESSION_REVISION,
++          sequence: seq,
++          status: 'completed',
++          result,
++        },
++      });
++    },
++    emitFailed(errorCode: VisualAgentErrorCode, resumeToken?: string) {
++      const seq = nextSequence();
++      emitFrame({
++        version: 1,
++        type: 'task.failed',
++        requestId: `dsh-evt-${seq}`,
++        event: {
++          type: 'terminal',
++          taskId: TASK_ID,
++          sessionRevision: SESSION_REVISION,
++          sequence: seq,
++          status: 'failed',
++          errorCode,
++          ...(resumeToken ? {resumeToken} : {}),
++        },
++      });
++    },
++    emitCancelled(resumeToken?: string) {
++      const seq = nextSequence();
++      emitFrame({
++        version: 1,
++        type: 'task.cancelled',
++        requestId: `dsh-evt-${seq}`,
++        event: {
++          type: 'terminal',
++          taskId: TASK_ID,
++          sessionRevision: SESSION_REVISION,
++          sequence: seq,
++          status: 'cancelled',
++          ...(resumeToken ? {resumeToken} : {}),
++        },
++      });
++    },
++    emitDisconnect() {
++      // Upstream teardown is exercised through `port.disconnect()`; no frame is
++      // emitted here so the run ends on exactly one terminal event.
++    },
++  };
++}
++
++export const dshConformanceFixture: VisualAgentAdapterConformanceFixture =
++  buildFixture();
++
++export const dshRequiredConformance: VisualAgentConformanceOptions = {
++  requiredStatuses: ['queued', 'running', 'cancelled'],
++  negotiatedCapabilities: ['structuredAction', 'stream', 'cancel'],
++};
+diff --git a/AwesomeProject/src/connectorBridge/visualAgent/adapters/hermes/HermesAdapter.ts b/AwesomeProject/src/connectorBridge/visualAgent/adapters/hermes/HermesAdapter.ts
+new file mode 100644
+index 0000000..b35ae9c
+--- /dev/null
++++ b/AwesomeProject/src/connectorBridge/visualAgent/adapters/hermes/HermesAdapter.ts
+@@ -0,0 +1,384 @@
++// Hermes Visual Agent adapter. Maps each of the four Hermes transports
++// (ACP stdio, TUI Gateway JSON-RPC over stdio or WS, and Runs HTTP+SSE) onto the
++// transport-neutral `VisualAgentUpstreamPort`, one binding mode at a time with no
++// fallback. Run approval, steer/cancel, resume, and inline image input are only
++// activated when the upstream negotiation reports the corresponding capability;
++// a requested-but-not-negotiated capability fails closed before any send.
++import {CapabilityError} from '@core/engine/capabilities/shared/CapabilityError';
++import type {
++  VisualAgentCapabilitySet,
++  VisualAgentConnectionState,
++  VisualAgentExecutionPort,
++  VisualAgentPreferenceCommand,
++  VisualAgentProfileV1,
++  VisualAgentTaskEnvelopeV1,
++  VisualAgentTaskEvent,
++  VisualAgentToolAdapter,
++  VisualAgentToolManifestV1,
++} from '@core/engine/operateRuntime/visualAgent/VisualAgentContracts';
++import type {
++  VisualAgentBindingPort,
++  VisualAgentUpstreamPort,
++  VisualAgentUpstreamProtocol,
++  VisualAgentUpstreamSession,
++} from '../../ports/VisualAgentUpstreamPort';
++import {
++  createVisualAgentProtocolTaskTracker,
++  decodeVisualAgentMessage,
++  encodeVisualAgentMessage,
++  type VisualAgentProtocolTaskTracker,
++} from '../../protocol/VisualAgentProtocolCodec';
++import {validateHermesBinding, type HermesBindingV1} from './HermesBinding';
++
++const CAPABILITY_KEYS = [
++  'imageInput',
++  'structuredAction',
++  'stream',
++  'cancel',
++  'approval',
++  'resume',
++  'steer',
++  'preferences',
++] as const;
++
++export const hermesManifest: VisualAgentToolManifestV1 = {
++  toolId: 'hermes',
++  displayName: 'Hermes',
++  maturity: 'beta',
++  adapterVersion: '1.0.0',
++  protocolVersions: [1],
++  declaredCapabilities: {
++    imageInput: true,
++    structuredAction: true,
++    stream: true,
++    cancel: true,
++    approval: true,
++    resume: true,
++    steer: true,
++    preferences: true,
++  },
++};
++
++class HermesExecutionPort implements VisualAgentExecutionPort {
++  private state: VisualAgentConnectionState = {status: 'disconnected'};
++  private session: VisualAgentUpstreamSession | null = null;
++  private unsubscribeUpstream: (() => void) | null = null;
++  private negotiated: VisualAgentCapabilitySet | null = null;
++  private tracker: VisualAgentProtocolTaskTracker | null = null;
++  private requestSeq = 0;
++  private currentTask: {taskId: string; sessionRevision: number} | null = null;
++  private terminalDelivered = false;
++  private lastDeliveredSequence = -1;
++  private readonly listeners = new Set<(event: VisualAgentTaskEvent) => void>();
++
++  constructor(
++    private readonly bindings: VisualAgentBindingPort,
++    private readonly upstream: VisualAgentUpstreamPort,
++  ) {}
++
++  getConnectionState(): VisualAgentConnectionState {
++    return this.state;
++  }
++
++  async connect(
++    profile: VisualAgentProfileV1,
++    signal: AbortSignal,
++  ): Promise<VisualAgentCapabilitySet> {
++    this.state = {status: 'connecting'};
++    let binding: HermesBindingV1;
++    try {
++      const raw = await this.bindings.read(profile.connector.bindingId, 'hermes');
++      binding = validateHermesBinding(raw);
++    } catch (error) {
++      this.state = {status: 'failed', errorCode: 'visual_agent_invalid_profile'};
++      throw error instanceof CapabilityError
++        ? error
++        : new CapabilityError('visual_agent_invalid_profile');
++    }
++
++    this.state = {status: 'negotiating'};
++    const protocol: VisualAgentUpstreamProtocol = binding.protocol;
++    const session = await this.upstream.open({
++      protocol,
++      binding: binding as unknown as Readonly<Record<string, unknown>>,
++      signal,
++    });
++    this.session = session;
++    this.unsubscribeUpstream = session.subscribe(message =>
++      this.handleUpstream(message),
++    );
++
++    const negotiated = await session.negotiate(profile.requestedCapabilities);
++    for (const key of CAPABILITY_KEYS) {
++      if (profile.requestedCapabilities[key] && !negotiated[key]) {
++        this.state = {
++          status: 'failed',
++          errorCode: 'visual_agent_capability_unsupported',
++        };
++        await this.closeSession();
++        throw new CapabilityError('visual_agent_capability_unsupported');
++      }
++    }
++
++    this.negotiated = negotiated;
++    this.state = {status: 'ready', negotiatedCapabilities: negotiated};
++    return negotiated;
++  }
++
++  private handleUpstream(message: unknown): void {
++    // A malformed or mis-correlated frame must never throw out of the upstream
++    // subscribe listener. Decode/tracker rejections are caught and modeled as a
++    // `visual_agent_protocol_error` failed state; the raw frame is never leaked.
++    if (this.terminalDelivered) {
++      return;
++    }
++    try {
++      if (typeof message !== 'string') {
++        return;
++      }
++      const decoded = decodeVisualAgentMessage(message);
++      switch (decoded.type) {
++        case 'task.status':
++        case 'task.event':
++        case 'task.completed':
++        case 'task.failed':
++        case 'task.cancelled':
++          this.forward(decoded.event);
++          break;
++        default:
++          break;
++      }
++    } catch {
++      this.failWithProtocolError();
++    }
++  }
++
++  private forward(event: VisualAgentTaskEvent): void {
++    if (this.tracker) {
++      this.tracker.accept(event);
++    }
++    this.lastDeliveredSequence = event.sequence;
++    if (event.type === 'terminal') {
++      this.terminalDelivered = true;
++    }
++    for (const listener of [...this.listeners]) {
++      listener(event);
++    }
++  }
++
++  private failWithProtocolError(): void {
++    this.state = {status: 'failed', errorCode: 'visual_agent_protocol_error'};
++    if (!this.currentTask || this.terminalDelivered) {
++      return;
++    }
++    const terminal: VisualAgentTaskEvent = {
++      type: 'terminal',
++      taskId: this.currentTask.taskId,
++      sessionRevision: this.currentTask.sessionRevision,
++      sequence: this.lastDeliveredSequence + 1,
++      status: 'failed',
++      errorCode: 'visual_agent_protocol_error',
++    };
++    this.terminalDelivered = true;
++    this.lastDeliveredSequence = terminal.sequence;
++    for (const listener of [...this.listeners]) {
++      listener(terminal);
++    }
++  }
++
++  subscribe(listener: (event: VisualAgentTaskEvent) => void): () => void {
++    this.listeners.add(listener);
++    return () => {
++      this.listeners.delete(listener);
++    };
++  }
++
++  private ensureReady(): {
++    session: VisualAgentUpstreamSession;
++    negotiated: VisualAgentCapabilitySet;
++  } {
++    if (this.state.status !== 'ready' || !this.session || !this.negotiated) {
++      throw new CapabilityError('visual_agent_not_ready');
++    }
++    return {session: this.session, negotiated: this.negotiated};
++  }
++
++  private nextRequestId(): string {
++    this.requestSeq += 1;
++    return `hermes-req-${this.requestSeq}`;
++  }
++
++  async execute(
++    envelope: VisualAgentTaskEnvelopeV1,
++    _signal: AbortSignal,
++  ): Promise<{taskId: string}> {
++    const {session, negotiated} = this.ensureReady();
++    for (const key of CAPABILITY_KEYS) {
++      if (envelope.requiredCapabilities[key] && !negotiated[key]) {
++        throw new CapabilityError('visual_agent_capability_unsupported');
++      }
++    }
++    if (envelope.image && !negotiated.imageInput) {
++      throw new CapabilityError('visual_agent_capability_unsupported');
++    }
++    this.tracker = createVisualAgentProtocolTaskTracker({
++      taskId: envelope.taskId,
++      sessionRevision: envelope.sessionRevision,
++    });
++    this.currentTask = {
++      taskId: envelope.taskId,
++      sessionRevision: envelope.sessionRevision,
++    };
++    this.terminalDelivered = false;
++    this.lastDeliveredSequence = -1;
++    await session.send(
++      encodeVisualAgentMessage({
++        version: 1,
++        type: 'task.start',
++        requestId: this.nextRequestId(),
++        envelope,
++      }),
++    );
++    return {taskId: envelope.taskId};
++  }
++
++  async cancel(
++    input: {taskId: string; sessionRevision: number},
++    _signal: AbortSignal,
++  ): Promise<void> {
++    const {session, negotiated} = this.ensureReady();
++    if (!negotiated.cancel) {
++      throw new CapabilityError('visual_agent_capability_unsupported');
++    }
++    await session.send(
++      encodeVisualAgentMessage({
++        version: 1,
++        type: 'task.cancel',
++        requestId: this.nextRequestId(),
++        taskId: input.taskId,
++        sessionRevision: input.sessionRevision,
++      }),
++    );
++  }
++
++  async resolveApproval(
++    input: {
++      taskId: string;
++      sessionRevision: number;
++      approvalId: string;
++      decision: 'approve' | 'reject';
++    },
++    _signal: AbortSignal,
++  ): Promise<void> {
++    const {session, negotiated} = this.ensureReady();
++    if (!negotiated.approval) {
++      throw new CapabilityError('visual_agent_capability_unsupported');
++    }
++    await session.send(
++      encodeVisualAgentMessage({
++        version: 1,
++        type: 'task.approval.resolve',
++        requestId: this.nextRequestId(),
++        taskId: input.taskId,
++        sessionRevision: input.sessionRevision,
++        approvalId: input.approvalId,
++        decision: input.decision,
++      }),
++    );
++  }
++
++  async resume(
++    input: {taskId: string; sessionRevision: number; resumeToken: string},
++    _signal: AbortSignal,
++  ): Promise<void> {
++    const {session, negotiated} = this.ensureReady();
++    if (!negotiated.resume) {
++      throw new CapabilityError('visual_agent_resume_unsupported');
++    }
++    await session.send(
++      encodeVisualAgentMessage({
++        version: 1,
++        type: 'task.resume',
++        requestId: this.nextRequestId(),
++        taskId: input.taskId,
++        sessionRevision: input.sessionRevision,
++        resumeToken: input.resumeToken,
++      }),
++    );
++  }
++
++  async steer(
++    input: {taskId: string; sessionRevision: number; instruction: string},
++    _signal: AbortSignal,
++  ): Promise<void> {
++    const {session, negotiated} = this.ensureReady();
++    if (!negotiated.steer) {
++      throw new CapabilityError('visual_agent_capability_unsupported');
++    }
++    await session.send(
++      encodeVisualAgentMessage({
++        version: 1,
++        type: 'task.steer',
++        requestId: this.nextRequestId(),
++        taskId: input.taskId,
++        sessionRevision: input.sessionRevision,
++        instruction: input.instruction,
++      }),
++    );
++  }
++
++  async requestPreferences(
++    command: VisualAgentPreferenceCommand,
++    _signal: AbortSignal,
++  ): Promise<unknown> {
++    const {session, negotiated} = this.ensureReady();
++    if (!negotiated.preferences) {
++      throw new CapabilityError('visual_agent_capability_unsupported');
++    }
++    await session.send(
++      encodeVisualAgentMessage({
++        version: 1,
++        type: 'preference.request',
++        requestId: this.nextRequestId(),
++        command,
++      }),
++    );
++    return undefined;
++  }
++
++  private async closeSession(): Promise<void> {
++    const session = this.session;
++    this.unsubscribeUpstream?.();
++    this.unsubscribeUpstream = null;
++    this.session = null;
++    if (session) {
++      await session.close();
++    }
++  }
++
++  async disconnect(): Promise<void> {
++    await this.closeSession();
++    this.tracker = null;
++    this.currentTask = null;
++    this.negotiated = null;
++    this.state = {status: 'disconnected'};
++  }
++}
++
++export class HermesAdapter implements VisualAgentToolAdapter {
++  readonly toolId = 'hermes' as const;
++  readonly manifest = hermesManifest;
++
++  constructor(
++    private readonly bindings: VisualAgentBindingPort,
++    private readonly upstream: VisualAgentUpstreamPort,
++  ) {}
++
++  validateBinding(input: unknown): HermesBindingV1 {
++    return validateHermesBinding(input);
++  }
++
++  create(_profile: VisualAgentProfileV1): VisualAgentExecutionPort {
++    return new HermesExecutionPort(this.bindings, this.upstream);
++  }
++}
+diff --git a/AwesomeProject/src/connectorBridge/visualAgent/adapters/hermes/HermesBinding.ts b/AwesomeProject/src/connectorBridge/visualAgent/adapters/hermes/HermesBinding.ts
+new file mode 100644
+index 0000000..b5f845e
+--- /dev/null
++++ b/AwesomeProject/src/connectorBridge/visualAgent/adapters/hermes/HermesBinding.ts
+@@ -0,0 +1,69 @@
++// Hermes binding schema and validator. Hermes exposes four distinct Visual Agent
++// transports; each is a separate binding mode with no fallback between them:
++//   - acp_json_rpc_stdio     (ACP over stdio)
++//   - gateway_json_rpc_stdio (TUI Gateway JSON-RPC over stdio)
++//   - gateway_json_rpc_ws    (TUI Gateway JSON-RPC over WebSocket)
++//   - runs_http_sse          (Runs HTTP endpoints + SSE stream)
++// `hermes mcp serve` is intentionally excluded: its MCP messaging bridge is not a
++// complete Visual Agent lifecycle, so `mcp` is rejected as an invalid profile.
++import {CapabilityError} from '@core/engine/capabilities/shared/CapabilityError';
++
++export type HermesProtocol =
++  | 'acp_json_rpc_stdio'
++  | 'gateway_json_rpc_stdio'
++  | 'gateway_json_rpc_ws'
++  | 'runs_http_sse';
++
++export type HermesBindingV1 = {
++  readonly schemaVersion: 1;
++  readonly toolId: 'hermes';
++  readonly protocol: HermesProtocol;
++  readonly endpointOrExecutable: string;
++  readonly cwd: string | null;
++  readonly args: readonly string[];
++  readonly secretRef: string | null;
++};
++
++const HERMES_PROTOCOLS: readonly HermesProtocol[] = [
++  'acp_json_rpc_stdio',
++  'gateway_json_rpc_stdio',
++  'gateway_json_rpc_ws',
++  'runs_http_sse',
++];
++
++const isObject = (value: unknown): value is Record<string, unknown> =>
++  typeof value === 'object' && value !== null && !Array.isArray(value);
++
++const isHermesProtocol = (value: unknown): value is HermesProtocol =>
++  typeof value === 'string' && (HERMES_PROTOCOLS as readonly string[]).includes(value);
++
++/**
++ * Normalizes an untrusted binding record into a `HermesBindingV1`. Any mode
++ * outside the four supported transports — including `hermes mcp serve` — is
++ * rejected as an invalid profile. There is no mode fallback.
++ */
++export function validateHermesBinding(input: unknown): HermesBindingV1 {
++  if (!isObject(input)) {
++    throw new CapabilityError('visual_agent_invalid_profile');
++  }
++  if (!isHermesProtocol(input.protocol)) {
++    throw new CapabilityError('visual_agent_invalid_profile');
++  }
++  if (
++    typeof input.endpointOrExecutable !== 'string' ||
++    input.endpointOrExecutable.length === 0
++  ) {
++    throw new CapabilityError('visual_agent_invalid_profile');
++  }
++  return {
++    schemaVersion: 1,
++    toolId: 'hermes',
++    protocol: input.protocol,
++    endpointOrExecutable: input.endpointOrExecutable,
++    cwd: typeof input.cwd === 'string' ? input.cwd : null,
++    args: Array.isArray(input.args)
++      ? input.args.filter((arg): arg is string => typeof arg === 'string')
++      : [],
++    secretRef: typeof input.secretRef === 'string' ? input.secretRef : null,
++  };
++}
+diff --git a/AwesomeProject/src/connectorBridge/visualAgent/adapters/hermes/conformanceFixture.ts b/AwesomeProject/src/connectorBridge/visualAgent/adapters/hermes/conformanceFixture.ts
+new file mode 100644
+index 0000000..3541d75
+--- /dev/null
++++ b/AwesomeProject/src/connectorBridge/visualAgent/adapters/hermes/conformanceFixture.ts
+@@ -0,0 +1,242 @@
++// Self-contained conformance fixture for the Hermes adapter (Runs HTTP+SSE mode).
++// It wires a fake `VisualAgentUpstreamPort` whose emit helpers push correlated,
++// strictly increasing protocol frames (encoded through the shared codec) so the
++// frozen `defineVisualAgentAdapterConformance` runner can drive the full
++// connect → execute → status/approval/delta → single terminal → disconnect
++// lifecycle including steer and preferences. `fallbackSpy` is always 0.
++import type {
++  VisualAgentAdapterConformanceFixture,
++  VisualAgentConformanceOptions,
++} from '../../conformance/VisualAgentAdapterConformance';
++import type {
++  VisualAgentBindingPort,
++  VisualAgentUpstreamPort,
++  VisualAgentUpstreamSession,
++} from '../../ports/VisualAgentUpstreamPort';
++import {encodeVisualAgentMessage} from '../../protocol/VisualAgentProtocolCodec';
++import type {
++  VisualAgentCapabilitySet,
++  VisualAgentErrorCode,
++  VisualAgentProfileV1,
++  VisualAgentProtocolV1,
++  VisualAgentResultV1,
++  VisualAgentStructuredAction,
++} from '@core/engine/operateRuntime/visualAgent/VisualAgentContracts';
++import {HermesAdapter} from './HermesAdapter';
++import type {HermesBindingV1} from './HermesBinding';
++
++const TASK_ID = 'conformance-task';
++const SESSION_REVISION = 1;
++
++const negotiatedCapabilities: VisualAgentCapabilitySet = {
++  imageInput: true,
++  structuredAction: true,
++  stream: true,
++  cancel: true,
++  approval: true,
++  resume: true,
++  steer: true,
++  preferences: true,
++};
++
++const binding: HermesBindingV1 = {
++  schemaVersion: 1,
++  toolId: 'hermes',
++  protocol: 'runs_http_sse',
++  endpointOrExecutable: 'wss://hermes.example/runs',
++  cwd: null,
++  args: [],
++  secretRef: null,
++};
++
++const profile: VisualAgentProfileV1 = {
++  schemaVersion: 1,
++  profileId: 'hermes-conformance',
++  toolId: 'hermes',
++  enabled: true,
++  connector: {
++    kind: 'connector_bridge',
++    bridgeUrl: 'https://bridge.example',
++    bindingId: 'b-hermes-conformance',
++    secretRef: null,
++  },
++  requestedCapabilities: negotiatedCapabilities,
++};
++
++function buildFixture(): VisualAgentAdapterConformanceFixture {
++  let listeners = new Set<(message: unknown) => void>();
++  let sequence = 0;
++
++  const emitFrame = (message: VisualAgentProtocolV1): void => {
++    const raw = encodeVisualAgentMessage(message);
++    for (const listener of [...listeners]) {
++      listener(raw);
++    }
++  };
++  const nextSequence = (): number => {
++    const current = sequence;
++    sequence += 1;
++    return current;
++  };
++
++  const upstream: VisualAgentUpstreamPort = {
++    open: async () => {
++      listeners = new Set();
++      sequence = 0;
++      const session: VisualAgentUpstreamSession = {
++        negotiate: async () => negotiatedCapabilities,
++        send: async () => undefined,
++        subscribe: listener => {
++          listeners.add(listener);
++          return () => {
++            listeners.delete(listener);
++          };
++        },
++        close: async () => undefined,
++      };
++      return session;
++    },
++  };
++
++  const bindings: VisualAgentBindingPort = {
++    read: async () => binding,
++  };
++
++  const adapter = new HermesAdapter(bindings, upstream);
++
++  return {
++    toolId: 'hermes',
++    adapter,
++    profile,
++    binding: binding as unknown as Readonly<Record<string, unknown>>,
++    upstream,
++    supportedCapabilities: negotiatedCapabilities,
++    fallbackSpy: {callCount: () => 0},
++    emitStatus(status: 'queued' | 'running') {
++      const seq = nextSequence();
++      emitFrame({
++        version: 1,
++        type: 'task.status',
++        requestId: `hermes-evt-${seq}`,
++        event: {
++          type: 'status',
++          taskId: TASK_ID,
++          sessionRevision: SESSION_REVISION,
++          sequence: seq,
++          status,
++        },
++      });
++    },
++    emitApproval(approvalId: string) {
++      const seq = nextSequence();
++      emitFrame({
++        version: 1,
++        type: 'task.status',
++        requestId: `hermes-evt-${seq}`,
++        event: {
++          type: 'status',
++          taskId: TASK_ID,
++          sessionRevision: SESSION_REVISION,
++          sequence: seq,
++          status: 'waiting_approval',
++          approvalId,
++        },
++      });
++    },
++    emitDelta(input: {
++      textDelta?: string;
++      visualUnderstandingDelta?: string;
++      structuredAction?: VisualAgentStructuredAction;
++    }) {
++      const seq = nextSequence();
++      emitFrame({
++        version: 1,
++        type: 'task.event',
++        requestId: `hermes-evt-${seq}`,
++        event: {
++          type: 'delta',
++          taskId: TASK_ID,
++          sessionRevision: SESSION_REVISION,
++          sequence: seq,
++          ...(input.textDelta !== undefined ? {textDelta: input.textDelta} : {}),
++          ...(input.visualUnderstandingDelta !== undefined
++            ? {visualUnderstandingDelta: input.visualUnderstandingDelta}
++            : {}),
++          ...(input.structuredAction
++            ? {structuredAction: input.structuredAction}
++            : {}),
++        },
++      });
++    },
++    emitCompleted(result: VisualAgentResultV1) {
++      const seq = nextSequence();
++      emitFrame({
++        version: 1,
++        type: 'task.completed',
++        requestId: `hermes-evt-${seq}`,
++        event: {
++          type: 'terminal',
++          taskId: TASK_ID,
++          sessionRevision: SESSION_REVISION,
++          sequence: seq,
++          status: 'completed',
++          result,
++        },
++      });
++    },
++    emitFailed(errorCode: VisualAgentErrorCode, resumeToken?: string) {
++      const seq = nextSequence();
++      emitFrame({
++        version: 1,
++        type: 'task.failed',
++        requestId: `hermes-evt-${seq}`,
++        event: {
++          type: 'terminal',
++          taskId: TASK_ID,
++          sessionRevision: SESSION_REVISION,
++          sequence: seq,
++          status: 'failed',
++          errorCode,
++          ...(resumeToken ? {resumeToken} : {}),
++        },
++      });
++    },
++    emitCancelled(resumeToken?: string) {
++      const seq = nextSequence();
++      emitFrame({
++        version: 1,
++        type: 'task.cancelled',
++        requestId: `hermes-evt-${seq}`,
++        event: {
++          type: 'terminal',
++          taskId: TASK_ID,
++          sessionRevision: SESSION_REVISION,
++          sequence: seq,
++          status: 'cancelled',
++          ...(resumeToken ? {resumeToken} : {}),
++        },
++      });
++    },
++    emitDisconnect() {
++      // Upstream teardown is exercised through `port.disconnect()`; no frame is
++      // emitted here so the run ends on exactly one terminal event.
++    },
++  };
++}
++
++export const hermesConformanceFixture: VisualAgentAdapterConformanceFixture =
++  buildFixture();
++
++export const hermesRequiredConformance: VisualAgentConformanceOptions = {
++  requiredStatuses: ['queued', 'running', 'waiting_approval', 'completed'],
++  negotiatedCapabilities: [
++    'imageInput',
++    'structuredAction',
++    'stream',
++    'cancel',
++    'approval',
++    'resume',
++    'steer',
++    'preferences',
++  ],
++};

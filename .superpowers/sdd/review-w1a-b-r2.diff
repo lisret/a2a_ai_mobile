@@ -1,0 +1,701 @@
+# Review package: 4a703e3bb4baa39db859fed5467c4924702acec8..f3886c22919f2743489fe402723f27f66c486b6c
+
+## Commits
+f3886c2 fix: redact finalScreenshot from persisted task output
+e68d2bb fix: serialize task history and protect terminal state
+
+## Files changed
+ .../__tests__/services/TaskHistoryService.test.ts  | 198 +++++++++++++++-
+ .../operateRuntime/ports/TaskInstructionPort.ts    |   8 +
+ .../src/core/engine/taskEngine/types/Task.ts       |  10 +
+ .../features/task/services/TaskHistoryService.ts   | 261 +++++++++++++--------
+ 4 files changed, 365 insertions(+), 112 deletions(-)
+
+## Diff
+diff --git a/AwesomeProject/src/__tests__/services/TaskHistoryService.test.ts b/AwesomeProject/src/__tests__/services/TaskHistoryService.test.ts
+index 5ec4008..39f4f58 100644
+--- a/AwesomeProject/src/__tests__/services/TaskHistoryService.test.ts
++++ b/AwesomeProject/src/__tests__/services/TaskHistoryService.test.ts
+@@ -20,24 +20,36 @@ describe('TaskHistoryService', () => {
+   const mockModelId = 'model_123';
+   const mockTask: Task = {
+     id: 'task_1',
+     modelId: mockModelId,
+     instruction: '测试任务',
+     status: 'success',
+     createdAt: Date.now(),
+     output: {steps: []},
+   };
+ 
++  // In-memory backing store so mutation-queue/serialization tests observe
++  // real read-after-write behaviour instead of a single canned response.
++  let store: Record<string, string> = {};
++
+   beforeEach(() => {
+     jest.clearAllMocks();
+-    mockAsyncStorage.getItem.mockResolvedValue(null);
+-    mockAsyncStorage.setItem.mockResolvedValue(undefined);
++    store = {};
++    mockAsyncStorage.getItem.mockImplementation(
++      async key => store[key] ?? null,
++    );
++    mockAsyncStorage.setItem.mockImplementation(async (key, value) => {
++      store[key] = value;
++    });
++    mockAsyncStorage.removeItem.mockImplementation(async key => {
++      delete store[key];
++    });
+   });
+ 
+   describe('saveTask', () => {
+     it('应该保存新任务', async () => {
+       mockAsyncStorage.getItem.mockResolvedValue(JSON.stringify([]));
+ 
+       await taskHistoryService.saveTask(mockTask);
+ 
+       expect(mockAsyncStorage.setItem).toHaveBeenCalled();
+       const setItemCalls = mockAsyncStorage.setItem.mock.calls;
+@@ -77,20 +89,162 @@ describe('TaskHistoryService', () => {
+ 
+       await taskHistoryService.saveTask(newTask);
+ 
+       const globalWrite = mockAsyncStorage.setItem.mock.calls.find(
+         ([key]) => key === STORAGE_KEYS.TASKS,
+       );
+       expect(globalWrite).toBeDefined();
+       const savedTasks = JSON.parse(globalWrite![1] as string) as Task[];
+       expect(savedTasks).toHaveLength(TASK_CONFIG.MAX_TASKS);
+     });
++
++    it('deterministically trims the earliest-inserted task when createdAt ties', async () => {
++      for (let index = 0; index < TASK_CONFIG.MAX_TASKS; index += 1) {
++        await taskHistoryService.saveTask({
++          ...mockTask,
++          id: `task_${index}`,
++          // task_0 and task_1 tie at createdAt 0; task_0 was inserted first.
++          createdAt: index < 2 ? 0 : index,
++        });
++      }
++
++      await taskHistoryService.saveTask({
++        ...mockTask,
++        id: 'task_overflow',
++        createdAt: TASK_CONFIG.MAX_TASKS,
++      });
++
++      const allTasks = await taskHistoryService.getAllTasks();
++      expect(allTasks.find(task => task.id === 'task_0')).toBeUndefined();
++      expect(allTasks.find(task => task.id === 'task_1')).toBeDefined();
++      expect(allTasks).toHaveLength(TASK_CONFIG.MAX_TASKS);
++    });
++
++    it('is idempotent when saving the same task twice', async () => {
++      await taskHistoryService.saveTask(mockTask);
++      await taskHistoryService.saveTask(mockTask);
++
++      const allTasks = await taskHistoryService.getAllTasks();
++      expect(allTasks).toHaveLength(1);
++    });
++
++    it('does not lose either task across concurrent read-modify-write calls', async () => {
++      const taskA: Task = {...mockTask, id: 'task_a', createdAt: 1};
++      const taskB: Task = {...mockTask, id: 'task_b', createdAt: 2};
++
++      await Promise.all([
++        taskHistoryService.saveTask(taskA),
++        taskHistoryService.saveTask(taskB),
++      ]);
++
++      const allTasks = await taskHistoryService.getAllTasks();
++      expect(allTasks).toEqual(expect.arrayContaining([taskA, taskB]));
++      expect(allTasks).toHaveLength(2);
++    });
++
++    it('keeps the queue usable after a failed write', async () => {
++      mockAsyncStorage.setItem.mockRejectedValueOnce(new Error('write failed'));
++      const taskA: Task = {...mockTask, id: 'task_a'};
++      const taskB: Task = {...mockTask, id: 'task_b'};
++
++      await expect(taskHistoryService.saveTask(taskA)).rejects.toThrow(
++        'write failed',
++      );
++      await expect(taskHistoryService.saveTask(taskB)).resolves.toBeUndefined();
++    });
++
++    it('rejects a terminal task transition back to running', async () => {
++      const successTask: Task = {
++        ...mockTask,
++        id: 'task_terminal',
++        status: 'success',
++      };
++      await taskHistoryService.saveTask(successTask);
++
++      await expect(
++        taskHistoryService.saveTask({...successTask, status: 'running'}),
++      ).rejects.toMatchObject({code: 'task_terminal_transition_rejected'});
++
++      const stored = await taskHistoryService.getTaskById('task_terminal');
++      expect(stored?.status).toBe('success');
++    });
++
++    it('never writes or removes a per-model index key', async () => {
++      await taskHistoryService.saveTask(mockTask);
++      await taskHistoryService.deleteTask(mockTask.id);
++      await taskHistoryService.saveTask(mockTask);
++      await taskHistoryService.deleteTasksByModelId(mockModelId);
++
++      const prefixCalls = [
++        ...mockAsyncStorage.setItem.mock.calls,
++        ...mockAsyncStorage.removeItem.mock.calls,
++      ].filter(([key]) =>
++        key.startsWith(STORAGE_KEYS.TASKS_BY_MODEL_PREFIX),
++      );
++      expect(prefixCalls).toHaveLength(0);
++    });
++
++    it('does not persist output.finalScreenshot', async () => {
++      const finalScreenshot = 'data:image/png;base64,FINAL_SCREENSHOT';
++      const taskWithFinalScreenshot: Task = {
++        ...mockTask,
++        id: 'task_final_screenshot',
++        output: {
++          steps: [],
++          finalScreenshot,
++        },
++      };
++
++      await taskHistoryService.saveTask(taskWithFinalScreenshot);
++
++      const rawStoredJson = store[STORAGE_KEYS.TASKS];
++      expect(rawStoredJson).toBeDefined();
++      expect(rawStoredJson).not.toContain('FINAL_SCREENSHOT');
++      expect(rawStoredJson).not.toMatch(/data:image/);
++
++      const stored = await taskHistoryService.getTaskById('task_final_screenshot');
++      expect(stored?.output?.finalScreenshot).toBeUndefined();
++    });
++
++    it('never persists apiKey, secretRef, screenshot data URIs, or raw model responses', async () => {
++      const sensitiveTask: Task = {
++        ...mockTask,
++        id: 'task_sensitive',
++        output: {
++          steps: [
++            {
++              step: 1,
++              action: '点击登录按钮',
++              timestamp: 1_700_000_000_000,
++              screenshotUri: 'data:image/png;base64,AAAA',
++              modelResponse: 'apiKey=secret-123 secretRef=vault://token',
++              actionDetails: {type: 'click', x: 10, y: 20},
++            },
++          ],
++          summary: '任务完成',
++        },
++      };
++
++      await taskHistoryService.saveTask(sensitiveTask);
++
++      const rawStoredJson = store[STORAGE_KEYS.TASKS];
++      expect(rawStoredJson).toBeDefined();
++      expect(rawStoredJson).not.toMatch(/apiKey|secretRef|data:image/);
++
++      const stored = await taskHistoryService.getTaskById('task_sensitive');
++      expect(stored?.output?.steps[0]).toEqual({
++        step: 1,
++        action: '点击登录按钮',
++        timestamp: 1_700_000_000_000,
++        actionDetails: {type: 'click', x: 10, y: 20},
++      });
++    });
+   });
+ 
+   describe('getAllTasks', () => {
+     it('应该返回所有任务', async () => {
+       const tasks = [mockTask];
+       mockAsyncStorage.getItem.mockResolvedValue(JSON.stringify(tasks));
+ 
+       const result = await taskHistoryService.getAllTasks();
+ 
+       expect(result).toHaveLength(1);
+@@ -105,28 +259,21 @@ describe('TaskHistoryService', () => {
+       expect(result).toEqual([]);
+     });
+   });
+ 
+   describe('getTasksByModelId', () => {
+     it('应该返回指定模型的任务列表', async () => {
+       const tasks = [
+         mockTask,
+         {...mockTask, id: 'task_2', modelId: 'model_456'},
+       ];
+-      mockAsyncStorage.getItem.mockImplementation(async key => {
+-        if (key === `${STORAGE_KEYS.TASKS_BY_MODEL_PREFIX}${mockModelId}`) {
+-          return JSON.stringify(
+-            tasks.filter(task => task.modelId === mockModelId),
+-          );
+-        }
+-        return JSON.stringify(tasks);
+-      });
++      mockAsyncStorage.getItem.mockResolvedValue(JSON.stringify(tasks));
+ 
+       const result = await taskHistoryService.getTasksByModelId(mockModelId);
+ 
+       expect(result).toHaveLength(1);
+       expect(result[0].modelId).toBe(mockModelId);
+     });
+ 
+     it('应该按创建时间倒序排列', async () => {
+       const tasks = [
+         {...mockTask, id: 'task_1', createdAt: Date.now() - 2000},
+@@ -134,20 +281,33 @@ describe('TaskHistoryService', () => {
+         {...mockTask, id: 'task_3', createdAt: Date.now()},
+       ];
+       mockAsyncStorage.getItem.mockResolvedValue(JSON.stringify(tasks));
+ 
+       const result = await taskHistoryService.getTasksByModelId(mockModelId);
+ 
+       expect(result[0].id).toBe('task_3');
+       expect(result[1].id).toBe('task_2');
+       expect(result[2].id).toBe('task_1');
+     });
++
++    it('derives model results from the primary list, never a per-model key', async () => {
++      await taskHistoryService.saveTask(mockTask);
++
++      const perModelRead = mockAsyncStorage.getItem.mock.calls.find(
++        ([key]) => key === `${STORAGE_KEYS.TASKS_BY_MODEL_PREFIX}${mockModelId}`,
++      );
++      expect(perModelRead).toBeUndefined();
++
++      const result = await taskHistoryService.getTasksByModelId(mockModelId);
++      expect(result).toHaveLength(1);
++      expect(result[0].id).toBe(mockTask.id);
++    });
+   });
+ 
+   describe('deleteTask', () => {
+     it('应该删除指定任务', async () => {
+       const tasks = [mockTask, {...mockTask, id: 'task_2'}];
+       mockAsyncStorage.getItem.mockResolvedValue(JSON.stringify(tasks));
+ 
+       await taskHistoryService.deleteTask('task_1');
+ 
+       const setItemCalls = mockAsyncStorage.setItem.mock.calls;
+@@ -157,11 +317,29 @@ describe('TaskHistoryService', () => {
+     });
+ 
+     it('应该处理不存在的任务', async () => {
+       const tasks = [mockTask];
+       mockAsyncStorage.getItem.mockResolvedValue(JSON.stringify(tasks));
+ 
+       await taskHistoryService.deleteTask('non_existent');
+       expect(mockAsyncStorage.setItem).not.toHaveBeenCalled();
+     });
+   });
++
++  describe('load (TaskInstructionPort)', () => {
++    it('returns the trimmed instruction for an existing task', async () => {
++      await taskHistoryService.saveTask({
++        ...mockTask,
++        id: 'task_instruction',
++        instruction: '  执行任务  ',
++      });
++
++      await expect(
++        taskHistoryService.load('task_instruction'),
++      ).resolves.toBe('执行任务');
++    });
++
++    it('returns null when the task does not exist', async () => {
++      await expect(taskHistoryService.load('missing_task')).resolves.toBeNull();
++    });
++  });
+ });
+diff --git a/AwesomeProject/src/core/engine/operateRuntime/ports/TaskInstructionPort.ts b/AwesomeProject/src/core/engine/operateRuntime/ports/TaskInstructionPort.ts
+new file mode 100644
+index 0000000..556f96c
+--- /dev/null
++++ b/AwesomeProject/src/core/engine/operateRuntime/ports/TaskInstructionPort.ts
+@@ -0,0 +1,8 @@
++/**
++ * Runtime-facing port for loading a persisted task's instruction text by id.
++ * `TaskHistoryService` implements this port; callers receive only the trimmed
++ * instruction string (or `null`), never the full `Task` record.
++ */
++export interface TaskInstructionPort {
++  load(taskId: string): Promise<string | null>;
++}
+diff --git a/AwesomeProject/src/core/engine/taskEngine/types/Task.ts b/AwesomeProject/src/core/engine/taskEngine/types/Task.ts
+index f1a4d1e..8702019 100644
+--- a/AwesomeProject/src/core/engine/taskEngine/types/Task.ts
++++ b/AwesomeProject/src/core/engine/taskEngine/types/Task.ts
+@@ -59,20 +59,30 @@ export interface Task {
+   modelId: string;               // 关联的模型ID
+   instruction: string;           // 任务指令
+   status: TaskStatus;            // 任务状态
+   currentAction?: string;        // 当前操作描述
+   error?: string;                // 错误信息
+   output?: TaskOutput;           // 完整输出（包含所有步骤）
+   createdAt: number;             // 创建时间戳
+   completedAt?: number;          // 完成时间戳
+ }
+ 
++/**
++ * 持久化任务的第 2 版存储形态（预留给会话感知的持久化路径）。
++ * 当前 TaskHistoryService 仍以 `Task` 形态读写；schemaVersion/sessionRevision
++ * 供后续任务（如会话关联）在迁移到该形态时使用。
++ */
++export interface PersistedTaskV2 extends Task {
++  readonly schemaVersion: 2;
++  readonly sessionRevision: number;
++}
++
+ /**
+  * Open-AutoGLM API 请求格式
+  * 参考：Open-AutoGLM 框架 ModelConfig
+  */
+ export interface AutoGLMRequest {
+   model: string;
+   messages: Array<{
+     role: 'user' | 'assistant' | 'system';
+     content: string | Array<{
+       type: 'text' | 'image_url';
+diff --git a/AwesomeProject/src/features/task/services/TaskHistoryService.ts b/AwesomeProject/src/features/task/services/TaskHistoryService.ts
+index 9f94457..6077a6f 100644
+--- a/AwesomeProject/src/features/task/services/TaskHistoryService.ts
++++ b/AwesomeProject/src/features/task/services/TaskHistoryService.ts
+@@ -1,174 +1,231 @@
+ import AsyncStorage from '@react-native-async-storage/async-storage';
+-import type { Task } from '@core/engine/taskEngine';
+-import { STORAGE_KEYS, TASK_CONFIG } from '@shared/constants';
++import type {Task, TaskStep} from '@core/engine/taskEngine';
++import type {TaskInstructionPort} from '@core/engine/operateRuntime/ports/TaskInstructionPort';
++import {STORAGE_KEYS, TASK_CONFIG} from '@shared/constants';
+ 
+ const TASKS_KEY = STORAGE_KEYS.TASKS;
+-const TASKS_BY_MODEL_KEY_PREFIX = STORAGE_KEYS.TASKS_BY_MODEL_PREFIX;
++
++// Bounds a persisted output summary so it can never smuggle in an unbounded
++// raw provider response; individual steps still drop screenshotUri/modelResponse below.
++const MAX_OUTPUT_SUMMARY_LENGTH = 4000;
++
++const TERMINAL_STATUSES: ReadonlySet<Task['status']> = new Set([
++  'success',
++  'failed',
++]);
++const NON_TERMINAL_STATUSES: ReadonlySet<Task['status']> = new Set([
++  'idle',
++  'waiting',
++  'running',
++]);
++
++/** Stable, ref-free rejection carried on `.code`. */
++export class TaskHistoryError extends Error {
++  readonly code: string;
++  constructor(code: string) {
++    super(code);
++    this.name = 'TaskHistoryError';
++    this.code = code;
++  }
++}
++
++function assertNoTerminalRegression(previous: Task | undefined, next: Task): void {
++  if (
++    previous &&
++    TERMINAL_STATUSES.has(previous.status) &&
++    NON_TERMINAL_STATUSES.has(next.status)
++  ) {
++    throw new TaskHistoryError('task_terminal_transition_rejected');
++  }
++}
++
++function projectStepForStorage(step: TaskStep): TaskStep {
++  const {screenshotUri, modelResponse, ...safeStep} = step;
++  return safeStep;
++}
++
++function projectTaskForStorage(task: Task): Task {
++  if (!task.output) {
++    return task;
++  }
++  const {finalScreenshot, ...safeOutput} = task.output;
++  return {
++    ...task,
++    output: {
++      ...safeOutput,
++      steps: task.output.steps.map(projectStepForStorage),
++      summary: task.output.summary?.slice(0, MAX_OUTPUT_SUMMARY_LENGTH),
++    },
++  };
++}
+ 
+ /**
+  * 任务历史服务
+  */
+-class TaskHistoryService {
++class TaskHistoryService implements TaskInstructionPort {
++  private mutationQueue: Promise<void> = Promise.resolve();
++
++  private async readAllTasksStrict(): Promise<Task[]> {
++    const jsonValue = await AsyncStorage.getItem(TASKS_KEY);
++    return jsonValue != null ? JSON.parse(jsonValue) : [];
++  }
++
++  private enqueueMutation<T>(operation: () => Promise<T>): Promise<T> {
++    const result = this.mutationQueue.then(operation);
++    this.mutationQueue = result.then(
++      () => undefined,
++      () => undefined,
++    );
++    return result;
++  }
++
+   /**
+    * 保存任务
+    */
+   async saveTask(task: Task): Promise<void> {
+-    try {
+-      // 获取所有任务
+-      const allTasks = await this.getAllTasks();
+-      
+-      // 更新或添加任务
+-      const index = allTasks.findIndex(t => t.id === task.id);
+-      if (index >= 0) {
+-        allTasks[index] = task;
+-      } else {
+-        allTasks.push(task);
+-      }
+-      
+-      // 如果总数超过最大任务数，删除最早的那条记录
+-      if (allTasks.length > TASK_CONFIG.MAX_TASKS) {
+-        // 按创建时间排序，找到最早的任务
+-        const sortedTasks = [...allTasks].sort((a, b) => a.createdAt - b.createdAt);
+-        const oldestTask = sortedTasks[0];
+-        
+-        // 删除最早的任务
+-        const filteredTasks = allTasks.filter(t => t.id !== oldestTask.id);
+-        console.info(`任务总数超过${TASK_CONFIG.MAX_TASKS}条，已自动删除最早的任务: ${oldestTask.id}`);
+-        
+-        // 更新 allTasks 数组
+-        allTasks.length = 0;
+-        allTasks.push(...filteredTasks);
+-        
+-        // 更新被删除任务所属模型的任务列表
+-        await this.saveTasksByModel(oldestTask.modelId, filteredTasks.filter(t => t.modelId === oldestTask.modelId));
++    return this.enqueueMutation(async () => {
++      try {
++        const allTasks = await this.readAllTasksStrict();
++        const index = allTasks.findIndex(existing => existing.id === task.id);
++        assertNoTerminalRegression(
++          index >= 0 ? allTasks[index] : undefined,
++          task,
++        );
++
++        const storedTask = projectTaskForStorage(task);
++        if (index >= 0) {
++          allTasks[index] = storedTask;
++        } else {
++          allTasks.push(storedTask);
++        }
++
++        if (allTasks.length > TASK_CONFIG.MAX_TASKS) {
++          const oldestTask = [...allTasks].sort(
++            (a, b) => a.createdAt - b.createdAt,
++          )[0];
++          const filteredTasks = allTasks.filter(
++            existing => existing.id !== oldestTask.id,
++          );
++          allTasks.length = 0;
++          allTasks.push(...filteredTasks);
++          console.info(
++            `任务总数超过${TASK_CONFIG.MAX_TASKS}条，已自动删除最早的任务: ${oldestTask.id}`,
++          );
++        }
++
++        await AsyncStorage.setItem(TASKS_KEY, JSON.stringify(allTasks));
++        console.info('任务已保存:', task.id);
++      } catch (error) {
++        console.error('保存任务失败');
++        throw error;
+       }
+-      
+-      // 保存所有任务
+-      const jsonValue = JSON.stringify(allTasks);
+-      await AsyncStorage.setItem(TASKS_KEY, jsonValue);
+-      
+-      // 按模型ID保存任务列表
+-      await this.saveTasksByModel(task.modelId, allTasks.filter(t => t.modelId === task.modelId));
+-      
+-      console.info('任务已保存:', task.id);
+-    } catch (error) {
+-      console.error('保存任务失败:', error);
+-      throw error;
+-    }
++    });
+   }
+ 
+   /**
+    * 获取所有任务
+    */
+   async getAllTasks(): Promise<Task[]> {
+     try {
+-      const jsonValue = await AsyncStorage.getItem(TASKS_KEY);
+-      return jsonValue != null ? JSON.parse(jsonValue) : [];
+-    } catch (error) {
+-      console.error('获取任务列表失败:', error);
++      return await this.readAllTasksStrict();
++    } catch {
++      console.error('获取任务列表失败');
+       return [];
+     }
+   }
+ 
+   /**
+    * 根据模型ID获取任务列表
+    */
+   async getTasksByModelId(modelId: string): Promise<Task[]> {
+     try {
+-      const key = `${TASKS_BY_MODEL_KEY_PREFIX}${modelId}`;
+-      const jsonValue = await AsyncStorage.getItem(key);
+-      const tasks: Task[] = jsonValue != null ? JSON.parse(jsonValue) : [];
+-      
+-      // 按创建时间倒序排列（最新的在前）
+-      return tasks.sort((a, b) => b.createdAt - a.createdAt);
+-    } catch (error) {
+-      console.error('获取模型任务列表失败:', error);
++      const tasks = await this.getAllTasks();
++      return tasks
++        .filter(task => task.modelId === modelId)
++        .sort((a, b) => b.createdAt - a.createdAt);
++    } catch {
++      console.error('获取模型任务列表失败');
+       return [];
+     }
+   }
+ 
+   /**
+    * 根据任务ID获取任务
+    */
+   async getTaskById(taskId: string): Promise<Task | null> {
+     try {
+       const allTasks = await this.getAllTasks();
+       return allTasks.find(task => task.id === taskId) || null;
+-    } catch (error) {
+-      console.error('获取任务失败:', error);
++    } catch {
++      console.error('获取任务失败');
+       return null;
+     }
+   }
+ 
+   /**
+    * 获取模型的最新任务
+    */
+   async getLatestTaskByModelId(modelId: string): Promise<Task | null> {
+     try {
+       const tasks = await this.getTasksByModelId(modelId);
+       return tasks.length > 0 ? tasks[0] : null;
+-    } catch (error) {
+-      console.error('获取最新任务失败:', error);
++    } catch {
++      console.error('获取最新任务失败');
+       return null;
+     }
+   }
+ 
+   /**
+-   * 删除任务
++   * TaskInstructionPort：仅返回去除首尾空白的指令文本，不暴露完整 Task。
+    */
+-  async deleteTask(taskId: string): Promise<void> {
++  async load(taskId: string): Promise<string | null> {
+     try {
+-      const allTasks = await this.getAllTasks();
+-      const task = allTasks.find(t => t.id === taskId);
+-      
+-      if (!task) {
+-        return;
+-      }
+-      
+-      const filteredTasks = allTasks.filter(t => t.id !== taskId);
+-      await AsyncStorage.setItem(TASKS_KEY, JSON.stringify(filteredTasks));
+-      
+-      // 更新模型的任务列表
+-      await this.saveTasksByModel(task.modelId, filteredTasks.filter(t => t.modelId === task.modelId));
+-      
+-      console.info('任务已删除:', taskId);
+-    } catch (error) {
+-      console.error('删除任务失败:', error);
+-      throw error;
++      const task = await this.getTaskById(taskId);
++      return task ? task.instruction.trim() : null;
++    } catch {
++      console.error('获取任务指令失败');
++      return null;
+     }
+   }
+ 
+   /**
+-   * 按模型ID保存任务列表（内部方法）
++   * 删除任务
+    */
+-  private async saveTasksByModel(modelId: string, tasks: Task[]): Promise<void> {
+-    try {
+-      const key = `${TASKS_BY_MODEL_KEY_PREFIX}${modelId}`;
+-      const jsonValue = JSON.stringify(tasks);
+-      await AsyncStorage.setItem(key, jsonValue);
+-    } catch (error) {
+-      console.error('保存模型任务列表失败:', error);
+-    }
++  async deleteTask(taskId: string): Promise<void> {
++    return this.enqueueMutation(async () => {
++      try {
++        const allTasks = await this.readAllTasksStrict();
++        if (!allTasks.some(task => task.id === taskId)) {
++          return;
++        }
++
++        const filteredTasks = allTasks.filter(task => task.id !== taskId);
++        await AsyncStorage.setItem(TASKS_KEY, JSON.stringify(filteredTasks));
++        console.info('任务已删除:', taskId);
++      } catch (error) {
++        console.error('删除任务失败');
++        throw error;
++      }
++    });
+   }
+ 
+   /**
+    * 删除模型的所有任务
+    */
+   async deleteTasksByModelId(modelId: string): Promise<void> {
+-    try {
+-      const allTasks = await this.getAllTasks();
+-      const filteredTasks = allTasks.filter(t => t.modelId !== modelId);
+-      await AsyncStorage.setItem(TASKS_KEY, JSON.stringify(filteredTasks));
+-      
+-      // 删除模型的任务列表
+-      const key = `${TASKS_BY_MODEL_KEY_PREFIX}${modelId}`;
+-      await AsyncStorage.removeItem(key);
+-    } catch (error) {
+-      console.error('删除模型任务失败:', error);
+-      throw error;
+-    }
++    return this.enqueueMutation(async () => {
++      try {
++        const allTasks = await this.readAllTasksStrict();
++        const filteredTasks = allTasks.filter(
++          task => task.modelId !== modelId,
++        );
++        await AsyncStorage.setItem(TASKS_KEY, JSON.stringify(filteredTasks));
++      } catch (error) {
++        console.error('删除模型任务失败');
++        throw error;
++      }
++    });
+   }
+ }
+ 
+ export const taskHistoryService = new TaskHistoryService();
+-

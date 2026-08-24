@@ -1,0 +1,199 @@
+# Review package: 14f687efda5e08b43c6beaf4560f1dc1107856f1..HEAD
+
+## Commits
+acbabec feat: add scoped operate and companion facades
+
+## Files changed
+ .../facades/OperateAndCompanionFacade.test.ts      | 64 ++++++++++++++++++++++
+ .../src/application/events/ScopedTaskUiEvents.ts   | 27 +++++++++
+ .../src/application/facades/CompanionFacade.ts     | 26 +++++++++
+ .../src/application/facades/OperateFacade.ts       | 45 +++++++++++++++
+ 4 files changed, 162 insertions(+)
+
+## Diff
+diff --git a/AwesomeProject/src/__tests__/application/facades/OperateAndCompanionFacade.test.ts b/AwesomeProject/src/__tests__/application/facades/OperateAndCompanionFacade.test.ts
+new file mode 100644
+index 0000000..a00136f
+--- /dev/null
++++ b/AwesomeProject/src/__tests__/application/facades/OperateAndCompanionFacade.test.ts
+@@ -0,0 +1,64 @@
++import {ScopedTaskUiEvents} from '../../../application/events/ScopedTaskUiEvents';
++import {DefaultOperateFacade} from '../../../application/facades/OperateFacade';
++import {DefaultCompanionFacade} from '../../../application/facades/CompanionFacade';
++import type {TaskUiEvent} from '../../../application/facades/UiRuntimeContracts';
++
++describe('application task facades', () => {
++  it('delivers only matching session events with increasing sequence', () => {
++    let emit: (event: TaskUiEvent) => void = () => undefined;
++    const source = {
++      subscribe: jest.fn(listener => {
++        emit = listener;
++        return jest.fn();
++      }),
++    };
++    const events = new ScopedTaskUiEvents(source);
++    const listener = jest.fn();
++    events.subscribe('task-a', 3, listener);
++
++    emit({type: 'started', taskId: 'task-b', sessionRevision: 3, sequence: 1, occurredAtMs: 1, maxSteps: 9});
++    emit({type: 'started', taskId: 'task-a', sessionRevision: 2, sequence: 1, occurredAtMs: 1, maxSteps: 9});
++    emit({type: 'started', taskId: 'task-a', sessionRevision: 3, sequence: 2, occurredAtMs: 2, maxSteps: 9});
++    emit({type: 'step_started', taskId: 'task-a', sessionRevision: 3, sequence: 2, occurredAtMs: 3, step: 1, maxSteps: 9});
++
++    expect(listener).toHaveBeenCalledTimes(1);
++    expect(listener.mock.calls[0][0].sequence).toBe(2);
++  });
++
++  it('returns a blocked operate result without opening a second execution path', async () => {
++    const port = {
++      getCurrent: jest.fn(),
++      start: jest.fn().mockResolvedValue({
++        kind: 'blocked',
++        blocker: {code: 'visual_agent_not_ready', message: 'Active tool profile 未就绪'},
++      }),
++      cancel: jest.fn(),
++    };
++    const facade = new DefaultOperateFacade(port, {subscribe: jest.fn()});
++    await expect(facade.start('打开设置')).resolves.toEqual({
++      kind: 'blocked',
++      blocker: {code: 'visual_agent_not_ready', message: 'Active tool profile 未就绪'},
++    });
++    expect(port.start).toHaveBeenCalledTimes(1);
++  });
++
++  it('does not persist a companion proposal before confirmProposal', async () => {
++    const port = {
++      getState: jest.fn(),
++      submitTranscript: jest.fn().mockResolvedValue({
++        id: 'turn-1',
++        transcript: '以后少糖',
++        reply: '要记住吗',
++        intent: 'preference',
++        proposal: {kind: 'preference', title: '少糖'},
++      }),
++      confirmProposal: jest.fn(),
++      dismissTurn: jest.fn(),
++    };
++    const facade = new DefaultCompanionFacade(port);
++    await facade.submitTranscript('以后少糖');
++    expect(port.confirmProposal).not.toHaveBeenCalled();
++    await facade.confirmProposal('turn-1');
++    expect(port.confirmProposal).toHaveBeenCalledWith('turn-1');
++  });
++});
+diff --git a/AwesomeProject/src/application/events/ScopedTaskUiEvents.ts b/AwesomeProject/src/application/events/ScopedTaskUiEvents.ts
+new file mode 100644
+index 0000000..6042519
+--- /dev/null
++++ b/AwesomeProject/src/application/events/ScopedTaskUiEvents.ts
+@@ -0,0 +1,27 @@
++import type {
++  TaskUiEvent,
++  TaskUiEventSource,
++  Unsubscribe,
++} from '../facades/UiRuntimeContracts';
++
++export class ScopedTaskUiEvents {
++  constructor(private readonly source: TaskUiEventSource) {}
++
++  subscribe(
++    taskId: string,
++    sessionRevision: number,
++    listener: (event: TaskUiEvent) => void,
++  ): Unsubscribe {
++    let lastSequence = -1;
++    return this.source.subscribe(event => {
++      if (event.taskId !== taskId || event.sessionRevision !== sessionRevision) {
++        return;
++      }
++      if (!Number.isInteger(event.sequence) || event.sequence <= lastSequence) {
++        return;
++      }
++      lastSequence = event.sequence;
++      listener(event);
++    });
++  }
++}
+diff --git a/AwesomeProject/src/application/facades/CompanionFacade.ts b/AwesomeProject/src/application/facades/CompanionFacade.ts
+new file mode 100644
+index 0000000..c39a796
+--- /dev/null
++++ b/AwesomeProject/src/application/facades/CompanionFacade.ts
+@@ -0,0 +1,26 @@
++import type {
++  CompanionApplicationPort,
++  CompanionFacade,
++  CompanionTurnViewState,
++  CompanionViewState,
++} from './UiRuntimeContracts';
++
++export class DefaultCompanionFacade implements CompanionFacade {
++  constructor(private readonly port: CompanionApplicationPort) {}
++
++  getViewState(): Promise<CompanionViewState> {
++    return this.port.getState();
++  }
++
++  submitTranscript(text: string): Promise<CompanionTurnViewState> {
++    return this.port.submitTranscript(text);
++  }
++
++  confirmProposal(turnId: string): Promise<void> {
++    return this.port.confirmProposal(turnId);
++  }
++
++  dismissTurn(turnId: string): Promise<void> {
++    return this.port.dismissTurn(turnId);
++  }
++}
+diff --git a/AwesomeProject/src/application/facades/OperateFacade.ts b/AwesomeProject/src/application/facades/OperateFacade.ts
+new file mode 100644
+index 0000000..6586d17
+--- /dev/null
++++ b/AwesomeProject/src/application/facades/OperateFacade.ts
+@@ -0,0 +1,45 @@
++import {ScopedTaskUiEvents} from '../events/ScopedTaskUiEvents';
++import type {
++  OperateApplicationPort,
++  OperateFacade,
++  OperateTaskViewState,
++  StartOperateResult,
++  TaskUiEvent,
++  TaskUiEventSource,
++  Unsubscribe,
++} from './UiRuntimeContracts';
++
++export class DefaultOperateFacade implements OperateFacade {
++  private readonly events: ScopedTaskUiEvents;
++
++  constructor(
++    private readonly port: OperateApplicationPort,
++    source: TaskUiEventSource,
++  ) {
++    this.events = new ScopedTaskUiEvents(source);
++  }
++
++  getViewState(): Promise<OperateTaskViewState> {
++    return this.port.getCurrent();
++  }
++
++  start(instruction: string): Promise<StartOperateResult> {
++    const trimmed = instruction.trim();
++    if (trimmed.length === 0) {
++      throw new Error('Operate instruction must not be empty');
++    }
++    return this.port.start(trimmed);
++  }
++
++  cancel(taskId: string): Promise<void> {
++    return this.port.cancel(taskId);
++  }
++
++  subscribeTask(
++    taskId: string,
++    sessionRevision: number,
++    listener: (event: TaskUiEvent) => void,
++  ): Unsubscribe {
++    return this.events.subscribe(taskId, sessionRevision, listener);
++  }
++}

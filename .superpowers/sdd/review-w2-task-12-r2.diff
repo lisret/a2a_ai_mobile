@@ -1,0 +1,1911 @@
+# Review package: c9dec764c5bfd1e25314ce9309ddfd56fbe02813..HEAD
+
+## Commits
+e3ade7b fix: global enabled flag and async visual agent cancel/preferences
+5a3bc0d test: enforce visual agent adapter conformance
+
+## Files changed
+ .../CapabilityDomainBoundaries.test.ts             | 186 +++++++++++
+ .../VisualAgentAdapterConformance.test.ts          | 162 ++++++++++
+ .../ConnectorBridgeVisualAgentClient.test.ts       | 290 +++++++++++++++++
+ .../features/visualAgent/VisualAgentFacade.test.ts | 183 +++++++++++
+ .../VisualAgentPreferenceRepository.test.ts        | 174 ++++++++++
+ .../VisualAgentProfileController.test.ts           |  10 +
+ .../visualAgent/BuiltInVisualAgentToolRegistry.ts  |  67 ++++
+ AwesomeProject/src/features/companion/index.ts     |   4 +
+ AwesomeProject/src/features/errand/index.ts        |   4 +
+ AwesomeProject/src/features/preference/index.ts    |   4 +
+ .../visualAgent/application/VisualAgentFacade.ts   | 142 ++++++++
+ .../application/VisualAgentProfileController.ts    |   5 +
+ .../application/VisualAgentViewState.ts            |  24 ++
+ .../visualAgent/data/ConnectorBridgeTransport.ts   |  21 ++
+ .../data/ConnectorBridgeVisualAgentClient.ts       | 358 +++++++++++++++++++++
+ .../data/VisualAgentPreferenceRepository.ts        |  98 ++++++
+ AwesomeProject/src/features/visualAgent/index.ts   |  21 ++
+ 17 files changed, 1753 insertions(+)
+
+## Diff
+diff --git a/AwesomeProject/src/__tests__/architecture/CapabilityDomainBoundaries.test.ts b/AwesomeProject/src/__tests__/architecture/CapabilityDomainBoundaries.test.ts
+new file mode 100644
+index 0000000..dc23a8c
+--- /dev/null
++++ b/AwesomeProject/src/__tests__/architecture/CapabilityDomainBoundaries.test.ts
+@@ -0,0 +1,186 @@
++// Task 12 architecture guard for the capability domains. It scans the
++// capability-owned core/feature/bridge production files for boundary
++// violations: React Native/domain imports and Screen wiring in mobile modules,
++// product transport names or bridge adapter imports in mobile code, legacy
++// OpenClaw migration symbols anywhere in the capability wave, and re-declared
++// primary Visual Agent contracts. It also proves the adapter directories,
++// manifests, conformance fixtures, and built-in registry agree on exactly the
++// five canonical tool ids.
++import fs from 'node:fs';
++import path from 'node:path';
++
++import {createBuiltInVisualAgentToolRegistry} from '../../connectorBridge/visualAgent/BuiltInVisualAgentToolRegistry';
++import {openClawManifest} from '../../connectorBridge/visualAgent/adapters/openclaw/OpenClawAdapter';
++import {codexManifest} from '../../connectorBridge/visualAgent/adapters/codex/CodexAdapter';
++import {cursorManifest} from '../../connectorBridge/visualAgent/adapters/cursor/CursorAdapter';
++import {dshManifest} from '../../connectorBridge/visualAgent/adapters/dsh/DshAdapter';
++import {hermesManifest} from '../../connectorBridge/visualAgent/adapters/hermes/HermesAdapter';
++import {createOpenClawConformanceFixture} from '../../connectorBridge/visualAgent/adapters/openclaw/conformanceFixture';
++import {createCodexConformanceFixture} from '../../connectorBridge/visualAgent/adapters/codex/conformanceFixture';
++import {createCursorConformanceFixture} from '../../connectorBridge/visualAgent/adapters/cursor/conformanceFixture';
++import {dshConformanceFixture} from '../../connectorBridge/visualAgent/adapters/dsh/conformanceFixture';
++import {hermesConformanceFixture} from '../../connectorBridge/visualAgent/adapters/hermes/conformanceFixture';
++
++const SRC_ROOT = path.resolve(__dirname, '../../');
++
++const read = (relative: string): string =>
++  fs.readFileSync(path.join(SRC_ROOT, relative), 'utf8');
++
++function walkTs(relativeDir: string): string[] {
++  const abs = path.join(SRC_ROOT, relativeDir);
++  if (!fs.existsSync(abs)) {
++    return [];
++  }
++  const out: string[] = [];
++  for (const entry of fs.readdirSync(abs, {withFileTypes: true})) {
++    const relative = path.join(relativeDir, entry.name);
++    if (entry.isDirectory()) {
++      if (entry.name === '__tests__') {
++        continue;
++      }
++      out.push(...walkTs(relative));
++    } else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.d.ts')) {
++      out.push(relative);
++    }
++  }
++  return out;
++}
++
++const MOBILE_FEATURE_DIRS = [
++  'features/visualAgent',
++  'features/preference',
++  'features/companion',
++  'features/errand',
++];
++
++const mobileFiles = MOBILE_FEATURE_DIRS.flatMap(walkTs).map(file => ({
++  file,
++  text: read(file),
++}));
++
++const capabilityOwnedProductionFiles = [
++  ...MOBILE_FEATURE_DIRS,
++  'connectorBridge/visualAgent',
++  'core/engine/operateRuntime/visualAgent',
++]
++  .flatMap(walkTs)
++  .map(file => ({file, text: read(file)}));
++
++const PRIMARY_CONTRACTS = [
++  'VisualAgentToolId',
++  'VisualAgentProfileV1',
++  'VisualAgentCapabilitySet',
++  'VisualAgentTaskEnvelopeV1',
++  'VisualAgentConnectionState',
++  'VisualAgentProtocolV1',
++  'VisualAgentToolAdapter',
++  'VisualAgentExecutionPort',
++  'VisualAgentToolRegistry',
++  'VisualAgentToolManifestV1',
++  'VisualAgentRunStatus',
++];
++
++const CONTRACTS_FILE = 'core/engine/operateRuntime/visualAgent/VisualAgentContracts.ts';
++
++describe('CapabilityDomainBoundaries', () => {
++  it('keeps mobile modules away from product transports and bridge adapters', () => {
++    const forbidden =
++      /child_process|acp_json_rpc|gateway_ws|runs_http_sse|connectorBridge\/visualAgent\/adapters/;
++    for (const {file, text} of mobileFiles) {
++      expect({file, text}).not.toEqual(
++        expect.objectContaining({text: expect.stringMatching(forbidden)}),
++      );
++    }
++  });
++
++  it('keeps React Native, storage, navigation, and Screen wiring out of mobile modules', () => {
++    const forbidden =
++      /from '(react|react-native|@react-native-async-storage[^']*|@react-navigation[^']*|[^']*NativeModules[^']*|[^']*Screen[^']*)'|require\(['"]react/;
++    for (const {file, text} of mobileFiles) {
++      expect({file}).toEqual({file});
++      expect(text).not.toMatch(forbidden);
++    }
++  });
++
++  it('keeps legacy OpenClaw migration exclusively in Runtime Task 4B', () => {
++    const capabilityProduction = capabilityOwnedProductionFiles
++      .map(({text}) => text)
++      .join('\n');
++    expect(capabilityProduction).not.toMatch(
++      /RuntimeConfigMigrationV1|LegacyOpenClawBindingPort|migrateLegacyOpenClawConfig|@nono:openclaw/,
++    );
++  });
++
++  it('declares the primary Visual Agent contracts only in the runtime contracts file', () => {
++    const contractsText = read(CONTRACTS_FILE);
++    for (const name of PRIMARY_CONTRACTS) {
++      expect(contractsText).toMatch(new RegExp(`export (interface|type) ${name}\\b`));
++    }
++    for (const {file, text} of capabilityOwnedProductionFiles) {
++      if (file === CONTRACTS_FILE) {
++        continue;
++      }
++      for (const name of PRIMARY_CONTRACTS) {
++        expect(text).not.toMatch(new RegExp(`export (interface|type) ${name}\\b`));
++      }
++    }
++  });
++
++  it('re-exports the frozen contracts type-only from the visual agent barrel', () => {
++    const barrel = read('features/visualAgent/index.ts');
++    expect(barrel).toMatch(/export \{VisualAgentFacade\}/);
++    expect(barrel).toMatch(/export type \{VisualAgentViewState\}/);
++    expect(barrel).toMatch(/VisualAgentContracts/);
++    for (const name of PRIMARY_CONTRACTS) {
++      expect(barrel).toMatch(new RegExp(`\\b${name}\\b`));
++      // No barrel-local declaration; only re-exports are allowed.
++      expect(barrel).not.toMatch(new RegExp(`export (interface|type) ${name}\\b`));
++    }
++    expect(barrel).not.toMatch(/export interface |export class /);
++  });
++
++  it('agrees on exactly the five canonical tool ids across dirs, manifests, fixtures, and registry', () => {
++    const canonical = ['codex', 'cursor', 'dsh', 'hermes', 'openclaw'];
++
++    const adapterDirs = fs
++      .readdirSync(path.join(SRC_ROOT, 'connectorBridge/visualAgent/adapters'), {
++        withFileTypes: true,
++      })
++      .filter(entry => entry.isDirectory())
++      .map(entry => entry.name)
++      .sort();
++
++    const registryIds = [...createBuiltInVisualAgentToolRegistry().list()].sort();
++
++    const manifestIds = [
++      openClawManifest,
++      codexManifest,
++      cursorManifest,
++      dshManifest,
++      hermesManifest,
++    ]
++      .map(manifest => manifest.toolId)
++      .sort();
++
++    const fixtureIds = [
++      createOpenClawConformanceFixture().toolId,
++      createCodexConformanceFixture().toolId,
++      createCursorConformanceFixture().toolId,
++      dshConformanceFixture.toolId,
++      hermesConformanceFixture.toolId,
++    ].sort();
++
++    expect(adapterDirs).toEqual(canonical);
++    expect(registryIds).toEqual(canonical);
++    expect(manifestIds).toEqual(canonical);
++    expect(fixtureIds).toEqual(canonical);
++  });
++
++  it('exposes no OpenClawFacade or VisualAgentAdapterRegistry public symbol and no features/openclaw barrel', () => {
++    const capabilityProduction = capabilityOwnedProductionFiles
++      .map(({text}) => text)
++      .join('\n');
++    expect(capabilityProduction).not.toMatch(/OpenClawFacade|VisualAgentAdapterRegistry/);
++    expect(fs.existsSync(path.join(SRC_ROOT, 'features/openclaw'))).toBe(false);
++  });
++});
+diff --git a/AwesomeProject/src/__tests__/connectorBridge/visualAgent/VisualAgentAdapterConformance.test.ts b/AwesomeProject/src/__tests__/connectorBridge/visualAgent/VisualAgentAdapterConformance.test.ts
+new file mode 100644
+index 0000000..adf150a
+--- /dev/null
++++ b/AwesomeProject/src/__tests__/connectorBridge/visualAgent/VisualAgentAdapterConformance.test.ts
+@@ -0,0 +1,162 @@
++// Task 12 unified conformance gate. Every built-in adapter is driven through the
++// single frozen `defineVisualAgentAdapterConformance` runner (Wave 2A Task 7),
++// imported unchanged. Options are derived from each fixture's honestly reported
++// `supportedCapabilities` — there is no `switch (toolId)` and no tool-name
++// behavior branch anywhere in this file. The built-in registry is proved to hold
++// exactly the five canonical adapters with their frozen manifests.
++import {
++  defineVisualAgentAdapterConformance,
++  type VisualAgentAdapterConformanceFixture,
++  type VisualAgentConformanceOptions,
++} from '../../../connectorBridge/visualAgent/conformance/VisualAgentAdapterConformance';
++import {createBuiltInVisualAgentToolRegistry} from '../../../connectorBridge/visualAgent/BuiltInVisualAgentToolRegistry';
++import {createOpenClawConformanceFixture} from '../../../connectorBridge/visualAgent/adapters/openclaw/conformanceFixture';
++import {createCodexConformanceFixture} from '../../../connectorBridge/visualAgent/adapters/codex/conformanceFixture';
++import {createCursorConformanceFixture} from '../../../connectorBridge/visualAgent/adapters/cursor/conformanceFixture';
++import {dshConformanceFixture} from '../../../connectorBridge/visualAgent/adapters/dsh/conformanceFixture';
++import {hermesConformanceFixture} from '../../../connectorBridge/visualAgent/adapters/hermes/conformanceFixture';
++import {openClawManifest} from '../../../connectorBridge/visualAgent/adapters/openclaw/OpenClawAdapter';
++import {codexManifest} from '../../../connectorBridge/visualAgent/adapters/codex/CodexAdapter';
++import {cursorManifest} from '../../../connectorBridge/visualAgent/adapters/cursor/CursorAdapter';
++import {dshManifest} from '../../../connectorBridge/visualAgent/adapters/dsh/DshAdapter';
++import {hermesManifest} from '../../../connectorBridge/visualAgent/adapters/hermes/HermesAdapter';
++import type {VisualAgentCapabilitySet} from '@core/engine/operateRuntime/visualAgent/VisualAgentContracts';
++
++const CAPABILITY_KEYS = [
++  'imageInput',
++  'structuredAction',
++  'stream',
++  'cancel',
++  'approval',
++  'resume',
++  'steer',
++  'preferences',
++] as const;
++
++// One shape per adapter; the factory produces a fresh, independent fixture so a
++// runner call never leaks state into the next assertion.
++const fixtures: ReadonlyArray<{
++  readonly id: string;
++  readonly create: () => VisualAgentAdapterConformanceFixture;
++}> = [
++  {id: 'openclaw', create: createOpenClawConformanceFixture},
++  {id: 'codex', create: createCodexConformanceFixture},
++  {id: 'cursor', create: createCursorConformanceFixture},
++  {id: 'dsh', create: () => dshConformanceFixture},
++  {id: 'hermes', create: () => hermesConformanceFixture},
++];
++
++const negotiatedFrom = (
++  caps: VisualAgentCapabilitySet,
++): (keyof VisualAgentCapabilitySet)[] =>
++  CAPABILITY_KEYS.filter(key => caps[key] === true);
++
++// The frozen runner emits at most one terminal. The default path exercises the
++// completed terminal (plus steer/preferences when negotiated); focused variants
++// below drive the cancelled and failed terminals for the adapters that report
++// those capabilities.
++const completedOptions = (
++  caps: VisualAgentCapabilitySet,
++): VisualAgentConformanceOptions => ({
++  requiredStatuses: [
++    'queued',
++    'running',
++    ...(caps.approval ? (['waiting_approval'] as const) : []),
++    'completed',
++  ],
++  negotiatedCapabilities: negotiatedFrom(caps),
++});
++
++describe('unified visual agent adapter conformance gate', () => {
++  it.each(fixtures)(
++    '$id passes the shared conformance suite through the frozen runner',
++    async ({create}) => {
++      const fixture = create();
++      await expect(
++        defineVisualAgentAdapterConformance(
++          fixture,
++          completedOptions(fixture.supportedCapabilities),
++        ),
++      ).resolves.toBeUndefined();
++    },
++  );
++
++  it.each(fixtures)(
++    '$id drives a correlated cancel terminal when cancel is negotiated',
++    async ({create}) => {
++      const fixture = create();
++      if (!fixture.supportedCapabilities.cancel) {
++        return;
++      }
++      await expect(
++        defineVisualAgentAdapterConformance(fixture, {
++          requiredStatuses: ['queued', 'running', 'cancelled'],
++          negotiatedCapabilities: negotiatedFrom(fixture.supportedCapabilities),
++        }),
++      ).resolves.toBeUndefined();
++    },
++  );
++
++  it.each(fixtures)(
++    '$id resumes from a failed terminal when resume is negotiated',
++    async ({create}) => {
++      const fixture = create();
++      if (!fixture.supportedCapabilities.resume) {
++        return;
++      }
++      await expect(
++        defineVisualAgentAdapterConformance(fixture, {
++          requiredStatuses: ['queued', 'running', 'failed'],
++          negotiatedCapabilities: negotiatedFrom(fixture.supportedCapabilities),
++        }),
++      ).resolves.toBeUndefined();
++    },
++  );
++
++  it.each(fixtures)(
++    '$id fails closed on steer when steer is not negotiated and sends nothing extra',
++    async ({create}) => {
++      const fixture = create();
++      if (fixture.supportedCapabilities.steer) {
++        return;
++      }
++      const port = fixture.adapter.create(fixture.profile);
++      const signal = new AbortController().signal;
++      await port.connect(fixture.profile, signal);
++      await expect(
++        port.steer(
++          {taskId: 'conformance-task', sessionRevision: 1, instruction: 'nudge'},
++          signal,
++        ),
++      ).rejects.toThrow('visual_agent_capability_unsupported');
++      await port.disconnect();
++    },
++  );
++
++  it('registers exactly the five built-ins and requires conformance for custom ids', () => {
++    const registry = createBuiltInVisualAgentToolRegistry();
++    expect(registry.list()).toEqual(['openclaw', 'codex', 'cursor', 'dsh', 'hermes']);
++
++    const registerCustomWithoutConformance = (id: string): void => {
++      // There is no public mutable register: an unregistered custom id can only
++      // be looked up, and the immutable registry rejects it.
++      createBuiltInVisualAgentToolRegistry().require(id as `custom:${string}`);
++    };
++    expect(() => registerCustomWithoutConformance('custom:sample')).toThrow(
++      'visual_agent_adapter_not_found',
++    );
++  });
++
++  it('freezes exact built-in manifest metadata and maximum capability claims', () => {
++    const builtInRegistry = createBuiltInVisualAgentToolRegistry();
++    expect(
++      builtInRegistry.list().map(id => builtInRegistry.require(id).manifest),
++    ).toEqual([
++      openClawManifest,
++      codexManifest,
++      cursorManifest,
++      dshManifest,
++      hermesManifest,
++    ]);
++  });
++});
+diff --git a/AwesomeProject/src/__tests__/features/visualAgent/ConnectorBridgeVisualAgentClient.test.ts b/AwesomeProject/src/__tests__/features/visualAgent/ConnectorBridgeVisualAgentClient.test.ts
+new file mode 100644
+index 0000000..8fe11c7
+--- /dev/null
++++ b/AwesomeProject/src/__tests__/features/visualAgent/ConnectorBridgeVisualAgentClient.test.ts
+@@ -0,0 +1,290 @@
++// Task 12 mobile Connector Bridge proxy. The client is the only mobile
++// `VisualAgentExecutionPort`; it must open exactly the configured Connector
++// Bridge (never a product upstream), negotiate before execute, correlate all
++// task messages, enforce a cancel timeout, and reject pending work on disconnect.
++import {ConnectorBridgeVisualAgentClient} from '@features/visualAgent/data/ConnectorBridgeVisualAgentClient';
++import type {
++  ConnectorBridgeSession,
++  ConnectorBridgeTransport,
++} from '@features/visualAgent/data/ConnectorBridgeTransport';
++import {encodeVisualAgentMessage} from '../../../connectorBridge/visualAgent/protocol/VisualAgentProtocolCodec';
++import type {
++  VisualAgentCapabilitySet,
++  VisualAgentProfileV1,
++  VisualAgentProtocolV1,
++  VisualAgentTaskEnvelopeV1,
++  VisualAgentTaskEvent,
++} from '@core/engine/operateRuntime/visualAgent/VisualAgentContracts';
++
++const allCapabilities: VisualAgentCapabilitySet = {
++  imageInput: true,
++  structuredAction: true,
++  stream: true,
++  cancel: true,
++  approval: true,
++  resume: true,
++  steer: true,
++  preferences: true,
++};
++
++const profile: VisualAgentProfileV1 = {
++  schemaVersion: 1,
++  profileId: 'codex-main',
++  toolId: 'codex',
++  enabled: true,
++  connector: {
++    kind: 'connector_bridge',
++    bridgeUrl: 'https://bridge.example',
++    bindingId: 'b-1',
++    secretRef: 'visual-agent:bridge',
++  },
++  requestedCapabilities: allCapabilities,
++};
++
++const envelope: VisualAgentTaskEnvelopeV1 = {
++  protocolVersion: 1,
++  taskId: 't-1',
++  sessionRevision: 1,
++  profileId: 'codex-main',
++  instruction: 'do the thing',
++  idempotencyKey: 'k-1',
++  requiredCapabilities: allCapabilities,
++};
++
++interface TimerHandle {
++  handler: () => void;
++  cancelled: boolean;
++}
++
++function makeTimer(): {
++  schedule: jest.Mock;
++  fireAll: () => void;
++} {
++  const scheduled: TimerHandle[] = [];
++  return {
++    schedule: jest.fn((handler: () => void) => {
++      const entry: TimerHandle = {handler, cancelled: false};
++      scheduled.push(entry);
++      return () => {
++        entry.cancelled = true;
++      };
++    }),
++    fireAll: () => {
++      for (const entry of scheduled) {
++        if (!entry.cancelled) {
++          entry.handler();
++        }
++      }
++    },
++  };
++}
++
++function makeIds(): {next: () => string} {
++  let n = 0;
++  return {
++    next: () => {
++      n += 1;
++      return `req-${n}`;
++    },
++  };
++}
++
++function makeBridge(
++  negotiated: VisualAgentCapabilitySet,
++  options: {autoPreference?: boolean} = {},
++): {
++  transport: {open: jest.Mock};
++  sent: VisualAgentProtocolV1[];
++  emit: (raw: string) => void;
++  close: jest.Mock;
++} {
++  const autoPreference = options.autoPreference ?? true;
++  let listener: ((raw: string) => void) | undefined;
++  const sent: VisualAgentProtocolV1[] = [];
++  const close = jest.fn(async () => undefined);
++  const session: ConnectorBridgeSession = {
++    send: jest.fn(async (message: VisualAgentProtocolV1) => {
++      sent.push(message);
++      if (message.type === 'session.open') {
++        queueMicrotask(() => {
++          listener?.(
++            encodeVisualAgentMessage({
++              version: 1,
++              type: 'session.ready',
++              requestId: message.requestId,
++              negotiatedCapabilities: negotiated,
++            }),
++          );
++        });
++      }
++      if (message.type === 'preference.request' && autoPreference) {
++        queueMicrotask(() => {
++          listener?.(
++            encodeVisualAgentMessage({
++              version: 1,
++              type: 'preference.result',
++              requestId: message.requestId,
++              result: {type: 'list', preferences: []},
++            }),
++          );
++        });
++      }
++    }),
++    subscribe: (l: (raw: string) => void) => {
++      listener = l;
++      return () => {
++        listener = undefined;
++      };
++    },
++    close,
++  };
++  const transport: ConnectorBridgeTransport = {
++    open: jest.fn(async () => session),
++  };
++  return {
++    transport: transport as unknown as {open: jest.Mock},
++    sent,
++    emit: raw => listener?.(raw),
++    close,
++  };
++}
++
++const emitTaskEvent = (
++  bridge: {emit: (raw: string) => void},
++  message: VisualAgentProtocolV1,
++): void => bridge.emit(encodeVisualAgentMessage(message));
++
++describe('ConnectorBridgeVisualAgentClient', () => {
++  it('opens only the configured Connector Bridge and never a product upstream', async () => {
++    const bridge = makeBridge(allCapabilities);
++    const signal = new AbortController().signal;
++    const client = new ConnectorBridgeVisualAgentClient(
++      bridge.transport as unknown as ConnectorBridgeTransport,
++      makeTimer(),
++      makeIds(),
++    );
++
++    await client.connect(profile, signal);
++
++    expect(bridge.transport.open).toHaveBeenCalledWith({
++      bridgeUrl: 'https://bridge.example',
++      secretRef: 'visual-agent:bridge',
++      signal,
++    });
++    expect(JSON.stringify(bridge.transport.open.mock.calls)).not.toMatch(
++      /gateway\.example|codex|cursor-agent|dsh|hermes/i,
++    );
++    expect(client.getConnectionState()).toEqual({
++      status: 'ready',
++      negotiatedCapabilities: allCapabilities,
++    });
++  });
++
++  it('negotiates before execute and correlates delivered task events', async () => {
++    const bridge = makeBridge(allCapabilities);
++    const signal = new AbortController().signal;
++    const client = new ConnectorBridgeVisualAgentClient(
++      bridge.transport as unknown as ConnectorBridgeTransport,
++      makeTimer(),
++      makeIds(),
++    );
++    const events: VisualAgentTaskEvent[] = [];
++    client.subscribe(event => events.push(event));
++
++    await client.connect(profile, signal);
++    const {taskId} = await client.execute(envelope, signal);
++    expect(taskId).toBe('t-1');
++    expect(bridge.sent.some(m => m.type === 'task.start')).toBe(true);
++
++    emitTaskEvent(bridge, {
++      version: 1,
++      type: 'task.status',
++      requestId: 's-1',
++      event: {type: 'status', taskId: 't-1', sessionRevision: 1, sequence: 0, status: 'queued'},
++    });
++    emitTaskEvent(bridge, {
++      version: 1,
++      type: 'task.completed',
++      requestId: 's-2',
++      event: {
++        type: 'terminal',
++        taskId: 't-1',
++        sessionRevision: 1,
++        sequence: 1,
++        status: 'completed',
++        result: {summary: 'done'},
++      },
++    });
++
++    expect(events.map(e => e.type)).toEqual(['status', 'terminal']);
++    expect(events.every(e => e.taskId === 't-1' && e.sessionRevision === 1)).toBe(true);
++  });
++
++  it('rejects cancel with not_ready before connect rather than throwing synchronously', async () => {
++    const bridge = makeBridge(allCapabilities);
++    const signal = new AbortController().signal;
++    const client = new ConnectorBridgeVisualAgentClient(
++      bridge.transport as unknown as ConnectorBridgeTransport,
++      makeTimer(),
++      makeIds(),
++    );
++
++    const pending = client.cancel({taskId: 't-1', sessionRevision: 1}, signal);
++    expect(pending).toBeInstanceOf(Promise);
++    await expect(pending).rejects.toThrow('visual_agent_not_ready');
++  });
++
++  it('rejects a pending cancel with a cancel timeout when the bridge is silent', async () => {
++    const bridge = makeBridge(allCapabilities);
++    const timer = makeTimer();
++    const signal = new AbortController().signal;
++    const client = new ConnectorBridgeVisualAgentClient(
++      bridge.transport as unknown as ConnectorBridgeTransport,
++      timer,
++      makeIds(),
++    );
++
++    await client.connect(profile, signal);
++    await client.execute(envelope, signal);
++    const cancelPromise = client.cancel({taskId: 't-1', sessionRevision: 1}, signal);
++    const assertion = expect(cancelPromise).rejects.toThrow('visual_agent_cancel_timeout');
++    timer.fireAll();
++    await assertion;
++  });
++
++  it('rejects pending preference requests on disconnect', async () => {
++    const bridge = makeBridge(allCapabilities, {autoPreference: false});
++    const signal = new AbortController().signal;
++    const client = new ConnectorBridgeVisualAgentClient(
++      bridge.transport as unknown as ConnectorBridgeTransport,
++      makeTimer(),
++      makeIds(),
++    );
++
++    await client.connect(profile, signal);
++    await client.execute(envelope, signal);
++    const pending = client.requestPreferences({type: 'list'}, signal);
++    const assertion = expect(pending).rejects.toThrow('visual_agent_disconnected');
++    await client.disconnect();
++    await assertion;
++    expect(bridge.close).toHaveBeenCalled();
++  });
++
++  it('fails closed when a capability was not negotiated and sends nothing upstream', async () => {
++    const bridge = makeBridge({...allCapabilities, steer: false});
++    const signal = new AbortController().signal;
++    const client = new ConnectorBridgeVisualAgentClient(
++      bridge.transport as unknown as ConnectorBridgeTransport,
++      makeTimer(),
++      makeIds(),
++    );
++
++    await client.connect(profile, signal);
++    await client.execute(envelope, signal);
++    const sentBefore = bridge.sent.length;
++    await expect(
++      client.steer({taskId: 't-1', sessionRevision: 1, instruction: 'nudge'}, signal),
++    ).rejects.toThrow('visual_agent_capability_unsupported');
++    expect(bridge.sent.length).toBe(sentBefore);
++  });
++});
+diff --git a/AwesomeProject/src/__tests__/features/visualAgent/VisualAgentFacade.test.ts b/AwesomeProject/src/__tests__/features/visualAgent/VisualAgentFacade.test.ts
+new file mode 100644
+index 0000000..f0edf38
+--- /dev/null
++++ b/AwesomeProject/src/__tests__/features/visualAgent/VisualAgentFacade.test.ts
+@@ -0,0 +1,183 @@
++// Task 12 UI-narrow Visual Agent facade. It delegates to the frozen profile
++// controller and execution port without a second execution contract or any
++// fallback, and its view state exposes only generic tool/profile/capability
++// data — never bridge URLs, secret refs, upstream protocol, raw frames, or
++// stacks.
++import {VisualAgentFacade} from '@features/visualAgent/application/VisualAgentFacade';
++import type {VisualAgentProfileController} from '@features/visualAgent/application/VisualAgentProfileController';
++import type {
++  VisualAgentCapabilitySet,
++  VisualAgentConnectionState,
++  VisualAgentExecutionPort,
++  VisualAgentProfileV1,
++} from '@core/engine/operateRuntime/visualAgent/VisualAgentContracts';
++
++const allCapabilities: VisualAgentCapabilitySet = {
++  imageInput: true,
++  structuredAction: true,
++  stream: true,
++  cancel: true,
++  approval: true,
++  resume: true,
++  steer: true,
++  preferences: true,
++};
++
++const activeProfileFull: VisualAgentProfileV1 = {
++  schemaVersion: 1,
++  profileId: 'codex-main',
++  toolId: 'codex',
++  enabled: true,
++  connector: {
++    kind: 'connector_bridge',
++    bridgeUrl: 'https://bridge.example',
++    bindingId: 'b-1',
++    secretRef: 'visual-agent:bridge',
++  },
++  requestedCapabilities: allCapabilities,
++};
++
++interface ControllerStub {
++  readEnabled: jest.Mock;
++  readActiveProjection: jest.Mock;
++  list: jest.Mock;
++  setEnabled: jest.Mock;
++  setActive: jest.Mock;
++}
++
++function makeController(): ControllerStub {
++  let enabled = true;
++  return {
++    readEnabled: jest.fn(async () => enabled),
++    readActiveProjection: jest.fn().mockResolvedValue({
++      profileId: 'codex-main',
++      toolId: 'codex',
++      connectorRef: {kind: 'connector_bridge', bindingId: 'b-1'},
++    }),
++    list: jest.fn().mockResolvedValue([activeProfileFull]),
++    setEnabled: jest.fn(async (value: boolean) => {
++      enabled = value;
++    }),
++    setActive: jest.fn().mockResolvedValue(undefined),
++  };
++}
++
++function makeExecution(): {
++  port: VisualAgentExecutionPort;
++  connect: jest.Mock;
++  execute: jest.Mock;
++  steer: jest.Mock;
++} {
++  let connection: VisualAgentConnectionState = {status: 'disconnected'};
++  const connect = jest.fn(async () => {
++    connection = {status: 'ready', negotiatedCapabilities: allCapabilities};
++    return allCapabilities;
++  });
++  const execute = jest.fn(async () => ({taskId: 't-1'}));
++  const steer = jest.fn(async () => undefined);
++  const port: VisualAgentExecutionPort = {
++    getConnectionState: () => connection,
++    connect,
++    disconnect: jest.fn(async () => {
++      connection = {status: 'disconnected'};
++    }),
++    execute,
++    cancel: jest.fn(async () => undefined),
++    resolveApproval: jest.fn(async () => undefined),
++    resume: jest.fn(async () => undefined),
++    steer,
++    requestPreferences: jest.fn(async () => undefined),
++    subscribe: jest.fn(() => () => undefined),
++  };
++  return {port, connect, execute, steer};
++}
++
++describe('VisualAgentFacade', () => {
++  it('exposes generic state without upstream details or credentials', async () => {
++    const controller = makeController();
++    const {port} = makeExecution();
++    const facade = new VisualAgentFacade(
++      controller as unknown as VisualAgentProfileController,
++      port,
++    );
++
++    const state = await facade.read();
++    expect(state).toEqual(
++      expect.objectContaining({
++        activeToolId: 'codex',
++        activeProfile: expect.objectContaining({profileId: 'codex-main', toolId: 'codex'}),
++        canExecute: false,
++      }),
++    );
++    expect(JSON.stringify(state)).not.toMatch(
++      /secretRef|token|command|args|gatewayUrl|raw|stack/i,
++    );
++  });
++
++  it('reflects the global enabled flag written by setEnabled', async () => {
++    const controller = makeController();
++    const {port} = makeExecution();
++    const facade = new VisualAgentFacade(
++      controller as unknown as VisualAgentProfileController,
++      port,
++    );
++
++    const afterDisable = await facade.setEnabled(false, 7);
++    expect(controller.setEnabled).toHaveBeenCalledWith(false, 7);
++    expect(afterDisable.enabled).toBe(false);
++    expect(afterDisable.canExecute).toBe(false);
++
++    const reread = await facade.read();
++    expect(reread.enabled).toBe(false);
++    expect(reread.canExecute).toBe(false);
++  });
++
++  it('connects through the execution port with the active profile and reflects readiness', async () => {
++    const controller = makeController();
++    const execution = makeExecution();
++    const facade = new VisualAgentFacade(
++      controller as unknown as VisualAgentProfileController,
++      execution.port,
++    );
++
++    const signal = new AbortController().signal;
++    const state = await facade.connect(signal);
++
++    expect(execution.connect).toHaveBeenCalledWith(activeProfileFull, signal);
++    expect(state.connection).toBe('ready');
++    expect(state.canExecute).toBe(true);
++    expect(state.negotiatedCapabilities).toEqual(allCapabilities);
++  });
++
++  it('delegates mutations and task actions without a second execution path', async () => {
++    const controller = makeController();
++    const execution = makeExecution();
++    const facade = new VisualAgentFacade(
++      controller as unknown as VisualAgentProfileController,
++      execution.port,
++    );
++    const signal = new AbortController().signal;
++
++    await facade.setEnabled(false, 3);
++    expect(controller.setEnabled).toHaveBeenCalledWith(false, 3);
++
++    await facade.connect(signal);
++    const result = await facade.execute(
++      {
++        protocolVersion: 1,
++        taskId: 't-1',
++        sessionRevision: 1,
++        profileId: 'codex-main',
++        instruction: 'go',
++        idempotencyKey: 'k-1',
++        requiredCapabilities: allCapabilities,
++      },
++      signal,
++    );
++    expect(result).toEqual({taskId: 't-1'});
++    expect(execution.execute).toHaveBeenCalled();
++
++    await facade.steer({taskId: 't-1', sessionRevision: 1, instruction: 'nudge'}, signal);
++    expect(execution.steer).toHaveBeenCalled();
++  });
++});
+diff --git a/AwesomeProject/src/__tests__/features/visualAgent/VisualAgentPreferenceRepository.test.ts b/AwesomeProject/src/__tests__/features/visualAgent/VisualAgentPreferenceRepository.test.ts
+new file mode 100644
+index 0000000..4edc0d0
+--- /dev/null
++++ b/AwesomeProject/src/__tests__/features/visualAgent/VisualAgentPreferenceRepository.test.ts
+@@ -0,0 +1,174 @@
++// Task 12 remote preference adapter. It is a `PreferenceRepository` backed only
++// by the negotiated Connector Bridge preference command; it fails closed with
++// `preference_remote_unavailable` whenever preferences were not negotiated or a
++// remote command fails, and never caches remote data on the device.
++import {VisualAgentPreferenceRepository} from '@features/visualAgent/data/VisualAgentPreferenceRepository';
++import type {
++  VisualAgentCapabilitySet,
++  VisualAgentConnectionState,
++  VisualAgentExecutionPort,
++} from '@core/engine/operateRuntime/visualAgent/VisualAgentContracts';
++
++const allCapabilities: VisualAgentCapabilitySet = {
++  imageInput: true,
++  structuredAction: true,
++  stream: true,
++  cancel: true,
++  approval: true,
++  resume: true,
++  steer: true,
++  preferences: true,
++};
++
++const ready = (
++  overrides: Partial<VisualAgentCapabilitySet> = {},
++): VisualAgentConnectionState => ({
++  status: 'ready',
++  negotiatedCapabilities: {...allCapabilities, ...overrides},
++});
++
++function makeClient(): jest.Mocked<
++  Pick<VisualAgentExecutionPort, 'getConnectionState' | 'requestPreferences'>
++> {
++  return {
++    getConnectionState: jest.fn().mockReturnValue(ready()),
++    requestPreferences: jest.fn(),
++  };
++}
++
++function makeIds(): {next: () => string} {
++  let n = 0;
++  return {
++    next: () => {
++      n += 1;
++      return `pref-${n}`;
++    },
++  };
++}
++
++describe('VisualAgentPreferenceRepository', () => {
++  it('projects remote list records into sanitized preferences', async () => {
++    const client = makeClient();
++    client.requestPreferences.mockResolvedValue({
++      type: 'list',
++      preferences: [
++        {
++          id: 'p1',
++          kind: 'preference',
++          title: 'Tea',
++          summary: 'Green tea, no sugar',
++          createdAtEpochMs: 1,
++          updatedAtEpochMs: 2,
++        },
++      ],
++    });
++    const repository = new VisualAgentPreferenceRepository(
++      client as unknown as VisualAgentExecutionPort,
++      makeIds(),
++    );
++
++    await expect(repository.list()).resolves.toEqual([
++      {
++        id: 'p1',
++        kind: 'preference',
++        title: 'Tea',
++        summary: 'Green tea, no sugar',
++        createdAtEpochMs: 1,
++        updatedAtEpochMs: 2,
++      },
++    ]);
++    expect(client.requestPreferences).toHaveBeenCalledWith(
++      {type: 'list'},
++      expect.anything(),
++    );
++  });
++
++  it('fails preference operations when preferences were not negotiated', async () => {
++    const client = makeClient();
++    client.getConnectionState.mockReturnValue(ready({preferences: false}));
++    const repository = new VisualAgentPreferenceRepository(
++      client as unknown as VisualAgentExecutionPort,
++      makeIds(),
++    );
++
++    await expect(repository.list()).rejects.toThrow('preference_remote_unavailable');
++    expect(client.requestPreferences).not.toHaveBeenCalled();
++  });
++
++  it('fails preference operations when the connection is not ready', async () => {
++    const client = makeClient();
++    client.getConnectionState.mockReturnValue({status: 'disconnected'});
++    const repository = new VisualAgentPreferenceRepository(
++      client as unknown as VisualAgentExecutionPort,
++      makeIds(),
++    );
++
++    await expect(repository.list()).rejects.toThrow('preference_remote_unavailable');
++  });
++
++  it('maps every remote failure to preference_remote_unavailable', async () => {
++    const client = makeClient();
++    client.requestPreferences.mockRejectedValue(new Error('socket exploded'));
++    const repository = new VisualAgentPreferenceRepository(
++      client as unknown as VisualAgentExecutionPort,
++      makeIds(),
++    );
++
++    await expect(repository.list()).rejects.toThrow('preference_remote_unavailable');
++  });
++
++  it('sends upsert, delete, and clear commands for the matching operations', async () => {
++    const client = makeClient();
++    client.requestPreferences.mockImplementation(async (command: unknown) => {
++      const typed = command as {type: string};
++      if (typed.type === 'upsert') {
++        return {
++          type: 'upsert',
++          preference: {
++            id: 'pref-1',
++            kind: 'name',
++            title: 'Ann',
++            summary: 'Call me Ann',
++            createdAtEpochMs: 5,
++            updatedAtEpochMs: 5,
++          },
++        };
++      }
++      return {type: typed.type};
++    });
++    const repository = new VisualAgentPreferenceRepository(
++      client as unknown as VisualAgentExecutionPort,
++      makeIds(),
++    );
++
++    await expect(
++      repository.upsertConfirmed({kind: 'name', title: 'Ann', summary: 'Call me Ann'}),
++    ).resolves.toEqual({
++      id: 'pref-1',
++      kind: 'name',
++      title: 'Ann',
++      summary: 'Call me Ann',
++      createdAtEpochMs: 5,
++      updatedAtEpochMs: 5,
++    });
++    expect(client.requestPreferences).toHaveBeenLastCalledWith(
++      {
++        type: 'upsert',
++        preference: {id: 'pref-1', kind: 'name', title: 'Ann', summary: 'Call me Ann'},
++      },
++      expect.anything(),
++    );
++
++    await repository.delete('p2');
++    expect(client.requestPreferences).toHaveBeenLastCalledWith(
++      {type: 'delete', preferenceId: 'p2'},
++      expect.anything(),
++    );
++
++    await repository.forgetAll();
++    expect(client.requestPreferences).toHaveBeenLastCalledWith(
++      {type: 'clear'},
++      expect.anything(),
++    );
++  });
++});
+diff --git a/AwesomeProject/src/__tests__/features/visualAgent/VisualAgentProfileController.test.ts b/AwesomeProject/src/__tests__/features/visualAgent/VisualAgentProfileController.test.ts
+index ca7749a..3fc80cc 100644
+--- a/AwesomeProject/src/__tests__/features/visualAgent/VisualAgentProfileController.test.ts
++++ b/AwesomeProject/src/__tests__/features/visualAgent/VisualAgentProfileController.test.ts
+@@ -384,11 +384,21 @@ describe('VisualAgentProfileController.list/readActiveProjection', () => {
+       connectorRef: {kind: 'connector_bridge', bindingId: 'codex-main'},
+     });
+   });
+ 
+   it('returns null when no profile is active', async () => {
+     const runtimeConfig = makeRuntimeConfig();
+     runtimeConfig.load.mockResolvedValue(envelope({activeProfileId: null}));
+     const {controller} = makeController({runtimeConfig});
+     await expect(controller.readActiveProjection()).resolves.toBeNull();
+   });
++
++  it('reads the global visualAgent.enabled flag from the active route', async () => {
++    const {controller} = makeController();
++    await expect(controller.readEnabled()).resolves.toBe(true);
++
++    const runtimeConfig = makeRuntimeConfig();
++    runtimeConfig.load.mockResolvedValue(envelope({enabled: false}));
++    const disabled = makeController({runtimeConfig});
++    await expect(disabled.controller.readEnabled()).resolves.toBe(false);
++  });
+ });
+diff --git a/AwesomeProject/src/connectorBridge/visualAgent/BuiltInVisualAgentToolRegistry.ts b/AwesomeProject/src/connectorBridge/visualAgent/BuiltInVisualAgentToolRegistry.ts
+new file mode 100644
+index 0000000..d3deb4d
+--- /dev/null
++++ b/AwesomeProject/src/connectorBridge/visualAgent/BuiltInVisualAgentToolRegistry.ts
+@@ -0,0 +1,67 @@
++// The single built-in Visual Agent tool registry (capability-domain Task 12).
++// It composes exactly the five canonical adapters into the frozen, immutable
++// `VisualAgentToolRegistry` from Runtime Wave 1 Task 4B. There is no public
++// mutable register and no mutable adapter-registry type: registering a new
++// `custom:<name>` requires adding its adapter directory, fixture, shared-suite
++// invocation, and an entry here in one change. The real upstream transport is
++// bound by the Connector Bridge/Orchestrator composition; these adapters are
++// constructed here with an "unavailable" transport by default so the registry
++// stays a pure catalog until that composition injects live ports.
++import {CapabilityError} from '@core/engine/capabilities/shared/CapabilityError';
++import type {TimerPort} from '@core/engine/capabilities/shared/CapabilityPorts';
++import {createVisualAgentToolRegistry} from '@core/engine/operateRuntime/visualAgent/VisualAgentToolRegistry';
++import type {VisualAgentToolRegistry} from '@core/engine/operateRuntime/visualAgent/VisualAgentContracts';
++import {CodexAdapter} from './adapters/codex/CodexAdapter';
++import {CursorAdapter} from './adapters/cursor/CursorAdapter';
++import {DshAdapter} from './adapters/dsh/DshAdapter';
++import {HermesAdapter} from './adapters/hermes/HermesAdapter';
++import {OpenClawAdapter} from './adapters/openclaw/OpenClawAdapter';
++import type {
++  VisualAgentBindingPort,
++  VisualAgentUpstreamPort,
++} from './ports/VisualAgentUpstreamPort';
++
++export interface BuiltInVisualAgentAdapterDeps {
++  readonly bindings: VisualAgentBindingPort;
++  readonly upstream: VisualAgentUpstreamPort;
++  readonly timer: TimerPort;
++}
++
++const unavailable = (): never => {
++  throw new CapabilityError('visual_agent_not_ready');
++};
++
++const UNAVAILABLE_BINDINGS: VisualAgentBindingPort = {
++  read: async () => unavailable(),
++};
++
++const UNAVAILABLE_UPSTREAM: VisualAgentUpstreamPort = {
++  open: async () => unavailable(),
++};
++
++const NOOP_TIMER: TimerPort = {
++  schedule: () => () => undefined,
++};
++
++/**
++ * Builds the immutable registry of the five built-in adapters in canonical
++ * order. `deps` are only used when an adapter's `create()` is later invoked by
++ * the Connector Bridge composition; the registry's `list()`/`require()` catalog
++ * is independent of them.
++ */
++export function createBuiltInVisualAgentToolRegistry(
++  deps: BuiltInVisualAgentAdapterDeps = {
++    bindings: UNAVAILABLE_BINDINGS,
++    upstream: UNAVAILABLE_UPSTREAM,
++    timer: NOOP_TIMER,
++  },
++): VisualAgentToolRegistry {
++  const {bindings, upstream, timer} = deps;
++  return createVisualAgentToolRegistry([
++    new OpenClawAdapter(bindings, upstream, timer),
++    new CodexAdapter(bindings, upstream),
++    new CursorAdapter(bindings, upstream),
++    new DshAdapter(bindings, upstream),
++    new HermesAdapter(bindings, upstream),
++  ]);
++}
+diff --git a/AwesomeProject/src/features/companion/index.ts b/AwesomeProject/src/features/companion/index.ts
+new file mode 100644
+index 0000000..67e7062
+--- /dev/null
++++ b/AwesomeProject/src/features/companion/index.ts
+@@ -0,0 +1,4 @@
++// Public Companion barrel (capability-domain Task 12). Exposes only the existing
++// Facade and its UI-neutral ViewState.
++export {CompanionFacade} from './application/CompanionFacade';
++export type {CompanionViewState} from './application/CompanionViewState';
+diff --git a/AwesomeProject/src/features/errand/index.ts b/AwesomeProject/src/features/errand/index.ts
+new file mode 100644
+index 0000000..b81a3e9
+--- /dev/null
++++ b/AwesomeProject/src/features/errand/index.ts
+@@ -0,0 +1,4 @@
++// Public Errand barrel (capability-domain Task 12). Exposes only the existing
++// Facade and its UI-neutral ViewState.
++export {ErrandFacade} from './application/ErrandFacade';
++export type {ErrandsViewState} from './application/ErrandsViewState';
+diff --git a/AwesomeProject/src/features/preference/index.ts b/AwesomeProject/src/features/preference/index.ts
+new file mode 100644
+index 0000000..053da24
+--- /dev/null
++++ b/AwesomeProject/src/features/preference/index.ts
+@@ -0,0 +1,4 @@
++// Public Preference barrel (capability-domain Task 12). Exposes only the
++// existing Facade and its UI-neutral ViewState.
++export {PreferenceFacade} from './application/PreferenceFacade';
++export type {PrivacyViewState} from './application/PreferenceFacade';
+diff --git a/AwesomeProject/src/features/visualAgent/application/VisualAgentFacade.ts b/AwesomeProject/src/features/visualAgent/application/VisualAgentFacade.ts
+new file mode 100644
+index 0000000..2f868be
+--- /dev/null
++++ b/AwesomeProject/src/features/visualAgent/application/VisualAgentFacade.ts
+@@ -0,0 +1,142 @@
++// UI-narrow Visual Agent facade (capability-domain Task 12). It is a thin
++// adapter seam over the frozen `VisualAgentProfileController` (reads the current
++// safe projection — never a legacy key or reconstructed legacy profile) and the
++// single `VisualAgentExecutionPort`. It delegates every task action without a
++// fallback and is not a second execution contract.
++import {CapabilityError} from '@core/engine/capabilities/shared/CapabilityError';
++import type {
++  VisualAgentExecutionPort,
++  VisualAgentProfileV1,
++  VisualAgentTaskEnvelopeV1,
++} from '@core/engine/operateRuntime/visualAgent/VisualAgentContracts';
++import type {VisualAgentProfileController} from './VisualAgentProfileController';
++import type {VisualAgentViewState} from './VisualAgentViewState';
++
++export class VisualAgentFacade {
++  constructor(
++    private readonly profiles: VisualAgentProfileController,
++    private readonly execution: VisualAgentExecutionPort,
++  ) {}
++
++  read(): Promise<VisualAgentViewState> {
++    return this.project();
++  }
++
++  async setEnabled(enabled: boolean, expectedRevision: number): Promise<VisualAgentViewState> {
++    await this.profiles.setEnabled(enabled, expectedRevision);
++    return this.project();
++  }
++
++  async setActive(
++    profileId: string | null,
++    expectedRevision: number,
++  ): Promise<VisualAgentViewState> {
++    await this.profiles.setActive(profileId, expectedRevision);
++    return this.project();
++  }
++
++  async connect(signal: AbortSignal): Promise<VisualAgentViewState> {
++    const profile = await this.activeProfile();
++    if (!profile) {
++      throw new CapabilityError('visual_agent_invalid_profile');
++    }
++    await this.execution.connect(profile, signal);
++    return this.project();
++  }
++
++  async disconnect(): Promise<VisualAgentViewState> {
++    await this.execution.disconnect();
++    return this.project();
++  }
++
++  execute(
++    envelope: VisualAgentTaskEnvelopeV1,
++    signal: AbortSignal,
++  ): Promise<{taskId: string}> {
++    return this.execution.execute(envelope, signal);
++  }
++
++  cancel(
++    input: {taskId: string; sessionRevision: number},
++    signal: AbortSignal,
++  ): Promise<void> {
++    return this.execution.cancel(input, signal);
++  }
++
++  resolveApproval(
++    input: {
++      taskId: string;
++      sessionRevision: number;
++      approvalId: string;
++      decision: 'approve' | 'reject';
++    },
++    signal: AbortSignal,
++  ): Promise<void> {
++    return this.execution.resolveApproval(input, signal);
++  }
++
++  resume(
++    input: {taskId: string; sessionRevision: number; resumeToken: string},
++    signal: AbortSignal,
++  ): Promise<void> {
++    return this.execution.resume(input, signal);
++  }
++
++  steer(
++    input: {taskId: string; sessionRevision: number; instruction: string},
++    signal: AbortSignal,
++  ): Promise<void> {
++    return this.execution.steer(input, signal);
++  }
++
++  private async activeProfile(): Promise<VisualAgentProfileV1 | null> {
++    const projection = await this.profiles.readActiveProjection();
++    if (!projection) {
++      return null;
++    }
++    const profiles = await this.profiles.list();
++    return profiles.find(profile => profile.profileId === projection.profileId) ?? null;
++  }
++
++  private async project(): Promise<VisualAgentViewState> {
++    let projection: Awaited<ReturnType<VisualAgentProfileController['readActiveProjection']>>;
++    let enabled: boolean;
++    try {
++      [enabled, projection] = await Promise.all([
++        this.profiles.readEnabled(),
++        this.profiles.readActiveProjection(),
++      ]);
++    } catch {
++      return {
++        status: 'error',
++        enabled: false,
++        activeProfile: null,
++        activeProfileId: null,
++        activeToolId: null,
++        connection: this.execution.getConnectionState().status,
++        negotiatedCapabilities: null,
++        canExecute: false,
++      };
++    }
++
++    const connection = this.execution.getConnectionState();
++    const negotiatedCapabilities =
++      connection.status === 'ready' ? connection.negotiatedCapabilities : null;
++    const canExecute =
++      enabled && connection.status === 'ready' && projection !== null;
++
++    return {
++      status: 'ready',
++      enabled,
++      activeProfile: projection,
++      activeProfileId: projection?.profileId ?? null,
++      activeToolId: projection?.toolId ?? null,
++      connection: connection.status,
++      negotiatedCapabilities,
++      canExecute,
++      ...(connection.status === 'failed'
++        ? {blocker: {code: connection.errorCode, message: connection.errorCode}}
++        : {}),
++    };
++  }
++}
+diff --git a/AwesomeProject/src/features/visualAgent/application/VisualAgentProfileController.ts b/AwesomeProject/src/features/visualAgent/application/VisualAgentProfileController.ts
+index 918f0be..b7d0ad1 100644
+--- a/AwesomeProject/src/features/visualAgent/application/VisualAgentProfileController.ts
++++ b/AwesomeProject/src/features/visualAgent/application/VisualAgentProfileController.ts
+@@ -114,20 +114,25 @@ export class VisualAgentProfileController {
+     private readonly retirements: CredentialRetirementRepository,
+     private readonly registry: VisualAgentToolRegistry,
+     private readonly ids: IdGenerator,
+   ) {}
+ 
+   async list(): Promise<readonly VisualAgentProfileV1[]> {
+     const envelope = await this.runtimeConfig.load();
+     return envelope.active.visualAgent.profiles;
+   }
+ 
++  async readEnabled(): Promise<boolean> {
++    const envelope = await this.runtimeConfig.load();
++    return envelope.active.visualAgent.enabled;
++  }
++
+   async readActiveProjection(): Promise<VisualAgentProfileProjectionV1 | null> {
+     const envelope = await this.runtimeConfig.load();
+     const activeProfileId = envelope.active.visualAgent.activeProfileId;
+     if (activeProfileId === null) {
+       return null;
+     }
+     const profile = envelope.active.visualAgent.profiles.find(
+       item => item.profileId === activeProfileId,
+     );
+     if (!profile) {
+diff --git a/AwesomeProject/src/features/visualAgent/application/VisualAgentViewState.ts b/AwesomeProject/src/features/visualAgent/application/VisualAgentViewState.ts
+new file mode 100644
+index 0000000..e8ee21c
+--- /dev/null
++++ b/AwesomeProject/src/features/visualAgent/application/VisualAgentViewState.ts
+@@ -0,0 +1,24 @@
++// UI-neutral Visual Agent view state (capability-domain Task 12). It exposes
++// only generic tool/profile/capability/connection data and a generic blocker.
++// It deliberately excludes the bridge URL, secret ref, upstream protocol/config,
++// image, frame, and raw error — nothing here can leak a credential or a product
++// transport detail to the UI.
++import type {
++  VisualAgentCapabilitySet,
++  VisualAgentConnectionState,
++  VisualAgentErrorCode,
++  VisualAgentToolId,
++} from '@core/engine/operateRuntime/visualAgent/VisualAgentContracts';
++import type {VisualAgentProfileProjectionV1} from './VisualAgentProfileController';
++
++export interface VisualAgentViewState {
++  readonly status: 'loading' | 'ready' | 'error';
++  readonly enabled: boolean;
++  readonly activeProfile: VisualAgentProfileProjectionV1 | null;
++  readonly activeProfileId: string | null;
++  readonly activeToolId: VisualAgentToolId | null;
++  readonly connection: VisualAgentConnectionState['status'];
++  readonly negotiatedCapabilities: VisualAgentCapabilitySet | null;
++  readonly canExecute: boolean;
++  readonly blocker?: {readonly code: VisualAgentErrorCode; readonly message: string};
++}
+diff --git a/AwesomeProject/src/features/visualAgent/data/ConnectorBridgeTransport.ts b/AwesomeProject/src/features/visualAgent/data/ConnectorBridgeTransport.ts
+new file mode 100644
+index 0000000..71cc5e5
+--- /dev/null
++++ b/AwesomeProject/src/features/visualAgent/data/ConnectorBridgeTransport.ts
+@@ -0,0 +1,21 @@
++// Mobile Connector Bridge transport seam (capability-domain Task 12). This is
++// the only network boundary the mobile app crosses for Visual Agent traffic. It
++// carries the runtime-owned `VisualAgentProtocolV1` and nothing else: no product
++// protocol, no upstream CLI/endpoint, no bridge adapter. A concrete WebSocket/
++// HTTPS implementation is provided by the app shell; capability code depends
++// only on these interfaces.
++import type {VisualAgentProtocolV1} from '@core/engine/operateRuntime/visualAgent/VisualAgentContracts';
++
++export interface ConnectorBridgeSession {
++  send(message: VisualAgentProtocolV1): Promise<void>;
++  subscribe(listener: (raw: string) => void): () => void;
++  close(): Promise<void>;
++}
++
++export interface ConnectorBridgeTransport {
++  open(input: {
++    bridgeUrl: string;
++    secretRef: string | null;
++    signal: AbortSignal;
++  }): Promise<ConnectorBridgeSession>;
++}
+diff --git a/AwesomeProject/src/features/visualAgent/data/ConnectorBridgeVisualAgentClient.ts b/AwesomeProject/src/features/visualAgent/data/ConnectorBridgeVisualAgentClient.ts
+new file mode 100644
+index 0000000..6f7e2b9
+--- /dev/null
++++ b/AwesomeProject/src/features/visualAgent/data/ConnectorBridgeVisualAgentClient.ts
+@@ -0,0 +1,358 @@
++// Mobile Connector Bridge proxy (capability-domain Task 12). This is the only
++// `VisualAgentExecutionPort` bound in the app: it opens exactly the configured
++// Connector Bridge through `ConnectorBridgeTransport`, negotiates capabilities
++// before any execute, correlates every task message to one immutable profile
++// session, enforces a cancel timeout, and rejects pending work on disconnect.
++// It carries only the runtime-owned `VisualAgentProtocolV1`; it never spawns a
++// CLI, opens a product endpoint, or selects a second profile.
++import {CapabilityError} from '@core/engine/capabilities/shared/CapabilityError';
++import type {IdGenerator, TimerPort} from '@core/engine/capabilities/shared/CapabilityPorts';
++import type {
++  VisualAgentCapabilitySet,
++  VisualAgentConnectionState,
++  VisualAgentPreferenceCommand,
++  VisualAgentProfileV1,
++  VisualAgentExecutionPort,
++  VisualAgentProtocolV1,
++  VisualAgentTaskEnvelopeV1,
++  VisualAgentTaskEvent,
++} from '@core/engine/operateRuntime/visualAgent/VisualAgentContracts';
++import {
++  createVisualAgentProtocolTaskTracker,
++  decodeVisualAgentMessage,
++  type VisualAgentProtocolTaskTracker,
++} from '../../../connectorBridge/visualAgent/protocol/VisualAgentProtocolCodec';
++import type {
++  ConnectorBridgeSession,
++  ConnectorBridgeTransport,
++} from './ConnectorBridgeTransport';
++
++const CANCEL_TIMEOUT_MS = 15_000;
++
++type Pending<T> = {resolve: (value: T) => void; reject: (error: unknown) => void};
++
++type PendingCancel = Pending<void> & {cancelTimer: () => void};
++
++export class ConnectorBridgeVisualAgentClient implements VisualAgentExecutionPort {
++  private state: VisualAgentConnectionState = {status: 'disconnected'};
++  private session: ConnectorBridgeSession | null = null;
++  private profile: VisualAgentProfileV1 | null = null;
++  private negotiated: VisualAgentCapabilitySet | null = null;
++  private unsubscribe: (() => void) | null = null;
++  private pendingConnect: Pending<VisualAgentCapabilitySet> | null = null;
++  private readonly listeners = new Set<(event: VisualAgentTaskEvent) => void>();
++  private readonly pendingPreferences = new Map<string, Pending<unknown>>();
++  private readonly pendingCancels = new Map<string, PendingCancel>();
++  private readonly trackers = new Map<string, VisualAgentProtocolTaskTracker>();
++
++  constructor(
++    private readonly transport: ConnectorBridgeTransport,
++    private readonly timer: TimerPort,
++    private readonly ids: IdGenerator,
++  ) {}
++
++  getConnectionState(): VisualAgentConnectionState {
++    return this.state;
++  }
++
++  async connect(
++    profile: VisualAgentProfileV1,
++    signal: AbortSignal,
++  ): Promise<VisualAgentCapabilitySet> {
++    this.profile = profile;
++    this.state = {status: 'connecting'};
++    let session: ConnectorBridgeSession;
++    try {
++      session = await this.transport.open({
++        bridgeUrl: profile.connector.bridgeUrl,
++        secretRef: profile.connector.secretRef,
++        signal,
++      });
++    } catch {
++      this.state = {status: 'failed', errorCode: 'visual_agent_auth_failed'};
++      throw new CapabilityError('visual_agent_auth_failed');
++    }
++
++    this.session = session;
++    this.unsubscribe = session.subscribe(raw => this.handleRaw(raw));
++    this.state = {status: 'negotiating'};
++
++    return new Promise<VisualAgentCapabilitySet>((resolve, reject) => {
++      this.pendingConnect = {resolve, reject};
++      this.send(requestId => ({
++        version: 1,
++        type: 'session.open',
++        requestId,
++        profileId: profile.profileId,
++        toolId: profile.toolId,
++        requestedCapabilities: profile.requestedCapabilities,
++      })).catch(error => {
++        this.pendingConnect = null;
++        this.state = {status: 'failed', errorCode: 'visual_agent_disconnected'};
++        reject(error);
++      });
++    });
++  }
++
++  async disconnect(): Promise<void> {
++    const session = this.session;
++    this.rejectAllPending(new CapabilityError('visual_agent_disconnected'));
++    this.unsubscribe?.();
++    this.unsubscribe = null;
++    this.session = null;
++    this.negotiated = null;
++    this.trackers.clear();
++    this.state = {status: 'disconnected'};
++    if (session) {
++      try {
++        await session.close();
++      } catch {
++        // Teardown is best-effort; the caller already has the disconnect outcome.
++      }
++    }
++  }
++
++  async execute(
++    envelope: VisualAgentTaskEnvelopeV1,
++    _signal: AbortSignal,
++  ): Promise<{taskId: string}> {
++    this.assertReady();
++    this.trackers.set(
++      envelope.taskId,
++      createVisualAgentProtocolTaskTracker({
++        taskId: envelope.taskId,
++        sessionRevision: envelope.sessionRevision,
++      }),
++    );
++    await this.send(requestId => ({version: 1, type: 'task.start', requestId, envelope}));
++    return {taskId: envelope.taskId};
++  }
++
++  async cancel(
++    input: {taskId: string; sessionRevision: number},
++    _signal: AbortSignal,
++  ): Promise<void> {
++    this.assertReady();
++    this.assertCapability('cancel');
++    return new Promise<void>((resolve, reject) => {
++      const cancelTimer = this.timer.schedule(() => {
++        this.pendingCancels.delete(input.taskId);
++        reject(new CapabilityError('visual_agent_cancel_timeout'));
++      }, CANCEL_TIMEOUT_MS);
++      this.pendingCancels.set(input.taskId, {resolve, reject, cancelTimer});
++      this.send(requestId => ({
++        version: 1,
++        type: 'task.cancel',
++        requestId,
++        taskId: input.taskId,
++        sessionRevision: input.sessionRevision,
++      })).catch(error => {
++        cancelTimer();
++        this.pendingCancels.delete(input.taskId);
++        reject(error);
++      });
++    });
++  }
++
++  async resolveApproval(
++    input: {
++      taskId: string;
++      sessionRevision: number;
++      approvalId: string;
++      decision: 'approve' | 'reject';
++    },
++    _signal: AbortSignal,
++  ): Promise<void> {
++    this.assertReady();
++    this.assertCapability('approval');
++    await this.send(requestId => ({
++      version: 1,
++      type: 'task.approval.resolve',
++      requestId,
++      taskId: input.taskId,
++      sessionRevision: input.sessionRevision,
++      approvalId: input.approvalId,
++      decision: input.decision,
++    }));
++  }
++
++  async resume(
++    input: {taskId: string; sessionRevision: number; resumeToken: string},
++    _signal: AbortSignal,
++  ): Promise<void> {
++    this.assertReady();
++    this.assertCapability('resume');
++    await this.send(requestId => ({
++      version: 1,
++      type: 'task.resume',
++      requestId,
++      taskId: input.taskId,
++      sessionRevision: input.sessionRevision,
++      resumeToken: input.resumeToken,
++    }));
++  }
++
++  async steer(
++    input: {taskId: string; sessionRevision: number; instruction: string},
++    _signal: AbortSignal,
++  ): Promise<void> {
++    this.assertReady();
++    this.assertCapability('steer');
++    await this.send(requestId => ({
++      version: 1,
++      type: 'task.steer',
++      requestId,
++      taskId: input.taskId,
++      sessionRevision: input.sessionRevision,
++      instruction: input.instruction,
++    }));
++  }
++
++  async requestPreferences(
++    command: VisualAgentPreferenceCommand,
++    signal: AbortSignal,
++  ): Promise<unknown> {
++    this.assertReady();
++    this.assertCapability('preferences');
++    const session = this.session;
++    if (!session) {
++      throw new CapabilityError('visual_agent_disconnected');
++    }
++    const requestId = this.ids.next();
++    return new Promise<unknown>((resolve, reject) => {
++      if (signal.aborted) {
++        reject(new CapabilityError('visual_agent_disconnected'));
++        return;
++      }
++      this.pendingPreferences.set(requestId, {resolve, reject});
++      session
++        .send({version: 1, type: 'preference.request', requestId, command})
++        .catch(() => {
++          this.pendingPreferences.delete(requestId);
++          reject(new CapabilityError('visual_agent_disconnected'));
++        });
++    });
++  }
++
++  subscribe(listener: (event: VisualAgentTaskEvent) => void): () => void {
++    this.listeners.add(listener);
++    return () => {
++      this.listeners.delete(listener);
++    };
++  }
++
++  private assertReady(): void {
++    if (this.state.status !== 'ready' || !this.session) {
++      throw new CapabilityError('visual_agent_not_ready');
++    }
++  }
++
++  private assertCapability(key: keyof VisualAgentCapabilitySet): void {
++    if (!this.negotiated || this.negotiated[key] !== true) {
++      throw new CapabilityError('visual_agent_capability_unsupported');
++    }
++  }
++
++  private async send(
++    build: (requestId: string) => VisualAgentProtocolV1,
++  ): Promise<void> {
++    const session = this.session;
++    if (!session) {
++      throw new CapabilityError('visual_agent_disconnected');
++    }
++    try {
++      await session.send(build(this.ids.next()));
++    } catch {
++      throw new CapabilityError('visual_agent_disconnected');
++    }
++  }
++
++  private handleRaw(raw: string): void {
++    let message: VisualAgentProtocolV1;
++    try {
++      message = decodeVisualAgentMessage(raw);
++    } catch {
++      // A malformed frame never escapes the listener or mutates task state.
++      return;
++    }
++    this.route(message);
++  }
++
++  private route(message: VisualAgentProtocolV1): void {
++    switch (message.type) {
++      case 'session.ready': {
++        this.negotiated = message.negotiatedCapabilities;
++        this.state = {
++          status: 'ready',
++          negotiatedCapabilities: message.negotiatedCapabilities,
++        };
++        this.pendingConnect?.resolve(message.negotiatedCapabilities);
++        this.pendingConnect = null;
++        return;
++      }
++      case 'session.failed': {
++        this.state = {status: 'failed', errorCode: message.errorCode};
++        this.pendingConnect?.reject(new CapabilityError(message.errorCode));
++        this.pendingConnect = null;
++        return;
++      }
++      case 'task.status':
++      case 'task.event':
++      case 'task.completed':
++      case 'task.failed':
++      case 'task.cancelled':
++        this.handleTaskEvent(message.event);
++        return;
++      case 'preference.result': {
++        const pending = this.pendingPreferences.get(message.requestId);
++        if (pending) {
++          this.pendingPreferences.delete(message.requestId);
++          pending.resolve(message.result);
++        }
++        return;
++      }
++      default:
++        return;
++    }
++  }
++
++  private handleTaskEvent(event: VisualAgentTaskEvent): void {
++    const tracker = this.trackers.get(event.taskId);
++    if (tracker) {
++      try {
++        tracker.accept(event);
++      } catch {
++        // A correlation/ordering violation is dropped rather than forwarded.
++        return;
++      }
++    }
++    for (const listener of this.listeners) {
++      listener(event);
++    }
++    if (event.type === 'terminal') {
++      this.trackers.delete(event.taskId);
++      const pendingCancel = this.pendingCancels.get(event.taskId);
++      if (pendingCancel) {
++        this.pendingCancels.delete(event.taskId);
++        pendingCancel.cancelTimer();
++        pendingCancel.resolve();
++      }
++    }
++  }
++
++  private rejectAllPending(error: CapabilityError): void {
++    if (this.pendingConnect) {
++      this.pendingConnect.reject(error);
++      this.pendingConnect = null;
++    }
++    for (const pending of this.pendingPreferences.values()) {
++      pending.reject(error);
++    }
++    this.pendingPreferences.clear();
++    for (const pending of this.pendingCancels.values()) {
++      pending.cancelTimer();
++      pending.reject(error);
++    }
++    this.pendingCancels.clear();
++  }
++}
+diff --git a/AwesomeProject/src/features/visualAgent/data/VisualAgentPreferenceRepository.ts b/AwesomeProject/src/features/visualAgent/data/VisualAgentPreferenceRepository.ts
+new file mode 100644
+index 0000000..2e63ab2
+--- /dev/null
++++ b/AwesomeProject/src/features/visualAgent/data/VisualAgentPreferenceRepository.ts
+@@ -0,0 +1,98 @@
++// Remote Visual Agent preference adapter (capability-domain Task 12). It is a
++// `PreferenceRepository` whose only backend is the negotiated Connector Bridge
++// preference command carried by the mobile execution port. It fails closed with
++// `preference_remote_unavailable` whenever preferences were not negotiated or a
++// remote command fails or returns an unexpected shape, and it never caches
++// remote data on the device.
++import {CapabilityError} from '@core/engine/capabilities/shared/CapabilityError';
++import type {IdGenerator} from '@core/engine/capabilities/shared/CapabilityPorts';
++import type {
++  ConfirmedPreferenceDraft,
++  Preference,
++} from '@core/engine/preference/domain/Preference';
++import type {PreferenceRepository} from '@core/engine/preference/ports/PreferenceRepository';
++import type {
++  VisualAgentExecutionPort,
++  VisualAgentPreferenceCommand,
++} from '@core/engine/operateRuntime/visualAgent/VisualAgentContracts';
++
++function unavailable(): never {
++  throw new CapabilityError('preference_remote_unavailable');
++}
++
++function isObject(value: unknown): value is Record<string, unknown> {
++  return typeof value === 'object' && value !== null && !Array.isArray(value);
++}
++
++function projectRecord(value: unknown): Preference {
++  if (!isObject(value)) {
++    unavailable();
++  }
++  const {id, kind, title, summary, createdAtEpochMs, updatedAtEpochMs} = value;
++  if (
++    typeof id !== 'string' ||
++    id.length === 0 ||
++    (kind !== 'name' && kind !== 'preference') ||
++    typeof title !== 'string' ||
++    typeof summary !== 'string' ||
++    typeof createdAtEpochMs !== 'number' ||
++    typeof updatedAtEpochMs !== 'number'
++  ) {
++    unavailable();
++  }
++  return {id, kind, title, summary, createdAtEpochMs, updatedAtEpochMs};
++}
++
++export class VisualAgentPreferenceRepository implements PreferenceRepository {
++  constructor(
++    private readonly execution: VisualAgentExecutionPort,
++    private readonly ids: IdGenerator,
++  ) {}
++
++  async list(): Promise<readonly Preference[]> {
++    const result = await this.send({type: 'list'});
++    if (!isObject(result) || result.type !== 'list' || !Array.isArray(result.preferences)) {
++      unavailable();
++    }
++    return result.preferences.map(projectRecord);
++  }
++
++  async upsertConfirmed(draft: ConfirmedPreferenceDraft): Promise<Preference> {
++    const result = await this.send({
++      type: 'upsert',
++      preference: {
++        id: this.ids.next(),
++        kind: draft.kind,
++        title: draft.title,
++        summary: draft.summary,
++      },
++    });
++    if (!isObject(result) || result.type !== 'upsert') {
++      unavailable();
++    }
++    return projectRecord(result.preference);
++  }
++
++  async delete(id: string): Promise<void> {
++    await this.send({type: 'delete', preferenceId: id});
++  }
++
++  async forgetAll(): Promise<void> {
++    await this.send({type: 'clear'});
++  }
++
++  private async send(command: VisualAgentPreferenceCommand): Promise<unknown> {
++    const state = this.execution.getConnectionState();
++    if (state.status !== 'ready' || state.negotiatedCapabilities.preferences !== true) {
++      unavailable();
++    }
++    try {
++      return await this.execution.requestPreferences(
++        command,
++        new AbortController().signal,
++      );
++    } catch {
++      return unavailable();
++    }
++  }
++}
+diff --git a/AwesomeProject/src/features/visualAgent/index.ts b/AwesomeProject/src/features/visualAgent/index.ts
+new file mode 100644
+index 0000000..d553f10
+--- /dev/null
++++ b/AwesomeProject/src/features/visualAgent/index.ts
+@@ -0,0 +1,21 @@
++// Public Visual Agent barrel (capability-domain Task 12). It exposes the
++// UI-narrow Facade and its ViewState, and re-exports — type-only — the nine
++// frozen primary Visual Agent contracts owned by Runtime Wave 1 Task 4B plus the
++// supporting manifest and run-status types. It exports no implementation class,
++// mutable register, transport, binding, or conformance fixture, and there is no
++// `features/openclaw` barrel.
++export {VisualAgentFacade} from './application/VisualAgentFacade';
++export type {VisualAgentViewState} from './application/VisualAgentViewState';
++export type {
++  VisualAgentToolId,
++  VisualAgentProfileV1,
++  VisualAgentCapabilitySet,
++  VisualAgentToolManifestV1,
++  VisualAgentTaskEnvelopeV1,
++  VisualAgentConnectionState,
++  VisualAgentRunStatus,
++  VisualAgentProtocolV1,
++  VisualAgentToolAdapter,
++  VisualAgentExecutionPort,
++  VisualAgentToolRegistry,
++} from '@core/engine/operateRuntime/visualAgent/VisualAgentContracts';

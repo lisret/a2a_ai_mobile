@@ -1,0 +1,3725 @@
+# Review package: 4a703e3bb4baa39db859fed5467c4924702acec8..5896550
+
+## Commits
+5896550 feat: port verified AgentRuntime decision core
+
+## Files changed
+ .../adapters/TaskActionAdapter.test.ts             | 150 +++++++
+ .../domain/AgentConfigMigration.test.ts            |  99 +++++
+ .../agentRuntime/domain/AgentConfigState.test.ts   |  61 +++
+ .../domain/AgentConfigValidation.test.ts           | 198 ++++++++++
+ .../pipelines/DirectAgentPipeline.test.ts          |  33 ++
+ .../agentRuntime/pipelines/PlannerPrivacy.test.ts  | 199 ++++++++++
+ .../pipelines/ProviderAdapters.test.ts             | 437 +++++++++++++++++++++
+ .../pipelines/SplitAgentPipeline.test.ts           | 172 ++++++++
+ .../policy/ActionDecisionValidator.test.ts         | 233 +++++++++++
+ .../agentRuntime/runtime/AgentRuntime.test.ts      | 341 ++++++++++++++++
+ .../agentRuntime/runtime/RuntimePrivacy.test.ts    | 332 ++++++++++++++++
+ .../agentRuntime/adapters/TaskActionAdapter.ts     | 125 ++++++
+ .../src/core/engine/agentRuntime/index.ts          |   2 +
+ .../agentRuntime/pipelines/DirectAgentPipeline.ts  |  14 +
+ .../agentRuntime/pipelines/SplitAgentPipeline.ts   |  32 ++
+ .../agentRuntime/policy/ActionDecisionValidator.ts | 245 ++++++++++++
+ .../engine/agentRuntime/policy/ActionPolicy.ts     |  37 ++
+ .../providers/CloudPerceptionProvider.ts           |  57 +++
+ .../providers/OpenAICompatibleDirectProvider.ts    |  85 ++++
+ .../providers/OpenAICompatiblePlannerProvider.ts   |  57 +++
+ .../providers/OpenAICompatibleTransport.ts         | 232 +++++++++++
+ .../engine/agentRuntime/runtime/AgentRuntime.ts    | 283 +++++++++++++
+ .../agentRuntime/runtime/AgentRuntimeFactory.ts    | 131 ++++++
+ 23 files changed, 3555 insertions(+)
+
+## Diff
+diff --git a/AwesomeProject/src/__tests__/core/engine/agentRuntime/adapters/TaskActionAdapter.test.ts b/AwesomeProject/src/__tests__/core/engine/agentRuntime/adapters/TaskActionAdapter.test.ts
+new file mode 100644
+index 0000000..cb8a52c
+--- /dev/null
++++ b/AwesomeProject/src/__tests__/core/engine/agentRuntime/adapters/TaskActionAdapter.test.ts
+@@ -0,0 +1,150 @@
++import type {
++  ActionDecision,
++  Observation,
++} from '../../../../../core/engine/agentRuntime/domain/AgentTypes';
++import {validateActionDecision} from '../../../../../core/engine/agentRuntime/policy/ActionDecisionValidator';
++import {
++  toPixel,
++  toTaskAction,
++} from '../../../../../core/engine/agentRuntime/adapters/TaskActionAdapter';
++
++const viewport = {width: 1080, height: 2400};
++
++const observation: Observation = {
++  schemaVersion: 1,
++  stateSummary: 'form',
++  visibleText: [],
++  elements: [
++    {
++      id: 'field',
++      role: 'textbox',
++      bbox: [100, 200, 200, 100],
++      enabled: true,
++      confidence: 0.99,
++    },
++  ],
++  uncertainties: [],
++};
++
++const decision = (
++  action: ActionDecision['action'],
++  patch: Partial<ActionDecision> = {},
++): ActionDecision =>
++  ({
++    schemaVersion: 1,
++    subtaskId: 'step',
++    action,
++    expectedState: `${action} done`,
++    risk: 'low',
++    ...patch,
++  } as ActionDecision);
++
++const adapt = (input: ActionDecision) =>
++  toTaskAction(
++    validateActionDecision(input, observation),
++    observation,
++    viewport,
++  );
++
++describe('toTaskAction', () => {
++  it('converts normalized coordinate boundaries with the approved formula', () => {
++    expect(toPixel(0, 1080)).toBe(0);
++    expect(toPixel(333, 1080)).toBe(360);
++    expect(toPixel(1000, 1080)).toBe(1080);
++  });
++
++  it('maps a targetId tap to the target bbox center in screen pixels', () => {
++    expect(adapt(decision('tap', {targetId: 'field'}))).toEqual({
++      type: 'click',
++      x: 216,
++      y: 600,
++      requiresConfirmation: false,
++    });
++  });
++
++  it('uses explicit coordinates only when no stable target is available', () => {
++    expect(
++      adapt(
++        decision('tap', {
++          targetId: undefined,
++          coordinates: [250, 750],
++        }),
++      ),
++    ).toEqual({
++      type: 'click',
++      x: 270,
++      y: 1800,
++      requiresConfirmation: false,
++    });
++  });
++
++  it('maps input text and resolves its target center', () => {
++    expect(
++      adapt(decision('input', {targetId: 'field', text: 'hello'})),
++    ).toEqual({
++      type: 'input',
++      x: 216,
++      y: 600,
++      text: 'hello',
++      requiresConfirmation: false,
++    });
++  });
++
++  it('maps swipe target center to start and coordinates to end pixels', () => {
++    expect(
++      adapt(
++        decision('swipe', {
++          targetId: 'field',
++          coordinates: [900, 100],
++        }),
++      ),
++    ).toEqual({
++      type: 'swipe',
++      startX: 216,
++      startY: 600,
++      endX: 972,
++      endY: 240,
++      requiresConfirmation: false,
++    });
++  });
++
++  it.each([
++    ['back', {type: 'back', requiresConfirmation: false}],
++    ['wait', {type: 'wait', duration: 1000, requiresConfirmation: false}],
++    [
++      'finish',
++      {
++        type: 'complete',
++        message: 'finish done',
++        requiresConfirmation: false,
++      },
++    ],
++    [
++      'ask_user',
++      {
++        type: 'take_over',
++        takeOverMessage: 'ask_user done',
++        requiresConfirmation: false,
++      },
++    ],
++  ] as const)('maps %s to the legacy action', (action, expected) => {
++    expect(adapt(decision(action))).toEqual(expected);
++  });
++
++  it('carries confirmation requirements into the legacy action', () => {
++    expect(
++      adapt(
++        decision('tap', {
++          targetId: 'field',
++          expectedState: 'payment submitted',
++        }),
++      ),
++    ).toEqual({
++      type: 'click',
++      x: 216,
++      y: 600,
++      requiresConfirmation: true,
++      confirmationMessage: 'Confirm before payment submitted',
++    });
++  });
++});
+diff --git a/AwesomeProject/src/__tests__/core/engine/agentRuntime/domain/AgentConfigMigration.test.ts b/AwesomeProject/src/__tests__/core/engine/agentRuntime/domain/AgentConfigMigration.test.ts
+new file mode 100644
+index 0000000..79c1650
+--- /dev/null
++++ b/AwesomeProject/src/__tests__/core/engine/agentRuntime/domain/AgentConfigMigration.test.ts
+@@ -0,0 +1,99 @@
++import {
++  AgentConfigV2,
++  ModelConnection,
++} from '../../../../../core/engine/agentRuntime/domain/AgentTypes';
++import {migrateLegacyAgentConfig} from '../../../../../core/engine/agentRuntime/domain/AgentConfigMigration';
++import {validateAgentConfig} from '../../../../../core/engine/agentRuntime/domain/AgentConfigValidation';
++
++const legacy = {
++  id: 'primary',
++  provider: 'openai',
++  name: 'Primary',
++  apiUrl: ' https://api.example.com ',
++  apiKey: 'sk-primary',
++  modelName: 'gpt-test',
++};
++
++describe('migrateLegacyAgentConfig', () => {
++  it.each(['@autoglm:selected_model', '@autoglm:selectedModel'])(
++    'migrates selected id from %s',
++    key => {
++      const output = migrateLegacyAgentConfig({
++        models: [legacy],
++        selectedValues: {[key]: legacy.id},
++      });
++      expect(output.config.activeMode).toBe('cloud_direct');
++      expect(output.config.modeDrafts.cloudDirect.modelConnectionId).toBe(
++        legacy.id,
++      );
++      expect(output.secrets).toEqual([
++        {secretRef: `model:${legacy.id}`, plaintext: legacy.apiKey},
++      ]);
++      expect(output.connections[0]).not.toHaveProperty('apiKey');
++    },
++  );
++
++  it('uses the first model only when neither selected value resolves', () => {
++    const output = migrateLegacyAgentConfig({
++      models: [legacy, {...legacy, id: 'secondary'}],
++      selectedValues: {
++        '@autoglm:selected_model': 'missing',
++        '@autoglm:selectedModel': null,
++      },
++    });
++    expect(output.config.modeDrafts.cloudDirect.modelConnectionId).toBe(
++      'primary',
++    );
++  });
++
++  it('produces a direct configuration that validates with migrated capabilities', () => {
++    const output = migrateLegacyAgentConfig({
++      models: [legacy],
++      selectedValues: {},
++    });
++
++    expect(validateAgentConfig(output.config, output.connections)).toEqual({
++      ok: true,
++    });
++  });
++
++  it('returns existing V2 data unchanged and does not restage plaintext secrets', () => {
++    const config: AgentConfigV2 = {
++      version: 2,
++      activeMode: 'cloud_direct',
++      modeDrafts: {
++        cloudDirect: {modelConnectionId: 'existing'},
++        cloudSplit: {},
++        localVisionCloudPlanner: {localModelId: 'minicpm-v-4.6-q4'},
++      },
++      maxSteps: 99,
++    };
++    const connections: ModelConnection[] = [
++      {
++        id: 'existing',
++        providerId: 'custom',
++        baseUrl: 'https://existing.example.com',
++        modelName: 'existing-model',
++        secretRef: 'model:existing',
++        capabilities: {
++          vision: true,
++          jsonOutput: true,
++          toolCalls: false,
++          thinking: false,
++        },
++      },
++    ];
++
++    expect(
++      migrateLegacyAgentConfig({
++        models: [legacy],
++        selectedValues: {},
++        existingV2: {config, connections},
++      }),
++    ).toEqual({
++      config,
++      connections,
++      secrets: [],
++    });
++  });
++});
+diff --git a/AwesomeProject/src/__tests__/core/engine/agentRuntime/domain/AgentConfigState.test.ts b/AwesomeProject/src/__tests__/core/engine/agentRuntime/domain/AgentConfigState.test.ts
+new file mode 100644
+index 0000000..6a79d45
+--- /dev/null
++++ b/AwesomeProject/src/__tests__/core/engine/agentRuntime/domain/AgentConfigState.test.ts
+@@ -0,0 +1,61 @@
++import {
++  AgentConfigV2,
++  ModelConnection,
++} from '../../../../../core/engine/agentRuntime/domain/AgentTypes';
++import {AgentConfigState} from '../../../../../core/engine/agentRuntime/domain/AgentConfigState';
++
++const config = (activeMode: AgentConfigV2['activeMode']): AgentConfigV2 => ({
++  version: 2,
++  activeMode,
++  modeDrafts: {
++    cloudDirect: {modelConnectionId: 'direct'},
++    cloudSplit: {},
++    localVisionCloudPlanner: {localModelId: 'minicpm-v-4.6-q4'},
++  },
++  maxSteps: 99,
++});
++
++const connection: ModelConnection = {
++  id: 'direct',
++  providerId: 'openai',
++  baseUrl: 'https://api.example.com',
++  modelName: 'original-model',
++  secretRef: 'model:direct',
++  capabilities: {
++    vision: true,
++    jsonOutput: true,
++    toolCalls: true,
++    thinking: false,
++  },
++};
++
++describe('AgentConfigState', () => {
++  it('creates immutable task snapshots detached from later configuration changes', () => {
++    const state = new AgentConfigState(config('cloud_direct'), [connection]);
++    const snapshot = state.createTaskSnapshot();
++
++    state.replaceConfig(config('cloud_split'));
++    expect(snapshot.config.activeMode).toBe('cloud_direct');
++    expect(Object.isFrozen(snapshot.connections)).toBe(true);
++    expect(snapshot.connections.direct.modelName).toBe('original-model');
++    expect(Object.isFrozen(snapshot.connections.direct.capabilities)).toBe(
++      true,
++    );
++  });
++
++  it('does not retain mutable caller-owned objects', () => {
++    const mutableConnection = {
++      ...connection,
++      capabilities: {...connection.capabilities},
++    };
++    const state = new AgentConfigState(config('cloud_direct'), [
++      mutableConnection,
++    ]);
++    mutableConnection.modelName = 'mutated-after-construction';
++    mutableConnection.capabilities.vision = false;
++
++    const snapshot = state.createTaskSnapshot();
++    expect(snapshot.connections.direct.modelName).toBe('original-model');
++    expect(snapshot.connections.direct.capabilities.vision).toBe(true);
++  });
++});
+diff --git a/AwesomeProject/src/__tests__/core/engine/agentRuntime/domain/AgentConfigValidation.test.ts b/AwesomeProject/src/__tests__/core/engine/agentRuntime/domain/AgentConfigValidation.test.ts
+new file mode 100644
+index 0000000..dc2a5a9
+--- /dev/null
++++ b/AwesomeProject/src/__tests__/core/engine/agentRuntime/domain/AgentConfigValidation.test.ts
+@@ -0,0 +1,198 @@
++import {
++  ActionDecision,
++  AgentConfigV2,
++  AgentMode,
++  ModelConnection,
++  Observation,
++} from '../../../../../core/engine/agentRuntime/domain/AgentTypes';
++import {validateAgentConfig} from '../../../../../core/engine/agentRuntime/domain/AgentConfigValidation';
++
++const makeConnections = (): ModelConnection[] => [
++  {
++    id: 'direct',
++    providerId: 'openai',
++    baseUrl: 'https://api.example.com',
++    modelName: 'direct-model',
++    secretRef: 'model:direct',
++    capabilities: {
++      vision: true,
++      jsonOutput: true,
++      toolCalls: true,
++      thinking: false,
++    },
++  },
++  {
++    id: 'vision',
++    providerId: 'openai',
++    baseUrl: 'https://api.example.com',
++    modelName: 'vision-model',
++    secretRef: 'model:vision',
++    capabilities: {
++      vision: true,
++      jsonOutput: true,
++      toolCalls: false,
++      thinking: false,
++    },
++  },
++  {
++    id: 'planner',
++    providerId: 'openai',
++    baseUrl: 'https://api.example.com',
++    modelName: 'planner-model',
++    secretRef: 'model:planner',
++    capabilities: {
++      vision: false,
++      jsonOutput: true,
++      toolCalls: true,
++      thinking: false,
++    },
++  },
++];
++
++const makeConfig = (mode: AgentMode, draft: object): AgentConfigV2 => {
++  const modeDrafts: AgentConfigV2['modeDrafts'] = {
++    cloudDirect: {},
++    cloudSplit: {},
++    localVisionCloudPlanner: {localModelId: 'minicpm-v-4.6-q4'},
++  };
++  if (mode === 'cloud_direct') {
++    modeDrafts.cloudDirect =
++      draft as AgentConfigV2['modeDrafts']['cloudDirect'];
++  } else if (mode === 'cloud_split') {
++    modeDrafts.cloudSplit = draft as AgentConfigV2['modeDrafts']['cloudSplit'];
++  } else {
++    modeDrafts.localVisionCloudPlanner =
++      draft as AgentConfigV2['modeDrafts']['localVisionCloudPlanner'];
++  }
++  return {version: 2, activeMode: mode, modeDrafts, maxSteps: 99};
++};
++
++const makeLocalConfig = (): AgentConfigV2 =>
++  makeConfig('local_vision_cloud_planner', {
++    localModelId: 'minicpm-v-4.6-q4',
++    plannerConnectionId: 'planner',
++  });
++
++const observationFixture: Observation = {
++  schemaVersion: 1,
++  stateSummary: 'login form visible',
++  visibleText: ['Sign in', 'Email'],
++  elements: [
++    {
++      id: 'sign-in',
++      role: 'button',
++      text: 'Sign in',
++      bbox: [0, 0, 1000, 80],
++      enabled: true,
++      confidence: 0.99,
++    },
++  ],
++  uncertainties: [],
++};
++
++const actionDecisionFixture: ActionDecision = {
++  schemaVersion: 1,
++  subtaskId: 'sign-in',
++  action: 'tap',
++  targetId: 'sign-in',
++  coordinates: [500, 40],
++  expectedState: 'credentials form focused',
++  risk: 'low',
++};
++
++describe('validateAgentConfig', () => {
++  it('exposes schema-versioned observation and action DTO fixtures', () => {
++    expect(observationFixture.visibleText).toContain('Sign in');
++    expect(actionDecisionFixture.action).toBe('tap');
++  });
++
++  it.each([
++    ['cloud_direct', 1, {modelConnectionId: 'direct'}],
++    [
++      'cloud_split',
++      2,
++      {visionConnectionId: 'vision', plannerConnectionId: 'planner'},
++    ],
++    [
++      'local_vision_cloud_planner',
++      1,
++      {localModelId: 'minicpm-v-4.6-q4', plannerConnectionId: 'planner'},
++    ],
++  ] as const)(
++    'validates %s with %i credential reference(s)',
++    (mode, _count, draft) => {
++      const result = validateAgentConfig(
++        makeConfig(mode, draft),
++        makeConnections(),
++        {state: 'ready', reasons: [], checkedAtEpochMs: 1},
++      );
++      expect(result).toEqual({ok: true});
++    },
++  );
++
++  it('rejects local mode until eligibility is ready', () => {
++    const result = validateAgentConfig(makeLocalConfig(), makeConnections(), {
++      state: 'needs_test',
++      reasons: ['self_test_required'],
++      checkedAtEpochMs: 1,
++    });
++    expect(result).toEqual({ok: false, errors: ['local_model_not_ready']});
++  });
++
++  it('rejects active connections with missing secrets or capabilities', () => {
++    const connections = makeConnections().map(connection =>
++      connection.id === 'direct'
++        ? {
++            ...connection,
++            secretRef: '',
++            capabilities: {...connection.capabilities, vision: false},
++          }
++        : connection,
++    );
++    expect(
++      validateAgentConfig(
++        makeConfig('cloud_direct', {modelConnectionId: 'direct'}),
++        connections,
++      ),
++    ).toEqual({
++      ok: false,
++      errors: ['connection_secret_missing', 'connection_vision_unsupported'],
++    });
++  });
++
++  it('maps a missing JSON-output capability to its explicit error', () => {
++    const connections = makeConnections().map(connection =>
++      connection.id === 'direct'
++        ? {
++            ...connection,
++            capabilities: {...connection.capabilities, jsonOutput: false},
++          }
++        : connection,
++    );
++
++    expect(
++      validateAgentConfig(
++        makeConfig('cloud_direct', {modelConnectionId: 'direct'}),
++        connections,
++      ),
++    ).toEqual({
++      ok: false,
++      errors: ['connection_json_output_unsupported'],
++    });
++  });
++
++  it('rejects an invalid max-step count', () => {
++    expect(
++      validateAgentConfig(
++        {
++          ...makeConfig('cloud_direct', {modelConnectionId: 'direct'}),
++          maxSteps: 0,
++        },
++        makeConnections(),
++      ),
++    ).toEqual({
++      ok: false,
++      errors: ['max_steps_invalid'],
++    });
++  });
++});
+diff --git a/AwesomeProject/src/__tests__/core/engine/agentRuntime/pipelines/DirectAgentPipeline.test.ts b/AwesomeProject/src/__tests__/core/engine/agentRuntime/pipelines/DirectAgentPipeline.test.ts
+new file mode 100644
+index 0000000..e7bcd89
+--- /dev/null
++++ b/AwesomeProject/src/__tests__/core/engine/agentRuntime/pipelines/DirectAgentPipeline.test.ts
+@@ -0,0 +1,33 @@
++import {DirectAgentPipeline} from '../../../../../core/engine/agentRuntime/pipelines/DirectAgentPipeline';
++import type {
++  DirectActionDecision,
++  DirectAgentProvider,
++  StepInput,
++} from '../../../../../core/engine/agentRuntime/contracts/AgentContracts';
++
++describe('DirectAgentPipeline', () => {
++  it('passes the screenshot only to the direct provider and returns its decision', async () => {
++    const decision: DirectActionDecision = {
++      schemaVersion: 1,
++      subtaskId: 'open-settings',
++      action: 'tap',
++      coordinates: [500, 500],
++      expectedState: 'Settings is visible',
++      risk: 'low',
++    };
++    const provider: DirectAgentProvider = {
++      decide: jest.fn().mockResolvedValue(decision),
++    };
++    const input: StepInput = {
++      screenshotUri: 'data:image/png;base64,x',
++      instruction: 'Open settings',
++      history: [],
++      signal: new AbortController().signal,
++    };
++
++    const result = await new DirectAgentPipeline(provider).decide(input);
++
++    expect(provider.decide).toHaveBeenCalledWith(input);
++    expect(result).toEqual({decision});
++  });
++});
+diff --git a/AwesomeProject/src/__tests__/core/engine/agentRuntime/pipelines/PlannerPrivacy.test.ts b/AwesomeProject/src/__tests__/core/engine/agentRuntime/pipelines/PlannerPrivacy.test.ts
+new file mode 100644
+index 0000000..dd77efd
+--- /dev/null
++++ b/AwesomeProject/src/__tests__/core/engine/agentRuntime/pipelines/PlannerPrivacy.test.ts
+@@ -0,0 +1,199 @@
++import {OpenAICompatiblePlannerProvider} from '../../../../../core/engine/agentRuntime/providers/OpenAICompatiblePlannerProvider';
++import type {OpenAICompatibleTransport} from '../../../../../core/engine/agentRuntime/providers/OpenAICompatibleTransport';
++import type {
++  CredentialResolver,
++  Observation,
++  RuntimeHistoryEntry,
++} from '../../../../../core/engine/agentRuntime/contracts/AgentContracts';
++import type {ModelConnection} from '../../../../../core/engine/agentRuntime/domain';
++
++const connection: ModelConnection = {
++  id: 'planner',
++  providerId: 'deepseek',
++  baseUrl: 'https://api.deepseek.com/v1',
++  modelName: 'deepseek-chat',
++  secretRef: 'credential://planner',
++  capabilities: {
++    vision: false,
++    jsonOutput: true,
++    toolCalls: false,
++    thinking: false,
++  },
++};
++const observation: Observation = {
++  schemaVersion: 1,
++  stateSummary: 'Home screen',
++  visibleText: ['Settings'],
++  elements: [
++    {
++      id: 'settings',
++      role: 'button',
++      text: 'Settings',
++      bbox: [800, 50, 100, 100],
++      enabled: true,
++      confidence: 0.98,
++    },
++  ],
++  uncertainties: [],
++};
++const response = (subtaskId: string) => ({
++  choices: [
++    {
++      message: {
++        content: JSON.stringify({
++          schemaVersion: 1,
++          subtaskId,
++          action: 'wait',
++          expectedState: subtaskId,
++          risk: 'low',
++        }),
++      },
++    },
++  ],
++});
++
++describe('OpenAICompatiblePlannerProvider privacy', () => {
++  it('sends only observation, instruction, and history to the planner', async () => {
++    const screenshotUri = 'data:image/png;base64,private-screen';
++    const taintedObservation = {
++      ...observation,
++      screenshotUri,
++      image_url: {url: screenshotUri},
++    } as unknown as Observation;
++    const history = [
++      {
++        step: 1,
++        outcome: 'Home screen unchanged',
++        screenshotUri,
++        observation: {
++          ...observation,
++          image_url: {url: screenshotUri},
++        },
++        decision: {
++          schemaVersion: 1,
++          subtaskId: 'previous',
++          action: 'wait',
++          expectedState: 'unchanged',
++          risk: 'low',
++          screenshotUri,
++        },
++      },
++    ] as unknown as RuntimeHistoryEntry[];
++    const transport: OpenAICompatibleTransport = {
++      post: jest.fn().mockResolvedValue(response('tap-settings')),
++    };
++    const resolver: CredentialResolver = {
++      resolve: jest.fn().mockResolvedValue('secret-value'),
++    };
++    const provider = new OpenAICompatiblePlannerProvider(
++      connection,
++      resolver,
++      transport,
++    );
++
++    await provider.plan({
++      observation: taintedObservation,
++      instruction: 'Open settings',
++      history,
++      signal: new AbortController().signal,
++    });
++
++    const request = (transport.post as jest.Mock).mock.calls[0][0];
++    const serialized = JSON.stringify(request.body);
++    expect(serialized).not.toContain('image_url');
++    expect(serialized).not.toContain('screenshotUri');
++    expect(serialized).not.toContain(screenshotUri);
++    expect(serialized).toContain('Open settings');
++    expect(serialized).toContain('Home screen');
++    expect(serialized).toContain('Home screen unchanged');
++  });
++
++  it('fails closed before transport when whitelisted planner data contains a data URI', async () => {
++    const transport: OpenAICompatibleTransport = {post: jest.fn()};
++    const provider = new OpenAICompatiblePlannerProvider(
++      connection,
++      {resolve: jest.fn().mockResolvedValue('secret-value')},
++      transport,
++    );
++
++    await expect(
++      provider.plan({
++        observation,
++        instruction: 'Open settings',
++        history: [
++          {
++            step: 1,
++            outcome: 'data:image/png;base64,private-screen',
++          },
++        ],
++        signal: new AbortController().signal,
++      }),
++    ).rejects.toMatchObject({
++      code: 'invalid_structured_response',
++      message: 'Provider returned invalid structured output',
++    });
++    expect(transport.post).not.toHaveBeenCalled();
++  });
++
++  it('fails closed when nested history observation schema is invalid', async () => {
++    const transport: OpenAICompatibleTransport = {post: jest.fn()};
++    const provider = new OpenAICompatiblePlannerProvider(
++      connection,
++      {resolve: jest.fn().mockResolvedValue('secret-value')},
++      transport,
++    );
++    const history = [
++      {
++        step: 1,
++        observation: {...observation, stateSummary: 7},
++      },
++    ] as unknown as RuntimeHistoryEntry[];
++
++    await expect(
++      provider.plan({
++        observation,
++        instruction: 'Open settings',
++        history,
++        signal: new AbortController().signal,
++      }),
++    ).rejects.toMatchObject({code: 'invalid_structured_response'});
++    expect(transport.post).not.toHaveBeenCalled();
++  });
++
++  it('resolves the credential for every request instead of caching plaintext', async () => {
++    const transport: OpenAICompatibleTransport = {
++      post: jest
++        .fn()
++        .mockResolvedValueOnce(response('one'))
++        .mockResolvedValueOnce(response('two')),
++    };
++    const resolver: CredentialResolver = {
++      resolve: jest
++        .fn()
++        .mockResolvedValueOnce('rotated-secret-1')
++        .mockResolvedValueOnce('rotated-secret-2'),
++    };
++    const provider = new OpenAICompatiblePlannerProvider(
++      connection,
++      resolver,
++      transport,
++    );
++    const input = {
++      observation,
++      instruction: 'Wait',
++      history: [],
++      signal: new AbortController().signal,
++    };
++
++    await provider.plan(input);
++    await provider.plan(input);
++
++    expect(resolver.resolve).toHaveBeenCalledTimes(2);
++    expect((transport.post as jest.Mock).mock.calls[0][0].apiKey).toBe(
++      'rotated-secret-1',
++    );
++    expect((transport.post as jest.Mock).mock.calls[1][0].apiKey).toBe(
++      'rotated-secret-2',
++    );
++  });
++});
+diff --git a/AwesomeProject/src/__tests__/core/engine/agentRuntime/pipelines/ProviderAdapters.test.ts b/AwesomeProject/src/__tests__/core/engine/agentRuntime/pipelines/ProviderAdapters.test.ts
+new file mode 100644
+index 0000000..9d6f7bc
+--- /dev/null
++++ b/AwesomeProject/src/__tests__/core/engine/agentRuntime/pipelines/ProviderAdapters.test.ts
+@@ -0,0 +1,437 @@
++import type {CredentialResolver} from '../../../../../core/engine/agentRuntime/contracts/AgentContracts';
++import type {ModelConnection} from '../../../../../core/engine/agentRuntime/domain';
++import {CloudPerceptionProvider} from '../../../../../core/engine/agentRuntime/providers/CloudPerceptionProvider';
++import {OpenAICompatibleDirectProvider} from '../../../../../core/engine/agentRuntime/providers/OpenAICompatibleDirectProvider';
++import {
++  FetchOpenAICompatibleTransport,
++  type OpenAICompatibleTransport,
++} from '../../../../../core/engine/agentRuntime/providers/OpenAICompatibleTransport';
++
++const visionConnection: ModelConnection = {
++  id: 'vision',
++  providerId: 'openai-compatible',
++  baseUrl: 'https://models.example/v1/',
++  modelName: 'vision-model',
++  secretRef: 'credential://vision',
++  capabilities: {
++    vision: true,
++    jsonOutput: true,
++    toolCalls: false,
++    thinking: false,
++  },
++};
++const resolver = (
++  secret: string | null = 'ephemeral-key',
++): CredentialResolver => ({resolve: jest.fn().mockResolvedValue(secret)});
++const directResponse = (decision: Record<string, unknown>) => ({
++  choices: [{message: {content: JSON.stringify(decision)}}],
++});
++const directDecision = (patch: Record<string, unknown> = {}) => ({
++  schemaVersion: 1,
++  subtaskId: 'direct-action',
++  action: 'tap',
++  coordinates: [500, 500],
++  expectedState: 'Next screen',
++  risk: 'low',
++  ...patch,
++});
++
++describe('OpenAI-compatible provider adapters', () => {
++  it('parses a structured cloud observation response', async () => {
++    const transport: OpenAICompatibleTransport = {
++      post: jest.fn().mockResolvedValue({
++        choices: [
++          {
++            message: {
++              content: [
++                {
++                  type: 'text',
++                  text: JSON.stringify({
++                    schemaVersion: 1,
++                    stateSummary: 'Login page',
++                    visibleText: ['Sign in'],
++                    elements: [],
++                    uncertainties: [],
++                  }),
++                },
++              ],
++            },
++          },
++        ],
++      }),
++    };
++    const provider = new CloudPerceptionProvider(
++      visionConnection,
++      resolver(),
++      transport,
++    );
++
++    await expect(
++      provider.observe({
++        screenshotUri: 'data:image/png;base64,screen',
++        instruction: 'Sign in',
++        signal: new AbortController().signal,
++      }),
++    ).resolves.toEqual(
++      expect.objectContaining({schemaVersion: 1, stateSummary: 'Login page'}),
++    );
++  });
++
++  it('whitelist-rebuilds a cloud observation response before returning it', async () => {
++    const screenshotUri = 'data:image/png;base64,private';
++    const transport: OpenAICompatibleTransport = {
++      post: jest.fn().mockResolvedValue({
++        choices: [
++          {
++            message: {
++              content: JSON.stringify({
++                schemaVersion: 1,
++                stateSummary: 'Login page',
++                visibleText: ['Sign in'],
++                elements: [],
++                uncertainties: [],
++                screenshotUri,
++                image_url: {url: screenshotUri},
++              }),
++            },
++          },
++        ],
++      }),
++    };
++    const provider = new CloudPerceptionProvider(
++      visionConnection,
++      resolver(),
++      transport,
++    );
++
++    const result = await provider.observe({
++      screenshotUri: 'data:image/png;base64,current-screen',
++      instruction: 'Sign in',
++      signal: new AbortController().signal,
++    });
++
++    expect(result).toEqual({
++      schemaVersion: 1,
++      stateSummary: 'Login page',
++      visibleText: ['Sign in'],
++      elements: [],
++      uncertainties: [],
++    });
++    expect(JSON.stringify(result)).not.toContain('image_url');
++    expect(JSON.stringify(result)).not.toContain('screenshotUri');
++    expect(JSON.stringify(result)).not.toContain(screenshotUri);
++  });
++
++  it.each([
++    ['malformed element', [{id: 'missing-fields'}], ['Sign in']],
++    ['non-string visible text', [], [42]],
++  ])(
++    'fails closed for a cloud observation with %s',
++    async (_label, elements, visibleText) => {
++      const provider = new CloudPerceptionProvider(
++        visionConnection,
++        resolver(),
++        {
++          post: jest.fn().mockResolvedValue({
++            choices: [
++              {
++                message: {
++                  content: JSON.stringify({
++                    schemaVersion: 1,
++                    stateSummary: 'Login page',
++                    visibleText,
++                    elements,
++                    uncertainties: [],
++                  }),
++                },
++              },
++            ],
++          }),
++        },
++      );
++
++      await expect(
++        provider.observe({
++          screenshotUri: 'data:image/png;base64,current-screen',
++          instruction: 'Sign in',
++          signal: new AbortController().signal,
++        }),
++      ).rejects.toMatchObject({
++        code: 'invalid_structured_response',
++        message: 'Provider returned invalid structured output',
++      });
++    },
++  );
++
++  it('parses fenced JSON from a direct model response', async () => {
++    const transport: OpenAICompatibleTransport = {
++      post: jest.fn().mockResolvedValue({
++        choices: [
++          {
++            message: {
++              content:
++                '```json\n{"schemaVersion":1,"subtaskId":"wait","action":"wait","expectedState":"loaded","risk":"low"}\n```',
++            },
++          },
++        ],
++      }),
++    };
++    const provider = new OpenAICompatibleDirectProvider(
++      visionConnection,
++      resolver(),
++      transport,
++    );
++
++    await expect(
++      provider.decide({
++        screenshotUri: 'data:image/png;base64,screen',
++        instruction: 'Wait for loading',
++        history: [],
++        signal: new AbortController().signal,
++      }),
++    ).resolves.toEqual(expect.objectContaining({action: 'wait'}));
++  });
++
++  it('rejects a direct tap that has only targetId because no observation can resolve it', async () => {
++    const transport: OpenAICompatibleTransport = {
++      post: jest.fn().mockResolvedValue({
++        choices: [
++          {
++            message: {
++              content: JSON.stringify({
++                schemaVersion: 1,
++                subtaskId: 'tap-settings',
++                action: 'tap',
++                targetId: 'settings',
++                expectedState: 'Settings page',
++                risk: 'low',
++              }),
++            },
++          },
++        ],
++      }),
++    };
++    const provider = new OpenAICompatibleDirectProvider(
++      visionConnection,
++      resolver(),
++      transport,
++    );
++
++    await expect(
++      provider.decide({
++        screenshotUri: 'data:image/png;base64,screen',
++        instruction: 'Open settings',
++        history: [],
++        signal: new AbortController().signal,
++      }),
++    ).rejects.toMatchObject({
++      code: 'invalid_structured_response',
++      message: 'Provider returned invalid structured output',
++    });
++  });
++
++  it.each([
++    ['wrong length', [500]],
++    ['non-number', ['500', 500]],
++    ['not finite', [Number.POSITIVE_INFINITY, 500]],
++    ['below range', [-1, 500]],
++    ['above range', [500, 1001]],
++  ])('rejects direct coordinates that are %s', async (_label, coordinates) => {
++    const provider = new OpenAICompatibleDirectProvider(
++      visionConnection,
++      resolver(),
++      {
++        post: jest
++          .fn()
++          .mockResolvedValue(directResponse(directDecision({coordinates}))),
++      },
++    );
++
++    await expect(
++      provider.decide({
++        screenshotUri: 'data:image/png;base64,screen',
++        instruction: 'Open settings',
++        history: [],
++        signal: new AbortController().signal,
++      }),
++    ).rejects.toMatchObject({
++      code: 'invalid_structured_response',
++      message: 'Provider returned invalid structured output',
++    });
++  });
++
++  it('rejects direct swipe because direct mode has no Observation-backed swipe schema', async () => {
++    const provider = new OpenAICompatibleDirectProvider(
++      visionConnection,
++      resolver(),
++      {
++        post: jest
++          .fn()
++          .mockResolvedValue(
++            directResponse(
++              directDecision({action: 'swipe', coordinates: [500, 500]}),
++            ),
++          ),
++      },
++    );
++
++    await expect(
++      provider.decide({
++        screenshotUri: 'data:image/png;base64,screen',
++        instruction: 'Scroll down',
++        history: [],
++        signal: new AbortController().signal,
++      }),
++    ).rejects.toMatchObject({
++      code: 'invalid_structured_response',
++      message: 'Provider returned invalid structured output',
++    });
++  });
++
++  it('throws stable redacted errors for missing credentials and malformed output', async () => {
++    const transport: OpenAICompatibleTransport = {post: jest.fn()};
++    const missingCredentialProvider = new CloudPerceptionProvider(
++      visionConnection,
++      resolver(null),
++      transport,
++    );
++    const missingCredential = missingCredentialProvider.observe({
++      screenshotUri: 'data:image/png;base64,screen',
++      instruction: 'Observe',
++      signal: new AbortController().signal,
++    });
++
++    await expect(missingCredential).rejects.toMatchObject({
++      name: 'AgentProviderError',
++      code: 'credential_unavailable',
++      message: 'Provider credential is unavailable',
++    });
++    await expect(missingCredential).rejects.not.toThrow(
++      visionConnection.secretRef,
++    );
++    expect(transport.post).not.toHaveBeenCalled();
++
++    const malformedProvider = new OpenAICompatibleDirectProvider(
++      visionConnection,
++      resolver(),
++      {
++        post: jest
++          .fn()
++          .mockResolvedValue({choices: [{message: {content: 'not-json'}}]}),
++      },
++    );
++    await expect(
++      malformedProvider.decide({
++        screenshotUri: 'data:image/png;base64,screen',
++        instruction: 'Wait',
++        history: [],
++        signal: new AbortController().signal,
++      }),
++    ).rejects.toMatchObject({
++      code: 'invalid_structured_response',
++      message: 'Provider returned invalid structured output',
++    });
++  });
++});
++
++describe('FetchOpenAICompatibleTransport', () => {
++  it('posts JSON to the normalized endpoint with AbortSignal', async () => {
++    const signal = new AbortController().signal;
++    const fetchFn = jest.fn().mockResolvedValue({
++      ok: true,
++      json: jest.fn().mockResolvedValue({choices: []}),
++    });
++    const transport = new FetchOpenAICompatibleTransport(fetchFn);
++
++    await transport.post({
++      baseUrl: 'https://models.example/v1/',
++      apiKey: 'ephemeral-key',
++      body: {model: 'vision-model', messages: []},
++      signal,
++    });
++
++    expect(fetchFn).toHaveBeenCalledWith(
++      'https://models.example/v1/chat/completions',
++      expect.objectContaining({
++        method: 'POST',
++        signal,
++        headers: {
++          Authorization: 'Bearer ephemeral-key',
++          'Content-Type': 'application/json',
++        },
++      }),
++    );
++  });
++
++  it('normalizes network and HTTP failures to stable errors', async () => {
++    const request = {
++      baseUrl: 'https://models.example/v1',
++      apiKey: 'ephemeral-key',
++      body: {model: 'vision-model', messages: []},
++      signal: new AbortController().signal,
++    };
++    const networkTransport = new FetchOpenAICompatibleTransport(
++      jest.fn().mockRejectedValue(new Error('host contains secret')),
++    );
++    await expect(networkTransport.post(request)).rejects.toMatchObject({
++      code: 'transport_failed',
++      message: 'Provider request failed',
++    });
++    const httpTransport = new FetchOpenAICompatibleTransport(
++      jest.fn().mockResolvedValue({ok: false, status: 429}),
++    );
++    await expect(httpTransport.post(request)).rejects.toMatchObject({
++      code: 'http_error',
++      message: 'Provider request failed with HTTP 429',
++    });
++  });
++
++  it.each([
++    [
++      'https://models.example/v1?tenant=alpha#client-fragment',
++      'https://models.example/v1/chat/completions?tenant=alpha#client-fragment',
++    ],
++    [
++      'https://models.example/v1/chat/completions?tenant=alpha#client-fragment',
++      'https://models.example/v1/chat/completions?tenant=alpha#client-fragment',
++    ],
++  ])(
++    'normalizes URL path without losing query or hash',
++    async (baseUrl, expected) => {
++      const fetchFn = jest.fn().mockResolvedValue({
++        ok: true,
++        json: jest.fn().mockResolvedValue({choices: []}),
++      });
++      const transport = new FetchOpenAICompatibleTransport(fetchFn);
++
++      await transport.post({
++        baseUrl,
++        apiKey: 'ephemeral-key',
++        body: {model: 'vision-model', messages: []},
++        signal: new AbortController().signal,
++      });
++
++      expect(fetchFn).toHaveBeenCalledWith(expected, expect.any(Object));
++    },
++  );
++
++  it('rejects an invalid base URL with a stable redacted configuration error', async () => {
++    const invalidBaseUrl = 'not a URL containing private-value';
++    const fetchFn = jest.fn();
++    const transport = new FetchOpenAICompatibleTransport(fetchFn);
++
++    const result = transport.post({
++      baseUrl: invalidBaseUrl,
++      apiKey: 'ephemeral-key',
++      body: {model: 'vision-model', messages: []},
++      signal: new AbortController().signal,
++    });
++
++    await expect(result).rejects.toMatchObject({
++      code: 'invalid_configuration',
++      message: 'Provider configuration is invalid',
++    });
++    await expect(result).rejects.not.toThrow(invalidBaseUrl);
++    expect(fetchFn).not.toHaveBeenCalled();
++  });
++});
+diff --git a/AwesomeProject/src/__tests__/core/engine/agentRuntime/pipelines/SplitAgentPipeline.test.ts b/AwesomeProject/src/__tests__/core/engine/agentRuntime/pipelines/SplitAgentPipeline.test.ts
+new file mode 100644
+index 0000000..4c2dfc3
+--- /dev/null
++++ b/AwesomeProject/src/__tests__/core/engine/agentRuntime/pipelines/SplitAgentPipeline.test.ts
+@@ -0,0 +1,172 @@
++import {SplitAgentPipeline} from '../../../../../core/engine/agentRuntime/pipelines/SplitAgentPipeline';
++import type {
++  ActionDecision,
++  Observation,
++  PerceptionProvider,
++  PlannerProvider,
++  StepInput,
++} from '../../../../../core/engine/agentRuntime/contracts/AgentContracts';
++
++const observation: Observation = {
++  schemaVersion: 1,
++  stateSummary: 'A settings page',
++  visibleText: ['Settings'],
++  elements: [],
++  uncertainties: [],
++};
++const decision: ActionDecision = {
++  schemaVersion: 1,
++  subtaskId: 'done',
++  action: 'finish',
++  expectedState: 'Settings is visible',
++  risk: 'low',
++};
++const stepInput = (): StepInput => ({
++  screenshotUri: 'data:image/png;base64,x',
++  instruction: 'Open settings',
++  history: [],
++  signal: new AbortController().signal,
++});
++
++describe('SplitAgentPipeline', () => {
++  it('calls perception before planner and returns observation and decision', async () => {
++    const callOrder: string[] = [];
++    const taintedObservation = {
++      ...observation,
++      screenshotUri: 'data:image/png;base64,private',
++      image_url: {url: 'data:image/png;base64,private'},
++    } as unknown as Observation;
++    const perception: PerceptionProvider = {
++      observe: jest.fn(async () => {
++        callOrder.push('perception');
++        return taintedObservation;
++      }),
++    };
++    const planner: PlannerProvider = {
++      plan: jest.fn(async input => {
++        callOrder.push('planner');
++        expect(input).toEqual({
++          observation,
++          instruction: 'Open settings',
++          history: [],
++          signal: expect.any(AbortSignal),
++        });
++        expect(input).not.toHaveProperty('screenshotUri');
++        return decision;
++      }),
++    };
++
++    const result = await new SplitAgentPipeline(perception, planner).decide(
++      stepInput(),
++    );
++
++    expect(callOrder).toEqual(['perception', 'planner']);
++    expect(perception.observe).toHaveBeenCalledWith(
++      expect.objectContaining({
++        screenshotUri: 'data:image/png;base64,x',
++        instruction: 'Open settings',
++      }),
++    );
++    expect(result).toEqual({observation, decision});
++  });
++
++  it('fails closed before planner when perception returns an invalid observation', async () => {
++    const perception: PerceptionProvider = {
++      observe: jest.fn().mockResolvedValue({...observation, elements: [{}]}),
++    };
++    const planner: PlannerProvider = {plan: jest.fn()};
++
++    await expect(
++      new SplitAgentPipeline(perception, planner).decide(stepInput()),
++    ).rejects.toMatchObject({
++      code: 'invalid_structured_response',
++      message: 'Provider returned invalid structured output',
++    });
++    expect(planner.plan).not.toHaveBeenCalled();
++  });
++
++  it.each([
++    [
++      'blank id',
++      {
++        ...observation,
++        elements: [
++          {
++            id: ' ',
++            role: 'button',
++            bbox: [0, 0, 10, 10],
++            enabled: true,
++            confidence: 1,
++          },
++        ],
++      },
++    ],
++    [
++      'blank role',
++      {
++        ...observation,
++        elements: [
++          {
++            id: 'button',
++            role: '',
++            bbox: [0, 0, 10, 10],
++            enabled: true,
++            confidence: 1,
++          },
++        ],
++      },
++    ],
++    [
++      'x plus width overflow',
++      {
++        ...observation,
++        elements: [
++          {
++            id: 'button',
++            role: 'button',
++            bbox: [950, 0, 51, 10],
++            enabled: true,
++            confidence: 1,
++          },
++        ],
++      },
++    ],
++    [
++      'y plus height overflow',
++      {
++        ...observation,
++        elements: [
++          {
++            id: 'button',
++            role: 'button',
++            bbox: [0, 999, 10, 2],
++            enabled: true,
++            confidence: 1,
++          },
++        ],
++      },
++    ],
++  ])('rejects observation elements with %s', async (_label, invalid) => {
++    const perception: PerceptionProvider = {
++      observe: jest.fn().mockResolvedValue(invalid),
++    };
++    const planner: PlannerProvider = {plan: jest.fn()};
++
++    await expect(
++      new SplitAgentPipeline(perception, planner).decide(stepInput()),
++    ).rejects.toMatchObject({code: 'invalid_structured_response'});
++    expect(planner.plan).not.toHaveBeenCalled();
++  });
++
++  it('does not invoke the planner when perception fails', async () => {
++    const perception: PerceptionProvider = {
++      observe: jest.fn().mockRejectedValue(new Error('vision unavailable')),
++    };
++    const planner: PlannerProvider = {plan: jest.fn()};
++
++    await expect(
++      new SplitAgentPipeline(perception, planner).decide(stepInput()),
++    ).rejects.toThrow('vision unavailable');
++    expect(planner.plan).not.toHaveBeenCalled();
++  });
++});
+diff --git a/AwesomeProject/src/__tests__/core/engine/agentRuntime/policy/ActionDecisionValidator.test.ts b/AwesomeProject/src/__tests__/core/engine/agentRuntime/policy/ActionDecisionValidator.test.ts
+new file mode 100644
+index 0000000..70cee12
+--- /dev/null
++++ b/AwesomeProject/src/__tests__/core/engine/agentRuntime/policy/ActionDecisionValidator.test.ts
+@@ -0,0 +1,233 @@
++import type {
++  ActionDecision,
++  Observation,
++} from '../../../../../core/engine/agentRuntime/domain/AgentTypes';
++import {
++  ActionValidationError,
++  validateActionDecision,
++} from '../../../../../core/engine/agentRuntime/policy/ActionDecisionValidator';
++
++const observation: Observation = {
++  schemaVersion: 1,
++  stateSummary: 'compose screen',
++  visibleText: ['Send'],
++  elements: [
++    {
++      id: 'primary',
++      role: 'button',
++      text: 'Continue',
++      bbox: [100, 200, 200, 100],
++      enabled: true,
++      confidence: 0.99,
++    },
++    {
++      id: 'disabled',
++      role: 'button',
++      bbox: [0, 0, 100, 100],
++      enabled: false,
++      confidence: 0.99,
++    },
++    {
++      id: 'uncertain',
++      role: 'button',
++      bbox: [0, 0, 100, 100],
++      enabled: true,
++      confidence: 0.2,
++    },
++    {
++      id: 'danger-1',
++      role: 'button',
++      text: 'Delete account',
++      bbox: [500, 500, 200, 100],
++      enabled: true,
++      confidence: 0.99,
++    },
++    {
++      id: 'danger-2',
++      role: 'button',
++      text: '发送消息',
++      bbox: [500, 700, 200, 100],
++      enabled: true,
++      confidence: 0.99,
++    },
++  ],
++  uncertainties: [],
++};
++
++const tapDecision = (): ActionDecision => ({
++  schemaVersion: 1,
++  subtaskId: 'submit',
++  action: 'tap',
++  targetId: 'primary',
++  expectedState: 'button activated',
++  risk: 'low',
++});
++
++const expectValidationCode = (
++  input: unknown,
++  code: ActionValidationError['code'],
++  source: Observation = observation,
++) => {
++  try {
++    validateActionDecision(input, source);
++    throw new Error('Expected validation to fail');
++  } catch (error) {
++    expect(error).toBeInstanceOf(ActionValidationError);
++    expect((error as ActionValidationError).code).toBe(code);
++  }
++};
++
++describe('validateActionDecision', () => {
++  it('rejects a missing or blank expected state', () => {
++    const missing: Partial<ActionDecision> = {...tapDecision()};
++    delete missing.expectedState;
++    expectValidationCode(missing, 'missing_expected_state');
++    expectValidationCode(
++      {...tapDecision(), expectedState: '   '},
++      'missing_expected_state',
++    );
++  });
++
++  it.each([
++    [-1, 500],
++    [500, 1001],
++    [Number.NaN, 500],
++  ])('rejects normalized coordinates outside 0..1000: %p', (x, y) => {
++    expectValidationCode(
++      {...tapDecision(), targetId: undefined, coordinates: [x, y]},
++      'coordinates_out_of_range',
++    );
++  });
++
++  it('rejects unknown, disabled, and low-confidence targets with typed errors', () => {
++    expectValidationCode(
++      {...tapDecision(), targetId: 'missing'},
++      'target_not_found',
++    );
++    expectValidationCode(
++      {...tapDecision(), targetId: 'disabled'},
++      'target_disabled',
++    );
++    expectValidationCode(
++      {...tapDecision(), targetId: 'uncertain'},
++      'target_confidence_low',
++    );
++  });
++
++  it('requires an observation only when a decision uses targetId', () => {
++    expect(() => validateActionDecision(tapDecision())).toThrow(
++      expect.objectContaining({code: 'target_observation_missing'}),
++    );
++
++    expect(
++      validateActionDecision({
++        ...tapDecision(),
++        targetId: undefined,
++        coordinates: [500, 500],
++      }).action,
++    ).toBe('tap');
++  });
++
++  it.each([
++    [{enabled: 'false'}, 'target_schema_invalid'],
++    [{confidence: 1.1}, 'target_schema_invalid'],
++    [{bbox: null}, 'target_schema_invalid'],
++  ] as const)(
++    'rejects malformed provider target fields %p with a typed error',
++    (targetPatch, code) => {
++      const malformed = {
++        ...observation,
++        elements: [{...observation.elements[0], ...targetPatch}],
++      } as unknown as Observation;
++
++      expectValidationCode(tapDecision(), code, malformed);
++    },
++  );
++
++  it('rejects input actions without non-blank text', () => {
++    expectValidationCode(
++      {...tapDecision(), action: 'input', text: undefined},
++      'input_text_missing',
++    );
++    expectValidationCode(
++      {...tapDecision(), action: 'input', text: '  '},
++      'input_text_missing',
++    );
++  });
++
++  it('requires swipe start target and end coordinates', () => {
++    expectValidationCode(
++      {...tapDecision(), action: 'swipe', targetId: undefined},
++      'swipe_target_missing',
++    );
++    expectValidationCode(
++      {...tapDecision(), action: 'swipe', coordinates: undefined},
++      'swipe_end_coordinates_missing',
++    );
++  });
++
++  it('stops an identical action when the observed UI did not change', () => {
++    const decision = tapDecision();
++
++    try {
++      validateActionDecision(decision, observation, {
++        previousDecision: decision,
++        stateChangedSincePreviousAction: false,
++      });
++      throw new Error('Expected validation to fail');
++    } catch (error) {
++      expect(error).toBeInstanceOf(ActionValidationError);
++      expect((error as ActionValidationError).code).toBe(
++        'repeated_unchanged_action',
++      );
++    }
++
++    expect(
++      validateActionDecision(decision, observation, {
++        previousDecision: decision,
++        stateChangedSincePreviousAction: true,
++      }).action,
++    ).toBe('tap');
++  });
++
++  it.each([
++    [{...tapDecision(), risk: 'high' as const}, true],
++    [{...tapDecision(), expectedState: 'payment submitted'}, true],
++    [{...tapDecision(), expectedState: 'transfer completed'}, true],
++    [{...tapDecision(), expectedState: 'record deleted'}, true],
++    [{...tapDecision(), expectedState: 'authorization granted'}, true],
++    [{...tapDecision(), expectedState: 'send message complete'}, true],
++    [{...tapDecision(), expectedState: '消息已发送'}, true],
++    [tapDecision(), false],
++  ])('marks high-risk decision %p for confirmation', (decision, expected) => {
++    expect(
++      validateActionDecision(decision, observation).requiresConfirmation,
++    ).toBe(expected);
++  });
++
++  it.each(['danger-1', 'danger-2'])(
++    'does not trust low provider risk when target %s is high risk',
++    targetId => {
++      expect(
++        validateActionDecision(
++          {...tapDecision(), targetId, expectedState: 'done', risk: 'low'},
++          observation,
++        ).requiresConfirmation,
++      ).toBe(true);
++    },
++  );
++
++  it('accepts exact coordinate boundaries and returns an immutable validated copy', () => {
++    const input: ActionDecision = {
++      ...tapDecision(),
++      targetId: undefined,
++      coordinates: [0, 1000],
++    };
++
++    const validated = validateActionDecision(input, observation);
++
++    expect(validated).toEqual({...input, requiresConfirmation: false});
++    expect(validated).not.toBe(input);
++    expect(Object.isFrozen(validated)).toBe(true);
++  });
++});
+diff --git a/AwesomeProject/src/__tests__/core/engine/agentRuntime/runtime/AgentRuntime.test.ts b/AwesomeProject/src/__tests__/core/engine/agentRuntime/runtime/AgentRuntime.test.ts
+new file mode 100644
+index 0000000..45ce0f7
+--- /dev/null
++++ b/AwesomeProject/src/__tests__/core/engine/agentRuntime/runtime/AgentRuntime.test.ts
+@@ -0,0 +1,341 @@
++import type {AgentPipeline} from '../../../../../core/engine/agentRuntime/contracts/AgentContracts';
++import {AgentConfigState} from '../../../../../core/engine/agentRuntime/domain/AgentConfigState';
++import type {
++  ActionDecision,
++  AgentConfigV2,
++  AgentMode,
++  ModelConnection,
++  Observation,
++} from '../../../../../core/engine/agentRuntime/domain/AgentTypes';
++import {
++  AgentRuntime,
++  AgentRuntimeConfigurationError,
++  type RuntimePipelineFactory,
++} from '../../../../../core/engine/agentRuntime';
++
++const connections: readonly ModelConnection[] = [
++  {
++    id: 'direct',
++    providerId: 'openai',
++    baseUrl: 'https://direct.example.com/v1',
++    modelName: 'direct-original',
++    secretRef: 'secret://direct',
++    capabilities: {
++      vision: true,
++      jsonOutput: true,
++      toolCalls: false,
++      thinking: false,
++    },
++  },
++  {
++    id: 'vision',
++    providerId: 'openai',
++    baseUrl: 'https://vision.example.com/v1',
++    modelName: 'vision-original',
++    secretRef: 'secret://vision',
++    capabilities: {
++      vision: true,
++      jsonOutput: false,
++      toolCalls: false,
++      thinking: false,
++    },
++  },
++  {
++    id: 'planner',
++    providerId: 'deepseek',
++    baseUrl: 'https://planner.example.com/v1',
++    modelName: 'planner-original',
++    secretRef: 'secret://planner',
++    capabilities: {
++      vision: false,
++      jsonOutput: true,
++      toolCalls: false,
++      thinking: false,
++    },
++  },
++];
++
++const config = (activeMode: AgentMode): AgentConfigV2 => ({
++  version: 2,
++  activeMode,
++  modeDrafts: {
++    cloudDirect: {modelConnectionId: 'direct'},
++    cloudSplit: {
++      visionConnectionId: 'vision',
++      plannerConnectionId: 'planner',
++    },
++    localVisionCloudPlanner: {
++      localModelId: 'minicpm-v-4.6-q4',
++      plannerConnectionId: 'planner',
++    },
++  },
++  maxSteps: 99,
++});
++
++const observation: Observation = {
++  schemaVersion: 1,
++  stateSummary: 'settings button visible',
++  visibleText: ['Settings'],
++  elements: [
++    {
++      id: 'settings',
++      role: 'button',
++      text: 'Settings',
++      bbox: [400, 200, 200, 100],
++      enabled: true,
++      confidence: 0.99,
++    },
++  ],
++  uncertainties: [],
++};
++
++const directDecision: ActionDecision = {
++  schemaVersion: 1,
++  subtaskId: 'open-settings',
++  action: 'tap',
++  coordinates: [200, 250],
++  expectedState: 'settings opens',
++  risk: 'low',
++};
++
++const splitDecision: ActionDecision = {
++  ...directDecision,
++  targetId: 'settings',
++  coordinates: undefined,
++};
++
++const stepInput = () => ({
++  screenshotUri: 'data:image/png;base64,private-screen',
++  instruction: 'Open settings',
++  history: [],
++  signal: new AbortController().signal,
++});
++
++const pipeline = (
++  result: Awaited<ReturnType<AgentPipeline['decide']>>,
++): AgentPipeline => ({decide: jest.fn().mockResolvedValue(result)});
++
++const deferred = <T>() => {
++  let resolve!: (value: T) => void;
++  const promise = new Promise<T>(complete => {
++    resolve = complete;
++  });
++  return {promise, resolve};
++};
++
++const makeHarness = (activeMode: AgentMode) => {
++  const direct = pipeline({decision: directDecision});
++  const cloudSplit = pipeline({observation, decision: splitDecision});
++  const localSplit = pipeline({observation, decision: splitDecision});
++  const pipelineFactory: RuntimePipelineFactory = {
++    createDirect: jest.fn().mockReturnValue(direct),
++    createCloudSplit: jest.fn().mockReturnValue(cloudSplit),
++    createLocalSplit: jest.fn().mockReturnValue(localSplit),
++  };
++  const state = new AgentConfigState(config(activeMode), connections, {
++    state: 'ready',
++  });
++  const credentialResolver = {
++    resolve: jest.fn().mockResolvedValue('runtime-secret'),
++  };
++  const viewportAdapter = {
++    getDimensions: jest.fn().mockResolvedValue({width: 1000, height: 2000}),
++  };
++  const runtime = new AgentRuntime({
++    configSource: state,
++    credentialResolver,
++    pipelineFactory,
++    viewportAdapter,
++    now: jest.fn().mockReturnValueOnce(100).mockReturnValueOnce(107),
++  });
++  return {
++    runtime,
++    state,
++    direct,
++    cloudSplit,
++    localSplit,
++    pipelineFactory,
++    credentialResolver,
++    viewportAdapter,
++  };
++};
++
++describe('AgentRuntime mode routing', () => {
++  it.each([
++    ['cloud_direct', 'createDirect'],
++    ['cloud_split', 'createCloudSplit'],
++    ['local_vision_cloud_planner', 'createLocalSplit'],
++  ] as const)('routes %s only through %s', async (mode, selectedFactory) => {
++    const harness = makeHarness(mode);
++    const snapshot = await harness.runtime.createTaskSnapshot();
++    const input = stepInput();
++
++    const result = await harness.runtime.decideStep(snapshot, input);
++
++    expect(harness.pipelineFactory[selectedFactory]).toHaveBeenCalledTimes(1);
++    const selectedPipeline =
++      mode === 'cloud_direct'
++        ? harness.direct
++        : mode === 'cloud_split'
++        ? harness.cloudSplit
++        : harness.localSplit;
++    expect(selectedPipeline.decide).toHaveBeenCalledWith(input);
++    const unselectedFactories = (
++      ['createDirect', 'createCloudSplit', 'createLocalSplit'] as const
++    ).filter(name => name !== selectedFactory);
++    unselectedFactories.forEach(name =>
++      expect(harness.pipelineFactory[name]).not.toHaveBeenCalled(),
++    );
++    expect(result.diagnostics).toEqual({mode, durationMs: 7});
++    expect(result.taskAction).toEqual({
++      type: 'click',
++      x: mode === 'cloud_direct' ? 200 : 500,
++      y: 500,
++      requiresConfirmation: false,
++    });
++    expect(result.observation).toEqual(
++      mode === 'cloud_direct' ? undefined : observation,
++    );
++  });
++
++  it('keeps a recursively frozen task snapshot after mutable state changes', async () => {
++    const harness = makeHarness('cloud_direct');
++    const snapshot = await harness.runtime.createTaskSnapshot();
++
++    harness.state.replaceConfig(config('cloud_split'));
++    harness.state.replaceConnections([
++      {...connections[0], modelName: 'direct-replaced'},
++      ...connections.slice(1),
++    ]);
++    await harness.runtime.decideStep(snapshot, stepInput());
++
++    expect(snapshot.config.activeMode).toBe('cloud_direct');
++    expect(snapshot.connections.direct.modelName).toBe('direct-original');
++    expect(Object.isFrozen(snapshot)).toBe(true);
++    expect(Object.isFrozen(snapshot.config.modeDrafts.cloudDirect)).toBe(true);
++    expect(Object.isFrozen(snapshot.connections.direct.capabilities)).toBe(
++      true,
++    );
++    expect(harness.pipelineFactory.createDirect).toHaveBeenCalledWith(
++      expect.objectContaining({modelName: 'direct-original'}),
++    );
++    expect(harness.pipelineFactory.createCloudSplit).not.toHaveBeenCalled();
++  });
++
++  it('validates every pipeline decision before adapting it', async () => {
++    const harness = makeHarness('cloud_direct');
++    (harness.direct.decide as jest.Mock).mockResolvedValue({
++      decision: {...directDecision, expectedState: ''},
++    });
++    const snapshot = await harness.runtime.createTaskSnapshot();
++
++    await expect(
++      harness.runtime.decideStep(snapshot, stepInput()),
++    ).rejects.toMatchObject({code: 'missing_expected_state'});
++  });
++
++  it('refuses snapshots when a required credential cannot be resolved', async () => {
++    const harness = makeHarness('cloud_split');
++    harness.credentialResolver.resolve.mockImplementation(
++      async (secretRef: string) =>
++        secretRef === 'secret://vision' ? 'vision-secret' : null,
++    );
++
++    await expect(harness.runtime.createTaskSnapshot()).rejects.toEqual(
++      expect.objectContaining({
++        name: 'AgentRuntimeConfigurationError',
++        code: 'credential_unavailable',
++      }),
++    );
++    expect(harness.credentialResolver.resolve).toHaveBeenCalledWith(
++      'secret://planner',
++    );
++  });
++
++  it('refuses a local snapshot unless the active eligibility is ready', async () => {
++    const harness = makeHarness('local_vision_cloud_planner');
++    harness.state.replaceEligibility({state: 'needs_test'});
++
++    await expect(harness.runtime.createTaskSnapshot()).rejects.toBeInstanceOf(
++      AgentRuntimeConfigurationError,
++    );
++    await expect(harness.runtime.createTaskSnapshot()).rejects.toMatchObject({
++      code: 'invalid_active_configuration',
++      validationErrors: ['local_model_not_ready'],
++    });
++    expect(harness.credentialResolver.resolve).not.toHaveBeenCalled();
++  });
++});
++
++describe('AgentRuntime cancellation', () => {
++  const expectRuntimeAbort = async (operation: Promise<unknown>) => {
++    await expect(operation).rejects.toMatchObject({
++      name: 'AbortError',
++      code: 'agent_runtime_aborted',
++      message: 'agent_runtime_aborted',
++    });
++  };
++
++  it('does not create or invoke a pipeline for a pre-aborted step', async () => {
++    const harness = makeHarness('cloud_direct');
++    const snapshot = await harness.runtime.createTaskSnapshot();
++    const controller = new AbortController();
++    controller.abort();
++
++    await expectRuntimeAbort(
++      harness.runtime.decideStep(snapshot, {
++        ...stepInput(),
++        signal: controller.signal,
++      }),
++    );
++
++    expect(harness.pipelineFactory.createDirect).not.toHaveBeenCalled();
++    expect(harness.direct.decide).not.toHaveBeenCalled();
++    expect(harness.viewportAdapter.getDimensions).not.toHaveBeenCalled();
++  });
++
++  it('stops before validation and viewport resolution when the pipeline resolves after abort', async () => {
++    const harness = makeHarness('cloud_direct');
++    const pendingPipeline =
++      deferred<Awaited<ReturnType<AgentPipeline['decide']>>>();
++    (harness.direct.decide as jest.Mock).mockReturnValue(
++      pendingPipeline.promise,
++    );
++    const snapshot = await harness.runtime.createTaskSnapshot();
++    const controller = new AbortController();
++    const operation = harness.runtime.decideStep(snapshot, {
++      ...stepInput(),
++      signal: controller.signal,
++    });
++
++    expect(harness.direct.decide).toHaveBeenCalledTimes(1);
++    controller.abort();
++    pendingPipeline.resolve({
++      decision: {...directDecision, expectedState: ''},
++    });
++
++    await expectRuntimeAbort(operation);
++    expect(harness.viewportAdapter.getDimensions).not.toHaveBeenCalled();
++  });
++
++  it('does not adapt or return an action when abort occurs during viewport resolution', async () => {
++    const harness = makeHarness('cloud_direct');
++    const pendingViewport = deferred<{width: number; height: number}>();
++    harness.viewportAdapter.getDimensions.mockReturnValue(
++      pendingViewport.promise,
++    );
++    const snapshot = await harness.runtime.createTaskSnapshot();
++    const controller = new AbortController();
++    const operation = harness.runtime.decideStep(snapshot, {
++      ...stepInput(),
++      signal: controller.signal,
++    });
++    await Promise.resolve();
++
++    expect(harness.viewportAdapter.getDimensions).toHaveBeenCalledTimes(1);
++    controller.abort();
++    pendingViewport.resolve({width: 0, height: 0});
++
++    await expectRuntimeAbort(operation);
++  });
++});
+diff --git a/AwesomeProject/src/__tests__/core/engine/agentRuntime/runtime/RuntimePrivacy.test.ts b/AwesomeProject/src/__tests__/core/engine/agentRuntime/runtime/RuntimePrivacy.test.ts
+new file mode 100644
+index 0000000..fa372ee
+--- /dev/null
++++ b/AwesomeProject/src/__tests__/core/engine/agentRuntime/runtime/RuntimePrivacy.test.ts
+@@ -0,0 +1,332 @@
++import type {
++  PerceptionInput,
++  PerceptionProvider,
++  RuntimeHistoryEntry,
++} from '../../../../../core/engine/agentRuntime/contracts/AgentContracts';
++import {AgentConfigState} from '../../../../../core/engine/agentRuntime/domain/AgentConfigState';
++import type {
++  AgentConfigV2,
++  ModelConnection,
++  Observation,
++} from '../../../../../core/engine/agentRuntime/domain/AgentTypes';
++import {
++  createAgentRuntime,
++  LocalPerceptionUnavailableError,
++} from '../../../../../core/engine/agentRuntime';
++import type {OpenAICompatibleTransport} from '../../../../../core/engine/agentRuntime/providers/OpenAICompatibleTransport';
++
++const plannerConnection: ModelConnection = {
++  id: 'planner',
++  providerId: 'deepseek',
++  baseUrl: 'https://api.deepseek.com/v1',
++  modelName: 'deepseek-chat',
++  secretRef: 'secret://planner',
++  capabilities: {
++    vision: false,
++    jsonOutput: true,
++    toolCalls: false,
++    thinking: false,
++  },
++};
++
++const localConfig: AgentConfigV2 = {
++  version: 2,
++  activeMode: 'local_vision_cloud_planner',
++  modeDrafts: {
++    cloudDirect: {},
++    cloudSplit: {},
++    localVisionCloudPlanner: {
++      localModelId: 'minicpm-v-4.6-q4',
++      plannerConnectionId: 'planner',
++    },
++  },
++  maxSteps: 99,
++};
++
++const observation: Observation = {
++  schemaVersion: 1,
++  stateSummary: 'home screen',
++  visibleText: ['Settings'],
++  elements: [
++    {
++      id: 'settings',
++      role: 'button',
++      text: 'Settings',
++      bbox: [400, 200, 200, 100],
++      enabled: true,
++      confidence: 0.99,
++    },
++  ],
++  uncertainties: [],
++};
++
++const plannerResponse = {
++  choices: [
++    {
++      message: {
++        content: JSON.stringify({
++          schemaVersion: 1,
++          subtaskId: 'open-settings',
++          action: 'tap',
++          targetId: 'settings',
++          expectedState: 'settings opens',
++          risk: 'low',
++        }),
++      },
++    },
++  ],
++};
++
++const runtimeDependencies = (
++  localPerceptionProvider: PerceptionProvider,
++  transport: OpenAICompatibleTransport,
++  invalidateLocalEligibility = jest.fn().mockResolvedValue(undefined),
++) => ({
++  configSource: new AgentConfigState(localConfig, [plannerConnection], {
++    state: 'ready' as const,
++  }),
++  credentialResolver: {resolve: jest.fn().mockResolvedValue('planner-secret')},
++  transport,
++  localPerceptionProviderFactory: jest
++    .fn()
++    .mockReturnValue(localPerceptionProvider),
++  viewportAdapter: {
++    getDimensions: jest.fn().mockReturnValue({width: 1000, height: 2000}),
++  },
++  invalidateLocalEligibility,
++  now: jest.fn().mockReturnValueOnce(10).mockReturnValueOnce(15),
++});
++
++describe('AgentRuntime local perception privacy', () => {
++  it('sends the screenshot only to local perception and a sanitized observation to the cloud planner', async () => {
++    const screenshotUri = 'data:image/png;base64,private-screen';
++    const localPerceptionProvider: PerceptionProvider = {
++      observe: jest.fn().mockResolvedValue({
++        ...observation,
++        screenshotUri,
++        image_url: {url: screenshotUri},
++      } as unknown as Observation),
++    };
++    const transport: OpenAICompatibleTransport = {
++      post: jest.fn().mockResolvedValue(plannerResponse),
++    };
++    const dependencies = runtimeDependencies(
++      localPerceptionProvider,
++      transport,
++    );
++    const runtime = createAgentRuntime(dependencies);
++    const snapshot = await runtime.createTaskSnapshot();
++    const signal = new AbortController().signal;
++    const history = [
++      {
++        step: 1,
++        outcome: 'screen unchanged',
++        screenshotUri,
++      },
++    ] as unknown as RuntimeHistoryEntry[];
++
++    const result = await runtime.decideStep(snapshot, {
++      screenshotUri,
++      instruction: 'Open settings',
++      history,
++      signal,
++    });
++
++    expect(dependencies.localPerceptionProviderFactory).toHaveBeenCalledWith(
++      'minicpm-v-4.6-q4',
++    );
++    expect(localPerceptionProvider.observe).toHaveBeenCalledWith({
++      screenshotUri,
++      instruction: 'Open settings',
++      signal,
++    } satisfies PerceptionInput);
++    const plannerRequest = (transport.post as jest.Mock).mock.calls[0][0];
++    const serializedPlannerRequest = JSON.stringify(plannerRequest.body);
++    expect(serializedPlannerRequest).not.toContain(screenshotUri);
++    expect(serializedPlannerRequest).not.toContain('screenshotUri');
++    expect(serializedPlannerRequest).not.toContain('image_url');
++    expect(serializedPlannerRequest).toContain('home screen');
++    expect(serializedPlannerRequest).toContain('screen unchanged');
++    expect(plannerRequest.signal).toBe(signal);
++    expect(result.taskAction).toEqual({
++      type: 'click',
++      x: 500,
++      y: 500,
++      requiresConfirmation: false,
++    });
++  });
++
++  it('invalidates eligibility and fails closed when local perception fails', async () => {
++    const localFailure = new Error('native inference OOM');
++    const localPerceptionProvider: PerceptionProvider = {
++      observe: jest.fn().mockRejectedValue(localFailure),
++    };
++    const transport: OpenAICompatibleTransport = {post: jest.fn()};
++    const invalidateLocalEligibility = jest
++      .fn()
++      .mockRejectedValue(new Error('native invalidation unavailable'));
++    const dependencies = runtimeDependencies(
++      localPerceptionProvider,
++      transport,
++      invalidateLocalEligibility,
++    );
++    const runtime = createAgentRuntime(dependencies);
++    const snapshot = await runtime.createTaskSnapshot();
++
++    const rejection = runtime.decideStep(snapshot, {
++      screenshotUri: 'file:///private/screen.png',
++      instruction: 'Open settings',
++      history: [],
++      signal: new AbortController().signal,
++    });
++
++    await expect(rejection).rejects.toBeInstanceOf(
++      LocalPerceptionUnavailableError,
++    );
++    await expect(rejection).rejects.toMatchObject({
++      name: 'LocalPerceptionUnavailableError',
++      code: 'local_perception_unavailable',
++    });
++    await expect(rejection).rejects.not.toHaveProperty('originalError');
++    expect(invalidateLocalEligibility).toHaveBeenCalledWith(
++      'local_perception_unavailable',
++    );
++    expect(transport.post).not.toHaveBeenCalled();
++  });
++
++  it('treats local provider construction failures as local unavailability', async () => {
++    const bridgeFailure = new Error('native bridge unavailable');
++    const transport: OpenAICompatibleTransport = {post: jest.fn()};
++    const invalidateLocalEligibility = jest.fn().mockResolvedValue(undefined);
++    const dependencies = runtimeDependencies(
++      {observe: jest.fn()},
++      transport,
++      invalidateLocalEligibility,
++    );
++    dependencies.localPerceptionProviderFactory.mockImplementation(() => {
++      throw bridgeFailure;
++    });
++    const runtime = createAgentRuntime(dependencies);
++    const snapshot = await runtime.createTaskSnapshot();
++
++    await expect(
++      runtime.decideStep(snapshot, {
++        screenshotUri: 'file:///private/screen.png',
++        instruction: 'Open settings',
++        history: [],
++        signal: new AbortController().signal,
++      }),
++    ).rejects.toMatchObject({
++      code: 'local_perception_unavailable',
++    });
++    expect(invalidateLocalEligibility).toHaveBeenCalledWith(
++      'local_perception_unavailable',
++    );
++    expect(transport.post).not.toHaveBeenCalled();
++  });
++
++  it('invalidates eligibility when local perception returns a malformed observation', async () => {
++    const localPerceptionProvider: PerceptionProvider = {
++      observe: jest.fn().mockResolvedValue({
++        ...observation,
++        stateSummary: 42,
++      } as unknown as Observation),
++    };
++    const transport: OpenAICompatibleTransport = {post: jest.fn()};
++    const invalidateLocalEligibility = jest.fn().mockResolvedValue(undefined);
++    const dependencies = runtimeDependencies(
++      localPerceptionProvider,
++      transport,
++      invalidateLocalEligibility,
++    );
++    const runtime = createAgentRuntime(dependencies);
++    const snapshot = await runtime.createTaskSnapshot();
++
++    await expect(
++      runtime.decideStep(snapshot, {
++        screenshotUri: 'file:///private/screen.png',
++        instruction: 'Open settings',
++        history: [],
++        signal: new AbortController().signal,
++      }),
++    ).rejects.toMatchObject({code: 'local_perception_unavailable'});
++    expect(invalidateLocalEligibility).toHaveBeenCalledWith(
++      'local_perception_unavailable',
++    );
++    expect(transport.post).not.toHaveBeenCalled();
++  });
++
++  it('preserves in-flight cancellation without invalidating local eligibility', async () => {
++    let rejectLocal!: (reason: unknown) => void;
++    const pendingLocal = new Promise<Observation>((_resolve, reject) => {
++      rejectLocal = reject;
++    });
++    const localPerceptionProvider: PerceptionProvider = {
++      observe: jest.fn().mockReturnValue(pendingLocal),
++    };
++    const transport: OpenAICompatibleTransport = {post: jest.fn()};
++    const invalidateLocalEligibility = jest.fn().mockResolvedValue(undefined);
++    const dependencies = runtimeDependencies(
++      localPerceptionProvider,
++      transport,
++      invalidateLocalEligibility,
++    );
++    const runtime = createAgentRuntime(dependencies);
++    const snapshot = await runtime.createTaskSnapshot();
++    const controller = new AbortController();
++    const operation = runtime.decideStep(snapshot, {
++      screenshotUri: 'file:///private/screen.png',
++      instruction: 'Open settings',
++      history: [],
++      signal: controller.signal,
++    });
++
++    expect(localPerceptionProvider.observe).toHaveBeenCalledTimes(1);
++    controller.abort();
++    rejectLocal(new Error('native cancellation'));
++
++    await expect(operation).rejects.toMatchObject({
++      name: 'AbortError',
++      code: 'agent_runtime_aborted',
++    });
++    expect(invalidateLocalEligibility).not.toHaveBeenCalled();
++    expect(transport.post).not.toHaveBeenCalled();
++  });
++
++  it('does not invoke the cloud planner when local perception resolves after abort', async () => {
++    let resolveLocal!: (value: Observation) => void;
++    const pendingLocal = new Promise<Observation>(resolve => {
++      resolveLocal = resolve;
++    });
++    const localPerceptionProvider: PerceptionProvider = {
++      observe: jest.fn().mockReturnValue(pendingLocal),
++    };
++    const transport: OpenAICompatibleTransport = {post: jest.fn()};
++    const invalidateLocalEligibility = jest.fn().mockResolvedValue(undefined);
++    const dependencies = runtimeDependencies(
++      localPerceptionProvider,
++      transport,
++      invalidateLocalEligibility,
++    );
++    const runtime = createAgentRuntime(dependencies);
++    const snapshot = await runtime.createTaskSnapshot();
++    const controller = new AbortController();
++    const operation = runtime.decideStep(snapshot, {
++      screenshotUri: 'file:///private/screen.png',
++      instruction: 'Open settings',
++      history: [],
++      signal: controller.signal,
++    });
++
++    expect(localPerceptionProvider.observe).toHaveBeenCalledTimes(1);
++    controller.abort();
++    resolveLocal(observation);
++
++    await expect(operation).rejects.toMatchObject({
++      name: 'AbortError',
++      code: 'agent_runtime_aborted',
++    });
++    expect(invalidateLocalEligibility).not.toHaveBeenCalled();
++    expect(transport.post).not.toHaveBeenCalled();
++  });
++});
+diff --git a/AwesomeProject/src/core/engine/agentRuntime/adapters/TaskActionAdapter.ts b/AwesomeProject/src/core/engine/agentRuntime/adapters/TaskActionAdapter.ts
+new file mode 100644
+index 0000000..1e88d27
+--- /dev/null
++++ b/AwesomeProject/src/core/engine/agentRuntime/adapters/TaskActionAdapter.ts
+@@ -0,0 +1,125 @@
++import type {TaskAction} from '@core/engine/taskEngine/types/Task';
++import type {Observation, ObservationElement} from '../domain/AgentTypes';
++import type {ValidatedActionDecision} from '../policy/ActionDecisionValidator';
++
++export interface ViewportDimensions {
++  width: number;
++  height: number;
++}
++
++export const toPixel = (value: number, size: number): number =>
++  Math.round((value / 1000) * size);
++
++const targetCenter = (
++  target: ObservationElement,
++): readonly [number, number] => {
++  const [x, y, width, height] = target.bbox;
++  return [x + width / 2, y + height / 2];
++};
++
++const resolveCoordinates = (
++  decision: ValidatedActionDecision,
++  observation: Observation | undefined,
++): readonly [number, number] => {
++  if (decision.targetId !== undefined) {
++    const target = observation?.elements.find(
++      element => element.id === decision.targetId,
++    );
++    if (target !== undefined) {
++      return targetCenter(target);
++    }
++  }
++  if (decision.coordinates !== undefined) {
++    return decision.coordinates;
++  }
++  throw new Error('validated_action_coordinates_missing');
++};
++
++const confirmationFields = (
++  decision: ValidatedActionDecision,
++): Pick<TaskAction, 'requiresConfirmation' | 'confirmationMessage'> => ({
++  requiresConfirmation: decision.requiresConfirmation,
++  ...(decision.requiresConfirmation
++    ? {confirmationMessage: `Confirm before ${decision.expectedState}`}
++    : {}),
++});
++
++const assertViewport = (viewport: ViewportDimensions): void => {
++  if (
++    !Number.isFinite(viewport.width) ||
++    viewport.width <= 0 ||
++    !Number.isFinite(viewport.height) ||
++    viewport.height <= 0
++  ) {
++    throw new Error('invalid_viewport_dimensions');
++  }
++};
++
++const pixels = (
++  coordinates: readonly [number, number],
++  viewport: ViewportDimensions,
++): readonly [number, number] => [
++  toPixel(coordinates[0], viewport.width),
++  toPixel(coordinates[1], viewport.height),
++];
++
++/** Adapts one already validated decision to the existing task executor schema. */
++export const toTaskAction = (
++  decision: ValidatedActionDecision,
++  observation: Observation | undefined,
++  viewport: ViewportDimensions,
++): TaskAction => {
++  assertViewport(viewport);
++  const confirmation = confirmationFields(decision);
++
++  switch (decision.action) {
++    case 'tap': {
++      const [x, y] = pixels(
++        resolveCoordinates(decision, observation),
++        viewport,
++      );
++      return {type: 'click', x, y, ...confirmation};
++    }
++    case 'input': {
++      const [x, y] = pixels(
++        resolveCoordinates(decision, observation),
++        viewport,
++      );
++      return {type: 'input', x, y, text: decision.text, ...confirmation};
++    }
++    case 'swipe': {
++      const [startX, startY] = pixels(
++        resolveCoordinates({...decision, coordinates: undefined}, observation),
++        viewport,
++      );
++      if (decision.coordinates === undefined) {
++        throw new Error('validated_swipe_end_coordinates_missing');
++      }
++      const [endX, endY] = pixels(decision.coordinates, viewport);
++      return {
++        type: 'swipe',
++        startX,
++        startY,
++        endX,
++        endY,
++        ...confirmation,
++      };
++    }
++    case 'back':
++      return {type: 'back', ...confirmation};
++    case 'wait':
++      return {type: 'wait', duration: 1000, ...confirmation};
++    case 'finish':
++      return {
++        type: 'complete',
++        message: decision.expectedState,
++        ...confirmation,
++      };
++    case 'ask_user':
++      return {
++        type: 'take_over',
++        takeOverMessage: decision.expectedState,
++        ...confirmation,
++      };
++  }
++};
+diff --git a/AwesomeProject/src/core/engine/agentRuntime/index.ts b/AwesomeProject/src/core/engine/agentRuntime/index.ts
+new file mode 100644
+index 0000000..c34ea20
+--- /dev/null
++++ b/AwesomeProject/src/core/engine/agentRuntime/index.ts
+@@ -0,0 +1,2 @@
++export * from './runtime/AgentRuntime';
++export * from './runtime/AgentRuntimeFactory';
+diff --git a/AwesomeProject/src/core/engine/agentRuntime/pipelines/DirectAgentPipeline.ts b/AwesomeProject/src/core/engine/agentRuntime/pipelines/DirectAgentPipeline.ts
+new file mode 100644
+index 0000000..416bca0
+--- /dev/null
++++ b/AwesomeProject/src/core/engine/agentRuntime/pipelines/DirectAgentPipeline.ts
+@@ -0,0 +1,14 @@
++import type {
++  AgentPipeline,
++  DirectAgentProvider,
++  PipelineStepResult,
++  StepInput,
++} from '../contracts/AgentContracts';
++
++export class DirectAgentPipeline implements AgentPipeline {
++  constructor(private readonly provider: DirectAgentProvider) {}
++
++  async decide(input: StepInput): Promise<PipelineStepResult> {
++    return {decision: await this.provider.decide(input)};
++  }
++}
+diff --git a/AwesomeProject/src/core/engine/agentRuntime/pipelines/SplitAgentPipeline.ts b/AwesomeProject/src/core/engine/agentRuntime/pipelines/SplitAgentPipeline.ts
+new file mode 100644
+index 0000000..df6e88b
+--- /dev/null
++++ b/AwesomeProject/src/core/engine/agentRuntime/pipelines/SplitAgentPipeline.ts
+@@ -0,0 +1,32 @@
++import type {
++  AgentPipeline,
++  PerceptionProvider,
++  PipelineStepResult,
++  PlannerProvider,
++  StepInput,
++} from '../contracts/AgentContracts';
++import {sanitizePlannerInput} from '../contracts/PlannerPayload';
++
++export class SplitAgentPipeline implements AgentPipeline {
++  constructor(
++    private readonly perception: PerceptionProvider,
++    private readonly planner: PlannerProvider,
++  ) {}
++
++  async decide(input: StepInput): Promise<PipelineStepResult> {
++    const rawObservation = await this.perception.observe({
++      screenshotUri: input.screenshotUri,
++      instruction: input.instruction,
++      signal: input.signal,
++    });
++    const plannerInput = sanitizePlannerInput({
++      observation: rawObservation,
++      instruction: input.instruction,
++      history: input.history,
++      signal: input.signal,
++    });
++    const decision = await this.planner.plan(plannerInput);
++    const {observation} = plannerInput;
++    return {observation, decision};
++  }
++}
+diff --git a/AwesomeProject/src/core/engine/agentRuntime/policy/ActionDecisionValidator.ts b/AwesomeProject/src/core/engine/agentRuntime/policy/ActionDecisionValidator.ts
+new file mode 100644
+index 0000000..63e77de
+--- /dev/null
++++ b/AwesomeProject/src/core/engine/agentRuntime/policy/ActionDecisionValidator.ts
+@@ -0,0 +1,245 @@
++import type {
++  ActionCoordinates,
++  ActionDecision,
++  Observation,
++  ObservationElement,
++} from '../domain/AgentTypes';
++import {requiresUserConfirmation} from './ActionPolicy';
++
++const ACTIONS = new Set<ActionDecision['action']>([
++  'tap',
++  'input',
++  'swipe',
++  'back',
++  'wait',
++  'finish',
++  'ask_user',
++]);
++const RISKS = new Set<ActionDecision['risk']>(['low', 'medium', 'high']);
++const DEFAULT_MINIMUM_TARGET_CONFIDENCE = 0.75;
++
++export type ActionValidationErrorCode =
++  | 'invalid_schema'
++  | 'missing_expected_state'
++  | 'coordinates_out_of_range'
++  | 'target_or_coordinates_missing'
++  | 'target_observation_missing'
++  | 'target_not_found'
++  | 'target_disabled'
++  | 'target_confidence_low'
++  | 'target_schema_invalid'
++  | 'input_text_missing'
++  | 'swipe_target_missing'
++  | 'swipe_end_coordinates_missing'
++  | 'repeated_unchanged_action';
++
++export class ActionValidationError extends Error {
++  constructor(public readonly code: ActionValidationErrorCode) {
++    super(code);
++    this.name = 'ActionValidationError';
++  }
++}
++
++export type ValidatedActionDecision = Readonly<
++  ActionDecision & {requiresConfirmation: boolean}
++>;
++
++export interface ActionValidationContext {
++  previousDecision?: ActionDecision;
++  stateChangedSincePreviousAction?: boolean;
++  minimumTargetConfidence?: number;
++}
++
++const fail = (code: ActionValidationErrorCode): never => {
++  throw new ActionValidationError(code);
++};
++
++const isRecord = (value: unknown): value is Record<string, unknown> =>
++  typeof value === 'object' && value !== null && !Array.isArray(value);
++
++const isNonBlankString = (value: unknown): value is string =>
++  typeof value === 'string' && value.trim().length > 0;
++
++const isNormalizedCoordinate = (value: unknown): value is number =>
++  typeof value === 'number' &&
++  Number.isFinite(value) &&
++  value >= 0 &&
++  value <= 1000;
++
++const validateCoordinates = (value: unknown): ActionCoordinates | undefined => {
++  if (value === undefined) {
++    return undefined;
++  }
++  if (
++    !Array.isArray(value) ||
++    value.length !== 2 ||
++    !isNormalizedCoordinate(value[0]) ||
++    !isNormalizedCoordinate(value[1])
++  ) {
++    return fail('coordinates_out_of_range');
++  }
++  return Object.freeze([value[0], value[1]]) as ActionCoordinates;
++};
++
++const isValidBoundingBox = (
++  value: unknown,
++): value is ObservationElement['bbox'] => {
++  if (!Array.isArray(value) || value.length !== 4) {
++    return false;
++  }
++  const bbox = value;
++  const [x, y, width, height] = bbox;
++  return (
++    bbox.length === 4 &&
++    isNormalizedCoordinate(x) &&
++    isNormalizedCoordinate(y) &&
++    isNormalizedCoordinate(width) &&
++    isNormalizedCoordinate(height) &&
++    x + width <= 1000 &&
++    y + height <= 1000
++  );
++};
++
++const isValidTargetSchema = (value: unknown): value is ObservationElement =>
++  isRecord(value) &&
++  isNonBlankString(value.id) &&
++  isNonBlankString(value.role) &&
++  (value.text === undefined || typeof value.text === 'string') &&
++  typeof value.enabled === 'boolean' &&
++  (value.selected === undefined || typeof value.selected === 'boolean') &&
++  typeof value.confidence === 'number' &&
++  Number.isFinite(value.confidence) &&
++  value.confidence >= 0 &&
++  value.confidence <= 1 &&
++  isValidBoundingBox(value.bbox);
++
++const resolveTarget = (
++  targetId: string | undefined,
++  observation: Observation | undefined,
++  minimumConfidence: number,
++): ObservationElement | undefined => {
++  if (targetId === undefined) {
++    return undefined;
++  }
++  if (observation === undefined) {
++    return fail('target_observation_missing');
++  }
++  if (!isRecord(observation)) {
++    return fail('target_schema_invalid');
++  }
++  const elements = observation.elements;
++  if (!Array.isArray(elements)) {
++    return fail('target_schema_invalid');
++  }
++  const target = elements.find(
++    element => isRecord(element) && element.id === targetId,
++  );
++  if (!target) {
++    return fail('target_not_found');
++  }
++  if (!isValidTargetSchema(target)) {
++    return fail('target_schema_invalid');
++  }
++  if (!target.enabled) {
++    return fail('target_disabled');
++  }
++  if (target.confidence < minimumConfidence) {
++    return fail('target_confidence_low');
++  }
++  return target;
++};
++
++const coordinatesEqual = (
++  first: ActionDecision['coordinates'],
++  second: ActionDecision['coordinates'],
++): boolean =>
++  first === undefined
++    ? second === undefined
++    : second !== undefined && first[0] === second[0] && first[1] === second[1];
++
++const isSameExecutableAction = (
++  first: ActionDecision,
++  second: ActionDecision,
++): boolean =>
++  first.action === second.action &&
++  first.targetId === second.targetId &&
++  first.text === second.text &&
++  coordinatesEqual(first.coordinates, second.coordinates);
++
++/** Validates untrusted provider output before it reaches the legacy executor. */
++export const validateActionDecision = (
++  input: unknown,
++  observation?: Observation,
++  context: ActionValidationContext = {},
++): ValidatedActionDecision => {
++  if (!isRecord(input)) {
++    return fail('invalid_schema');
++  }
++  if (!isNonBlankString(input.expectedState)) {
++    return fail('missing_expected_state');
++  }
++  if (
++    input.schemaVersion !== 1 ||
++    !isNonBlankString(input.subtaskId) ||
++    typeof input.action !== 'string' ||
++    !ACTIONS.has(input.action as ActionDecision['action']) ||
++    typeof input.risk !== 'string' ||
++    !RISKS.has(input.risk as ActionDecision['risk']) ||
++    (input.targetId !== undefined && !isNonBlankString(input.targetId)) ||
++    (input.text !== undefined && typeof input.text !== 'string')
++  ) {
++    return fail('invalid_schema');
++  }
++
++  const coordinates = validateCoordinates(input.coordinates);
++  const decision = {
++    schemaVersion: 1,
++    subtaskId: input.subtaskId,
++    action: input.action,
++    ...(input.targetId === undefined ? {} : {targetId: input.targetId}),
++    ...(coordinates === undefined ? {} : {coordinates}),
++    ...(input.text === undefined ? {} : {text: input.text}),
++    expectedState: input.expectedState,
++    risk: input.risk,
++  } as ActionDecision;
++
++  if (
++    decision.action === 'input' &&
++    (typeof decision.text !== 'string' || decision.text.trim().length === 0)
++  ) {
++    return fail('input_text_missing');
++  }
++  if (decision.action === 'swipe') {
++    if (decision.targetId === undefined) {
++      return fail('swipe_target_missing');
++    }
++    if (decision.coordinates === undefined) {
++      return fail('swipe_end_coordinates_missing');
++    }
++  } else if (
++    (decision.action === 'tap' || decision.action === 'input') &&
++    decision.targetId === undefined &&
++    decision.coordinates === undefined
++  ) {
++    return fail('target_or_coordinates_missing');
++  }
++
++  const target = resolveTarget(
++    decision.targetId,
++    observation,
++    context.minimumTargetConfidence ?? DEFAULT_MINIMUM_TARGET_CONFIDENCE,
++  );
++
++  if (
++    context.stateChangedSincePreviousAction === false &&
++    context.previousDecision !== undefined &&
++    isSameExecutableAction(decision, context.previousDecision)
++  ) {
++    return fail('repeated_unchanged_action');
++  }
++
++  return Object.freeze({
++    ...decision,
++    requiresConfirmation: requiresUserConfirmation(decision, {target}),
++  });
++};
+diff --git a/AwesomeProject/src/core/engine/agentRuntime/policy/ActionPolicy.ts b/AwesomeProject/src/core/engine/agentRuntime/policy/ActionPolicy.ts
+new file mode 100644
+index 0000000..d99dbc9
+--- /dev/null
++++ b/AwesomeProject/src/core/engine/agentRuntime/policy/ActionPolicy.ts
+@@ -0,0 +1,37 @@
++import type {ActionDecision, ObservationElement} from '../domain/AgentTypes';
++
++const HIGH_RISK_PATTERNS: readonly RegExp[] = [
++  /\b(?:pay(?:ment)?|transfer|delet(?:e|ed|ion)|remov(?:e|al)|authori[sz](?:e|ation)|grant permission|send(?:ing)? (?:a )?message|message sent)\b/i,
++  /支付|付款|转账|汇款|删除|授权|发送消息|发消息|消息已发送/,
++];
++
++/**
++ * Applies the common confirmation policy independently from provider-reported
++ * risk. Providers may under-classify a destructive action, so semantic action
++ * fields are checked as a second line of defence.
++ */
++export interface ActionPolicyContext {
++  target?: Pick<ObservationElement, 'role' | 'text'>;
++}
++
++export const requiresUserConfirmation = (
++  decision: ActionDecision,
++  context: ActionPolicyContext = {},
++): boolean => {
++  if (decision.risk === 'high') {
++    return true;
++  }
++
++  const policyText = [
++    decision.subtaskId,
++    decision.targetId,
++    decision.text,
++    decision.expectedState,
++    context.target?.role,
++    context.target?.text,
++  ]
++    .filter((value): value is string => typeof value === 'string')
++    .join(' ');
++
++  return HIGH_RISK_PATTERNS.some(pattern => pattern.test(policyText));
++};
+diff --git a/AwesomeProject/src/core/engine/agentRuntime/providers/CloudPerceptionProvider.ts b/AwesomeProject/src/core/engine/agentRuntime/providers/CloudPerceptionProvider.ts
+new file mode 100644
+index 0000000..63b3e26
+--- /dev/null
++++ b/AwesomeProject/src/core/engine/agentRuntime/providers/CloudPerceptionProvider.ts
+@@ -0,0 +1,57 @@
++import type {
++  CredentialResolver,
++  Observation,
++  PerceptionInput,
++  PerceptionProvider,
++} from '../contracts/AgentContracts';
++import type {ModelConnection} from '../domain/AgentTypes';
++import {
++  parseObservationResponse,
++  resolveCredential,
++  type OpenAICompatibleTransport,
++} from './OpenAICompatibleTransport';
++
++const SYSTEM_PROMPT =
++  'Describe the current mobile screen as one JSON Observation object. ' +
++  'Use normalized 0..1000 bounding boxes and stable element ids.';
++
++export class CloudPerceptionProvider implements PerceptionProvider {
++  constructor(
++    private readonly connection: ModelConnection,
++    private readonly credentialResolver: CredentialResolver,
++    private readonly transport: OpenAICompatibleTransport,
++  ) {}
++
++  async observe(input: PerceptionInput): Promise<Observation> {
++    const apiKey = await resolveCredential(
++      this.credentialResolver,
++      this.connection.secretRef,
++    );
++    const response = await this.transport.post({
++      baseUrl: this.connection.baseUrl,
++      apiKey,
++      signal: input.signal,
++      body: {
++        model: this.connection.modelName,
++        messages: [
++          {role: 'system', content: SYSTEM_PROMPT},
++          {
++            role: 'user',
++            content: [
++              {
++                type: 'text',
++                text: JSON.stringify({instruction: input.instruction}),
++              },
++              {type: 'image_url', image_url: {url: input.screenshotUri}},
++            ],
++          },
++        ],
++        temperature: 0,
++        ...(this.connection.capabilities.jsonOutput
++          ? {response_format: {type: 'json_object'}}
++          : {}),
++      },
++    });
++    return parseObservationResponse(response);
++  }
++}
+diff --git a/AwesomeProject/src/core/engine/agentRuntime/providers/OpenAICompatibleDirectProvider.ts b/AwesomeProject/src/core/engine/agentRuntime/providers/OpenAICompatibleDirectProvider.ts
+new file mode 100644
+index 0000000..6451c23
+--- /dev/null
++++ b/AwesomeProject/src/core/engine/agentRuntime/providers/OpenAICompatibleDirectProvider.ts
+@@ -0,0 +1,85 @@
++import type {
++  CredentialResolver,
++  DirectActionDecision,
++  DirectAgentProvider,
++  StepInput,
++} from '../contracts/AgentContracts';
++import {AgentProviderError} from '../contracts/AgentContracts';
++import type {ModelConnection} from '../domain/AgentTypes';
++import {
++  parseActionDecisionResponse,
++  resolveCredential,
++  type OpenAICompatibleTransport,
++} from './OpenAICompatibleTransport';
++
++const SYSTEM_PROMPT =
++  'Inspect the mobile screenshot and choose exactly one next action. ' +
++  'Return one JSON ActionDecision and do not return an action sequence. ' +
++  'A tap or input must contain normalized 0..1000 coordinates; targetId alone is invalid. ' +
++  'Swipe is unsupported in direct mode.';
++
++const hasNormalizedCoordinates = (value: unknown): boolean =>
++  Array.isArray(value) &&
++  value.length === 2 &&
++  value.every(
++    coordinate =>
++      typeof coordinate === 'number' &&
++      Number.isFinite(coordinate) &&
++      coordinate >= 0 &&
++      coordinate <= 1000,
++  );
++
++export class OpenAICompatibleDirectProvider implements DirectAgentProvider {
++  constructor(
++    private readonly connection: ModelConnection,
++    private readonly credentialResolver: CredentialResolver,
++    private readonly transport: OpenAICompatibleTransport,
++  ) {}
++
++  async decide(input: StepInput): Promise<DirectActionDecision> {
++    const apiKey = await resolveCredential(
++      this.credentialResolver,
++      this.connection.secretRef,
++    );
++    const response = await this.transport.post({
++      baseUrl: this.connection.baseUrl,
++      apiKey,
++      signal: input.signal,
++      body: {
++        model: this.connection.modelName,
++        messages: [
++          {role: 'system', content: SYSTEM_PROMPT},
++          {
++            role: 'user',
++            content: [
++              {
++                type: 'text',
++                text: JSON.stringify({
++                  instruction: input.instruction,
++                  history: input.history,
++                }),
++              },
++              {type: 'image_url', image_url: {url: input.screenshotUri}},
++            ],
++          },
++        ],
++        temperature: 0,
++        ...(this.connection.capabilities.jsonOutput
++          ? {response_format: {type: 'json_object'}}
++          : {}),
++      },
++    });
++    const decision = parseActionDecisionResponse(response);
++    if (
++      decision.action === 'swipe' ||
++      ((decision.action === 'tap' || decision.action === 'input') &&
++        !hasNormalizedCoordinates(decision.coordinates))
++    ) {
++      throw new AgentProviderError(
++        'invalid_structured_response',
++        'Provider returned invalid structured output',
++      );
++    }
++    return decision as DirectActionDecision;
++  }
++}
+diff --git a/AwesomeProject/src/core/engine/agentRuntime/providers/OpenAICompatiblePlannerProvider.ts b/AwesomeProject/src/core/engine/agentRuntime/providers/OpenAICompatiblePlannerProvider.ts
+new file mode 100644
+index 0000000..fd52ae3
+--- /dev/null
++++ b/AwesomeProject/src/core/engine/agentRuntime/providers/OpenAICompatiblePlannerProvider.ts
+@@ -0,0 +1,57 @@
++import type {
++  ActionDecision,
++  CredentialResolver,
++  PlannerInput,
++  PlannerProvider,
++} from '../contracts/AgentContracts';
++import {sanitizePlannerInput} from '../contracts/PlannerPayload';
++import type {ModelConnection} from '../domain/AgentTypes';
++import {
++  parseActionDecisionResponse,
++  resolveCredential,
++  type OpenAICompatibleTransport,
++} from './OpenAICompatibleTransport';
++
++const SYSTEM_PROMPT =
++  'Choose exactly one next mobile action and return one JSON ActionDecision. ' +
++  'Use targetId when the observation provides a stable element id.';
++
++export class OpenAICompatiblePlannerProvider implements PlannerProvider {
++  constructor(
++    private readonly connection: ModelConnection,
++    private readonly credentialResolver: CredentialResolver,
++    private readonly transport: OpenAICompatibleTransport,
++  ) {}
++
++  async plan(input: PlannerInput): Promise<ActionDecision> {
++    const sanitized = sanitizePlannerInput(input);
++    const apiKey = await resolveCredential(
++      this.credentialResolver,
++      this.connection.secretRef,
++    );
++    const response = await this.transport.post({
++      baseUrl: this.connection.baseUrl,
++      apiKey,
++      signal: input.signal,
++      body: {
++        model: this.connection.modelName,
++        messages: [
++          {role: 'system', content: SYSTEM_PROMPT},
++          {
++            role: 'user',
++            content: JSON.stringify({
++              observation: sanitized.observation,
++              instruction: sanitized.instruction,
++              history: sanitized.history,
++            }),
++          },
++        ],
++        temperature: 0,
++        ...(this.connection.capabilities.jsonOutput
++          ? {response_format: {type: 'json_object'}}
++          : {}),
++      },
++    });
++    return parseActionDecisionResponse(response);
++  }
++}
+diff --git a/AwesomeProject/src/core/engine/agentRuntime/providers/OpenAICompatibleTransport.ts b/AwesomeProject/src/core/engine/agentRuntime/providers/OpenAICompatibleTransport.ts
+new file mode 100644
+index 0000000..a20066a
+--- /dev/null
++++ b/AwesomeProject/src/core/engine/agentRuntime/providers/OpenAICompatibleTransport.ts
+@@ -0,0 +1,232 @@
++import {
++  AgentProviderError,
++  type ActionDecision,
++  type CredentialResolver,
++  type Observation,
++} from '../contracts/AgentContracts';
++import {sanitizeObservation} from '../contracts/PlannerPayload';
++
++export interface OpenAICompatibleRequest {
++  readonly baseUrl: string;
++  readonly apiKey: string;
++  readonly body: Readonly<Record<string, unknown>>;
++  readonly signal: AbortSignal;
++}
++
++export interface OpenAICompatibleTransport {
++  post(request: OpenAICompatibleRequest): Promise<unknown>;
++}
++
++interface FetchResponseLike {
++  readonly ok: boolean;
++  readonly status: number;
++  json(): Promise<unknown>;
++}
++
++export type OpenAICompatibleFetch = (
++  url: string,
++  init: {
++    readonly method: 'POST';
++    readonly headers: Readonly<Record<string, string>>;
++    readonly body: string;
++    readonly signal: AbortSignal;
++  },
++) => Promise<FetchResponseLike>;
++
++const chatCompletionsUrl = (baseUrl: string): string => {
++  let url: URL;
++  try {
++    url = new URL(baseUrl.trim());
++  } catch {
++    throw new AgentProviderError(
++      'invalid_configuration',
++      'Provider configuration is invalid',
++    );
++  }
++  if (
++    (url.protocol !== 'https:' && url.protocol !== 'http:') ||
++    !url.hostname ||
++    url.username ||
++    url.password
++  ) {
++    throw new AgentProviderError(
++      'invalid_configuration',
++      'Provider configuration is invalid',
++    );
++  }
++  const pathname = url.pathname.replace(/\/+$/, '');
++  if (!pathname.endsWith('/chat/completions')) {
++    url.pathname = `${pathname}/chat/completions`;
++  }
++  return url.toString();
++};
++
++export class FetchOpenAICompatibleTransport
++  implements OpenAICompatibleTransport
++{
++  constructor(
++    private readonly fetchFn: OpenAICompatibleFetch = fetch as unknown as OpenAICompatibleFetch,
++  ) {}
++
++  async post(request: OpenAICompatibleRequest): Promise<unknown> {
++    const url = chatCompletionsUrl(request.baseUrl);
++    let response: FetchResponseLike;
++    try {
++      response = await this.fetchFn(url, {
++        method: 'POST',
++        headers: {
++          Authorization: `Bearer ${request.apiKey}`,
++          'Content-Type': 'application/json',
++        },
++        body: JSON.stringify(request.body),
++        signal: request.signal,
++      });
++    } catch {
++      throw new AgentProviderError(
++        'transport_failed',
++        'Provider request failed',
++      );
++    }
++
++    if (!response.ok) {
++      throw new AgentProviderError(
++        'http_error',
++        `Provider request failed with HTTP ${response.status}`,
++      );
++    }
++
++    try {
++      return await response.json();
++    } catch {
++      throw new AgentProviderError(
++        'invalid_response',
++        'Provider returned an invalid response',
++      );
++    }
++  }
++}
++
++export const resolveCredential = async (
++  resolver: CredentialResolver,
++  secretRef: string,
++): Promise<string> => {
++  const apiKey = await resolver.resolve(secretRef);
++  if (!apiKey || !apiKey.trim()) {
++    throw new AgentProviderError(
++      'credential_unavailable',
++      'Provider credential is unavailable',
++    );
++  }
++  return apiKey;
++};
++
++const extractTextContent = (response: unknown): string => {
++  if (response === null || typeof response !== 'object') {
++    throw new AgentProviderError(
++      'invalid_response',
++      'Provider returned an invalid response',
++    );
++  }
++  const choices = (response as {choices?: unknown}).choices;
++  if (!Array.isArray(choices) || choices.length === 0) {
++    throw new AgentProviderError(
++      'invalid_response',
++      'Provider returned an invalid response',
++    );
++  }
++  const choice = choices[0];
++  const message =
++    choice !== null && typeof choice === 'object'
++      ? (choice as {message?: unknown}).message
++      : undefined;
++  const content =
++    message !== null && typeof message === 'object'
++      ? (message as {content?: unknown}).content
++      : undefined;
++
++  if (typeof content === 'string') {
++    return content;
++  }
++  if (Array.isArray(content)) {
++    const text = content
++      .map(part =>
++        part !== null &&
++        typeof part === 'object' &&
++        typeof (part as {text?: unknown}).text === 'string'
++          ? ((part as {text: string}).text as string)
++          : '',
++      )
++      .join('');
++    if (text) {
++      return text;
++    }
++  }
++  throw new AgentProviderError(
++    'invalid_response',
++    'Provider returned an invalid response',
++  );
++};
++
++export const parseStructuredResponse = (
++  response: unknown,
++): Record<string, unknown> => {
++  const raw = extractTextContent(response).trim();
++  const fence = raw.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
++  const json = fence ? fence[1] : raw;
++  try {
++    const parsed: unknown = JSON.parse(json);
++    if (
++      parsed === null ||
++      typeof parsed !== 'object' ||
++      Array.isArray(parsed)
++    ) {
++      throw new Error('not_an_object');
++    }
++    return parsed as Record<string, unknown>;
++  } catch {
++    throw new AgentProviderError(
++      'invalid_structured_response',
++      'Provider returned invalid structured output',
++    );
++  }
++};
++
++const ACTIONS = new Set([
++  'tap',
++  'input',
++  'swipe',
++  'back',
++  'wait',
++  'finish',
++  'ask_user',
++]);
++const RISKS = new Set(['low', 'medium', 'high']);
++
++const invalidStructuredResponse = (): never => {
++  throw new AgentProviderError(
++    'invalid_structured_response',
++    'Provider returned invalid structured output',
++  );
++};
++
++export const parseActionDecisionResponse = (
++  response: unknown,
++): ActionDecision => {
++  const value = parseStructuredResponse(response);
++  if (
++    value.schemaVersion !== 1 ||
++    typeof value.subtaskId !== 'string' ||
++    typeof value.action !== 'string' ||
++    !ACTIONS.has(value.action) ||
++    typeof value.expectedState !== 'string' ||
++    typeof value.risk !== 'string' ||
++    !RISKS.has(value.risk)
++  ) {
++    return invalidStructuredResponse();
++  }
++  return value as unknown as ActionDecision;
++};
++
++export const parseObservationResponse = (response: unknown): Observation => {
++  return sanitizeObservation(parseStructuredResponse(response));
++};
+diff --git a/AwesomeProject/src/core/engine/agentRuntime/runtime/AgentRuntime.ts b/AwesomeProject/src/core/engine/agentRuntime/runtime/AgentRuntime.ts
+new file mode 100644
+index 0000000..b002bb9
+--- /dev/null
++++ b/AwesomeProject/src/core/engine/agentRuntime/runtime/AgentRuntime.ts
+@@ -0,0 +1,283 @@
++import type {TaskAction} from '@core/engine/taskEngine/types/Task';
++
++import type {
++  AgentPipeline,
++  CredentialResolver,
++  RuntimeHistoryEntry,
++  StepInput,
++} from '../contracts/AgentContracts';
++import type {AgentTaskConfigSnapshot} from '../domain/AgentConfigState';
++import {validateAgentConfig} from '../domain/AgentConfigValidation';
++import type {
++  AgentConfigError,
++  AgentMode,
++  ModelConnection,
++  Observation,
++} from '../domain/AgentTypes';
++import {
++  toTaskAction,
++  type ViewportDimensions,
++} from '../adapters/TaskActionAdapter';
++import {
++  validateActionDecision,
++  type ValidatedActionDecision,
++} from '../policy/ActionDecisionValidator';
++
++export type RuntimeTaskSnapshot = AgentTaskConfigSnapshot;
++
++export interface RuntimeStepInput extends StepInput {
++  readonly stateChangedSincePreviousAction?: boolean;
++}
++
++export interface RuntimeStepResult {
++  readonly decision: ValidatedActionDecision;
++  readonly observation?: Observation;
++  readonly taskAction: TaskAction;
++  readonly diagnostics: Readonly<{
++    mode: AgentMode;
++    durationMs: number;
++  }>;
++}
++
++export interface RuntimeConfigurationSource {
++  createTaskSnapshot(): AgentTaskConfigSnapshot;
++}
++
++export interface RuntimePipelineFactory {
++  createDirect(connection: ModelConnection): AgentPipeline;
++  createCloudSplit(
++    visionConnection: ModelConnection,
++    plannerConnection: ModelConnection,
++  ): AgentPipeline;
++  createLocalSplit(
++    plannerConnection: ModelConnection,
++    localModelId: 'minicpm-v-4.6-q4',
++  ): AgentPipeline;
++}
++
++export interface RuntimeViewportAdapter {
++  getDimensions(): ViewportDimensions | PromiseLike<ViewportDimensions>;
++}
++
++export type AgentRuntimeConfigurationErrorCode =
++  | 'invalid_active_configuration'
++  | 'credential_unavailable';
++
++export const AGENT_RUNTIME_ABORTED = 'agent_runtime_aborted' as const;
++
++export class AgentRuntimeAbortError extends Error {
++  readonly name = 'AbortError';
++  readonly code = AGENT_RUNTIME_ABORTED;
++
++  constructor() {
++    super(AGENT_RUNTIME_ABORTED);
++    Object.setPrototypeOf(this, new.target.prototype);
++  }
++}
++
++export class AgentRuntimeConfigurationError extends Error {
++  readonly name = 'AgentRuntimeConfigurationError';
++
++  constructor(
++    readonly code: AgentRuntimeConfigurationErrorCode,
++    readonly validationErrors: readonly AgentConfigError[] = [],
++  ) {
++    super(code);
++    Object.setPrototypeOf(this, new.target.prototype);
++  }
++}
++
++export interface AgentRuntimeDependencies {
++  readonly configSource: RuntimeConfigurationSource;
++  readonly credentialResolver: CredentialResolver;
++  readonly pipelineFactory: RuntimePipelineFactory;
++  readonly viewportAdapter: RuntimeViewportAdapter;
++  readonly now?: () => number;
++}
++
++const cloneAndFreeze = <T>(value: T): T => {
++  if (Array.isArray(value)) {
++    return Object.freeze(value.map(item => cloneAndFreeze(item))) as T;
++  }
++  if (value !== null && typeof value === 'object') {
++    const copy = Object.fromEntries(
++      Object.entries(value as Record<string, unknown>).map(([key, item]) => [
++        key,
++        cloneAndFreeze(item),
++      ]),
++    );
++    return Object.freeze(copy) as T;
++  }
++  return value;
++};
++
++const requiredConnectionIds = (
++  snapshot: RuntimeTaskSnapshot,
++): readonly string[] => {
++  const {config} = snapshot;
++  switch (config.activeMode) {
++    case 'cloud_direct':
++      return config.modeDrafts.cloudDirect.modelConnectionId
++        ? [config.modeDrafts.cloudDirect.modelConnectionId]
++        : [];
++    case 'cloud_split':
++      return [
++        config.modeDrafts.cloudSplit.visionConnectionId,
++        config.modeDrafts.cloudSplit.plannerConnectionId,
++      ].filter((id): id is string => id !== undefined);
++    case 'local_vision_cloud_planner':
++      return config.modeDrafts.localVisionCloudPlanner.plannerConnectionId
++        ? [config.modeDrafts.localVisionCloudPlanner.plannerConnectionId]
++        : [];
++  }
++};
++
++const connectionById = (
++  snapshot: RuntimeTaskSnapshot,
++  id: string | undefined,
++): ModelConnection => {
++  const connection = id === undefined ? undefined : snapshot.connections[id];
++  if (connection === undefined) {
++    throw new AgentRuntimeConfigurationError('invalid_active_configuration', [
++      'connection_missing',
++    ]);
++  }
++  return connection;
++};
++
++const previousDecision = (
++  history: readonly RuntimeHistoryEntry[],
++): RuntimeHistoryEntry['decision'] => {
++  for (let index = history.length - 1; index >= 0; index -= 1) {
++    if (history[index].decision !== undefined) {
++      return history[index].decision;
++    }
++  }
++  return undefined;
++};
++
++const throwIfRuntimeAborted = (signal: AbortSignal): void => {
++  if (signal.aborted) {
++    throw new AgentRuntimeAbortError();
++  }
++};
++
++export class AgentRuntime {
++  private readonly now: () => number;
++
++  constructor(private readonly dependencies: AgentRuntimeDependencies) {
++    this.now = dependencies.now ?? Date.now;
++  }
++
++  async createTaskSnapshot(): Promise<RuntimeTaskSnapshot> {
++    const snapshot = cloneAndFreeze(
++      this.dependencies.configSource.createTaskSnapshot(),
++    );
++    const validation = validateAgentConfig(
++      snapshot.config,
++      Object.values(snapshot.connections),
++      snapshot.eligibility,
++    );
++    if (!validation.ok) {
++      throw new AgentRuntimeConfigurationError(
++        'invalid_active_configuration',
++        Object.freeze([...validation.errors]),
++      );
++    }
++
++    for (const id of new Set(requiredConnectionIds(snapshot))) {
++      const connection = connectionById(snapshot, id);
++      const credential = await this.dependencies.credentialResolver.resolve(
++        connection.secretRef,
++      );
++      if (typeof credential !== 'string' || credential.trim().length === 0) {
++        throw new AgentRuntimeConfigurationError('credential_unavailable');
++      }
++    }
++
++    return snapshot;
++  }
++
++  async decideStep(
++    snapshot: RuntimeTaskSnapshot,
++    input: RuntimeStepInput,
++  ): Promise<RuntimeStepResult> {
++    throwIfRuntimeAborted(input.signal);
++    const startedAt = this.now();
++    const history = cloneAndFreeze(input.history);
++    const pipelineInput: StepInput = Object.freeze({
++      screenshotUri: input.screenshotUri,
++      instruction: input.instruction,
++      history,
++      signal: input.signal,
++    });
++    const mode = snapshot.config.activeMode;
++    const pipeline = this.pipelineFor(snapshot);
++    let output: Awaited<ReturnType<AgentPipeline['decide']>>;
++    try {
++      output = await pipeline.decide(pipelineInput);
++    } catch (error) {
++      throwIfRuntimeAborted(input.signal);
++      throw error;
++    }
++    throwIfRuntimeAborted(input.signal);
++    const observation =
++      mode === 'cloud_direct' ? undefined : output.observation;
++    const decision = validateActionDecision(output.decision, observation, {
++      previousDecision: previousDecision(history),
++      stateChangedSincePreviousAction: input.stateChangedSincePreviousAction,
++    });
++    let viewport: ViewportDimensions;
++    try {
++      viewport = await this.dependencies.viewportAdapter.getDimensions();
++    } catch (error) {
++      throwIfRuntimeAborted(input.signal);
++      throw error;
++    }
++    throwIfRuntimeAborted(input.signal);
++    const taskAction = toTaskAction(decision, observation, viewport);
++    const diagnostics = Object.freeze({
++      mode,
++      durationMs: Math.max(0, this.now() - startedAt),
++    });
++
++    return Object.freeze({
++      decision,
++      ...(observation === undefined ? {} : {observation}),
++      taskAction,
++      diagnostics,
++    });
++  }
++
++  private pipelineFor(snapshot: RuntimeTaskSnapshot): AgentPipeline {
++    const {config} = snapshot;
++    switch (config.activeMode) {
++      case 'cloud_direct':
++        return this.dependencies.pipelineFactory.createDirect(
++          connectionById(
++            snapshot,
++            config.modeDrafts.cloudDirect.modelConnectionId,
++          ),
++        );
++      case 'cloud_split':
++        return this.dependencies.pipelineFactory.createCloudSplit(
++          connectionById(
++            snapshot,
++            config.modeDrafts.cloudSplit.visionConnectionId,
++          ),
++          connectionById(
++            snapshot,
++            config.modeDrafts.cloudSplit.plannerConnectionId,
++          ),
++        );
++      case 'local_vision_cloud_planner':
++        return this.dependencies.pipelineFactory.createLocalSplit(
++          connectionById(
++            snapshot,
++            config.modeDrafts.localVisionCloudPlanner.plannerConnectionId,
++          ),
++          config.modeDrafts.localVisionCloudPlanner.localModelId,
++        );
++    }
++  }
++}
+diff --git a/AwesomeProject/src/core/engine/agentRuntime/runtime/AgentRuntimeFactory.ts b/AwesomeProject/src/core/engine/agentRuntime/runtime/AgentRuntimeFactory.ts
+new file mode 100644
+index 0000000..a70f97b
+--- /dev/null
++++ b/AwesomeProject/src/core/engine/agentRuntime/runtime/AgentRuntimeFactory.ts
+@@ -0,0 +1,131 @@
++import type {
++  CredentialResolver,
++  PerceptionInput,
++  PerceptionProvider,
++} from '../contracts/AgentContracts';
++import {sanitizeObservation} from '../contracts/PlannerPayload';
++import type {ModelConnection} from '../domain/AgentTypes';
++import {DirectAgentPipeline} from '../pipelines/DirectAgentPipeline';
++import {SplitAgentPipeline} from '../pipelines/SplitAgentPipeline';
++import {CloudPerceptionProvider} from '../providers/CloudPerceptionProvider';
++import {OpenAICompatibleDirectProvider} from '../providers/OpenAICompatibleDirectProvider';
++import {OpenAICompatiblePlannerProvider} from '../providers/OpenAICompatiblePlannerProvider';
++import type {OpenAICompatibleTransport} from '../providers/OpenAICompatibleTransport';
++import {
++  AgentRuntime,
++  AgentRuntimeAbortError,
++  type RuntimeConfigurationSource,
++  type RuntimePipelineFactory,
++  type RuntimeViewportAdapter,
++} from './AgentRuntime';
++
++export const LOCAL_PERCEPTION_UNAVAILABLE =
++  'local_perception_unavailable' as const;
++
++export class LocalPerceptionUnavailableError extends Error {
++  readonly name = 'LocalPerceptionUnavailableError';
++  readonly code = LOCAL_PERCEPTION_UNAVAILABLE;
++
++  constructor() {
++    super(LOCAL_PERCEPTION_UNAVAILABLE);
++    Object.setPrototypeOf(this, new.target.prototype);
++  }
++}
++
++export interface AgentRuntimeFactoryDependencies {
++  readonly configSource: RuntimeConfigurationSource;
++  readonly credentialResolver: CredentialResolver;
++  readonly transport: OpenAICompatibleTransport;
++  readonly localPerceptionProviderFactory: (
++    modelId: 'minicpm-v-4.6-q4',
++  ) => PerceptionProvider;
++  readonly viewportAdapter: RuntimeViewportAdapter;
++  readonly invalidateLocalEligibility: (
++    errorCode: typeof LOCAL_PERCEPTION_UNAVAILABLE,
++  ) => unknown | PromiseLike<unknown>;
++  readonly now?: () => number;
++}
++
++class GuardedLocalPerceptionProvider implements PerceptionProvider {
++  private delegate?: PerceptionProvider;
++
++  constructor(
++    private readonly createDelegate: () => PerceptionProvider,
++    private readonly invalidate: AgentRuntimeFactoryDependencies['invalidateLocalEligibility'],
++  ) {}
++
++  async observe(input: PerceptionInput) {
++    try {
++      this.delegate ??= this.createDelegate();
++      const rawObservation = await this.delegate.observe(input);
++      if (input.signal.aborted) {
++        throw new AgentRuntimeAbortError();
++      }
++      return sanitizeObservation(rawObservation);
++    } catch (error) {
++      if (input.signal.aborted) {
++        throw error instanceof AgentRuntimeAbortError
++          ? error
++          : new AgentRuntimeAbortError();
++      }
++      try {
++        await this.invalidate(LOCAL_PERCEPTION_UNAVAILABLE);
++      } catch {
++        // Preserve the local inference failure even when state invalidation fails.
++      }
++      throw new LocalPerceptionUnavailableError();
++    }
++  }
++}
++
++const createPipelineFactory = (
++  dependencies: AgentRuntimeFactoryDependencies,
++): RuntimePipelineFactory => ({
++  createDirect: (connection: ModelConnection) =>
++    new DirectAgentPipeline(
++      new OpenAICompatibleDirectProvider(
++        connection,
++        dependencies.credentialResolver,
++        dependencies.transport,
++      ),
++    ),
++  createCloudSplit: (
++    visionConnection: ModelConnection,
++    plannerConnection: ModelConnection,
++  ) =>
++    new SplitAgentPipeline(
++      new CloudPerceptionProvider(
++        visionConnection,
++        dependencies.credentialResolver,
++        dependencies.transport,
++      ),
++      new OpenAICompatiblePlannerProvider(
++        plannerConnection,
++        dependencies.credentialResolver,
++        dependencies.transport,
++      ),
++    ),
++  createLocalSplit: (plannerConnection, localModelId) =>
++    new SplitAgentPipeline(
++      new GuardedLocalPerceptionProvider(
++        () => dependencies.localPerceptionProviderFactory(localModelId),
++        dependencies.invalidateLocalEligibility,
++      ),
++      new OpenAICompatiblePlannerProvider(
++        plannerConnection,
++        dependencies.credentialResolver,
++        dependencies.transport,
++      ),
++    ),
++});
++
++export const createAgentRuntime = (
++  dependencies: AgentRuntimeFactoryDependencies,
++): AgentRuntime =>
++  new AgentRuntime({
++    configSource: dependencies.configSource,
++    credentialResolver: dependencies.credentialResolver,
++    pipelineFactory: createPipelineFactory(dependencies),
++    viewportAdapter: dependencies.viewportAdapter,
++    ...(dependencies.now === undefined ? {} : {now: dependencies.now}),
++  });

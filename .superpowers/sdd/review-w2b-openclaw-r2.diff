@@ -1,0 +1,1186 @@
+# Review package: a5e36ddec7635a2aa4406ee6bda4852b742d9c93..HEAD
+
+## Commits
+816db98 fix: map binding-port failures in connect() to a generic CapabilityError
+f143dfb feat: add openclaw visual agent adapter
+
+## Files changed
+ .../visualAgent/openclaw/OpenClawAdapter.test.ts   | 308 ++++++++++++
+ .../adapters/openclaw/OpenClawAdapter.ts           | 541 +++++++++++++++++++++
+ .../adapters/openclaw/OpenClawBinding.ts           |  79 +++
+ .../adapters/openclaw/conformanceFixture.ts        | 220 +++++++++
+ 4 files changed, 1148 insertions(+)
+
+## Diff
+diff --git a/AwesomeProject/src/__tests__/connectorBridge/visualAgent/openclaw/OpenClawAdapter.test.ts b/AwesomeProject/src/__tests__/connectorBridge/visualAgent/openclaw/OpenClawAdapter.test.ts
+new file mode 100644
+index 0000000..11a8738
+--- /dev/null
++++ b/AwesomeProject/src/__tests__/connectorBridge/visualAgent/openclaw/OpenClawAdapter.test.ts
+@@ -0,0 +1,308 @@
++import {defineVisualAgentAdapterConformance} from '../../../../connectorBridge/visualAgent/conformance/VisualAgentAdapterConformance';
++import {OpenClawAdapter} from '../../../../connectorBridge/visualAgent/adapters/openclaw/OpenClawAdapter';
++import {createOpenClawConformanceFixture} from '../../../../connectorBridge/visualAgent/adapters/openclaw/conformanceFixture';
++import type {
++  VisualAgentBindingPort,
++  VisualAgentUpstreamPort,
++  VisualAgentUpstreamSession,
++} from '../../../../connectorBridge/visualAgent/ports/VisualAgentUpstreamPort';
++import type {
++  VisualAgentCapabilitySet,
++  VisualAgentProfileV1,
++} from '@core/engine/operateRuntime/visualAgent/VisualAgentContracts';
++import type {TimerPort} from '@core/engine/capabilities/shared/CapabilityPorts';
++
++const allCapabilities: VisualAgentCapabilitySet = {
++  imageInput: true,
++  structuredAction: true,
++  stream: true,
++  cancel: true,
++  approval: true,
++  resume: true,
++  steer: true,
++  preferences: true,
++};
++
++const rawBinding = {
++  schemaVersion: 1,
++  toolId: 'openclaw',
++  protocol: 'gateway_ws',
++  gatewayUrl: 'wss://gateway.example.com/ws',
++  deviceId: 'device-1',
++  cluster: 'us-1',
++  secretRef: 'secret-ref-1',
++};
++
++function makeProfile(requestedCapabilities: VisualAgentCapabilitySet): VisualAgentProfileV1 {
++  return {
++    schemaVersion: 1,
++    profileId: 'profile-1',
++    toolId: 'openclaw',
++    enabled: true,
++    connector: {
++      kind: 'connector_bridge',
++      bridgeUrl: 'https://bridge.example.com',
++      bindingId: 'binding-1',
++      secretRef: null,
++    },
++    requestedCapabilities,
++  };
++}
++
++function makeSession(overrides: Partial<jest.Mocked<VisualAgentUpstreamSession>> = {}): jest.Mocked<VisualAgentUpstreamSession> {
++  return {
++    negotiate: jest.fn().mockResolvedValue(allCapabilities),
++    send: jest.fn().mockResolvedValue(undefined),
++    subscribe: jest.fn().mockReturnValue(() => {}),
++    close: jest.fn().mockResolvedValue(undefined),
++    ...overrides,
++  } as jest.Mocked<VisualAgentUpstreamSession>;
++}
++
++function makeUpstream(session: jest.Mocked<VisualAgentUpstreamSession>): jest.Mocked<VisualAgentUpstreamPort> {
++  return {
++    open: jest.fn().mockResolvedValue(session),
++  } as jest.Mocked<VisualAgentUpstreamPort>;
++}
++
++function makeBindings(): jest.Mocked<VisualAgentBindingPort> {
++  return {
++    read: jest.fn().mockResolvedValue(rawBinding),
++  } as jest.Mocked<VisualAgentBindingPort>;
++}
++
++function makeTimer(): TimerPort {
++  return {
++    schedule: jest.fn().mockReturnValue(() => {}),
++  };
++}
++
++describe('OpenClawAdapter', () => {
++  it('maps one normalized task to one Gateway task and correlates cancellation', async () => {
++    const session = makeSession();
++    const upstream = makeUpstream(session);
++    const bindings = makeBindings();
++    const adapter = new OpenClawAdapter(bindings, upstream, makeTimer());
++    const profile = makeProfile(allCapabilities);
++    const execution = adapter.create(profile);
++    const controller = new AbortController();
++
++    await execution.connect(profile, controller.signal);
++    await execution.execute(
++      {
++        protocolVersion: 1,
++        taskId: 't1',
++        sessionRevision: 3,
++        profileId: profile.profileId,
++        instruction: 'do the thing',
++        idempotencyKey: 'key-1',
++        requiredCapabilities: allCapabilities,
++      },
++      controller.signal,
++    );
++    expect(session.send).toHaveBeenCalledWith(
++      expect.objectContaining({type: 'task.start', taskId: 't1', sessionRevision: 3}),
++    );
++
++    await execution.cancel({taskId: 't1', sessionRevision: 3}, controller.signal);
++    expect(session.send).toHaveBeenCalledWith(
++      expect.objectContaining({type: 'task.cancel', taskId: 't1', sessionRevision: 3}),
++    );
++  });
++
++  it('never connects when Gateway capabilities omit requested image input', async () => {
++    const session = makeSession({
++      negotiate: jest.fn().mockResolvedValue({...allCapabilities, imageInput: false}),
++    });
++    const upstream = makeUpstream(session);
++    const bindings = makeBindings();
++    const adapter = new OpenClawAdapter(bindings, upstream, makeTimer());
++    const profile = makeProfile(allCapabilities);
++    const execution = adapter.create(profile);
++    const controller = new AbortController();
++
++    await expect(execution.connect(profile, controller.signal)).rejects.toThrow(
++      'visual_agent_capability_unsupported',
++    );
++    expect(execution.getConnectionState().status).not.toBe('ready');
++  });
++
++  it('rejects a binding whose gatewayUrl is not wss', async () => {
++    const session = makeSession();
++    const upstream = makeUpstream(session);
++    const bindings = makeBindings();
++    (bindings.read as jest.Mock).mockResolvedValue({...rawBinding, gatewayUrl: 'ws://insecure.example.com'});
++    const adapter = new OpenClawAdapter(bindings, upstream, makeTimer());
++    const profile = makeProfile(allCapabilities);
++    const execution = adapter.create(profile);
++    const controller = new AbortController();
++
++    await expect(execution.connect(profile, controller.signal)).rejects.toThrow(
++      'visual_agent_invalid_profile',
++    );
++    expect(upstream.open).not.toHaveBeenCalled();
++  });
++
++  it('maps a binding-port rejection to a generic error and a failed state without leaking the raw message', async () => {
++    const session = makeSession();
++    const upstream = makeUpstream(session);
++    const bindings = makeBindings();
++    (bindings.read as jest.Mock).mockRejectedValue(
++      new Error('binding store offline: dsn=postgres://user:pw@internal-host/db'),
++    );
++    const adapter = new OpenClawAdapter(bindings, upstream, makeTimer());
++    const profile = makeProfile(allCapabilities);
++    const execution = adapter.create(profile);
++    const controller = new AbortController();
++
++    await expect(execution.connect(profile, controller.signal)).rejects.toThrow(
++      'visual_agent_invalid_profile',
++    );
++    try {
++      await execution.connect(profile, controller.signal);
++    } catch (error) {
++      expect(String((error as Error).message)).not.toMatch(/postgres|internal-host|binding store offline/);
++    }
++    expect(upstream.open).not.toHaveBeenCalled();
++    const state = execution.getConnectionState();
++    expect(state.status).not.toBe('connecting');
++    expect(state.status).toBe('failed');
++    if (state.status === 'failed') {
++      expect(state.errorCode).toBe('visual_agent_invalid_profile');
++    }
++  });
++
++  it('maps a Gateway auth failure to the generic auth error code without leaking details', async () => {
++    const session = makeSession();
++    const upstream = makeUpstream(session);
++    (upstream.open as jest.Mock).mockRejectedValue(new Error('secret token abc123 rejected by wss://gateway.internal'));
++    const bindings = makeBindings();
++    const adapter = new OpenClawAdapter(bindings, upstream, makeTimer());
++    const profile = makeProfile(allCapabilities);
++    const execution = adapter.create(profile);
++    const controller = new AbortController();
++
++    await expect(execution.connect(profile, controller.signal)).rejects.toThrow(
++      'visual_agent_auth_failed',
++    );
++  });
++
++  it('fails steer before sending when Gateway negotiation omits steer', async () => {
++    const session = makeSession({
++      negotiate: jest.fn().mockResolvedValue({...allCapabilities, steer: false}),
++    });
++    const upstream = makeUpstream(session);
++    const bindings = makeBindings();
++    const adapter = new OpenClawAdapter(bindings, upstream, makeTimer());
++    const profile = makeProfile({...allCapabilities, steer: false});
++    const execution = adapter.create(profile);
++    const controller = new AbortController();
++
++    await execution.connect(profile, controller.signal);
++    session.send.mockClear();
++    await expect(
++      execution.steer({taskId: 't1', sessionRevision: 1, instruction: 'go left'}, controller.signal),
++    ).rejects.toThrow('visual_agent_capability_unsupported');
++    expect(session.send).not.toHaveBeenCalled();
++  });
++
++  it('fails preferences before sending when Gateway negotiation omits preferences', async () => {
++    const session = makeSession({
++      negotiate: jest.fn().mockResolvedValue({...allCapabilities, preferences: false}),
++    });
++    const upstream = makeUpstream(session);
++    const bindings = makeBindings();
++    const adapter = new OpenClawAdapter(bindings, upstream, makeTimer());
++    const profile = makeProfile({...allCapabilities, preferences: false});
++    const execution = adapter.create(profile);
++    const controller = new AbortController();
++
++    await execution.connect(profile, controller.signal);
++    session.send.mockClear();
++    await expect(execution.requestPreferences({type: 'list'}, controller.signal)).rejects.toThrow(
++      'visual_agent_capability_unsupported',
++    );
++    expect(session.send).not.toHaveBeenCalled();
++  });
++
++  it('resolves requestPreferences with the correlated preference.result payload', async () => {
++    const session = makeSession();
++    const upstream = makeUpstream(session);
++    const bindings = makeBindings();
++    const adapter = new OpenClawAdapter(bindings, upstream, makeTimer());
++    const profile = makeProfile(allCapabilities);
++    const execution = adapter.create(profile);
++    const controller = new AbortController();
++
++    await execution.connect(profile, controller.signal);
++    const subscribeListener = session.subscribe.mock.calls[0][0] as (message: unknown) => void;
++
++    const resultPromise = execution.requestPreferences({type: 'list'}, controller.signal);
++    const sentMessage = session.send.mock.calls[session.send.mock.calls.length - 1][0] as {
++      type: string;
++      requestId: string;
++    };
++    expect(sentMessage.type).toBe('preference.request');
++    subscribeListener({
++      type: 'preference.result',
++      requestId: sentMessage.requestId,
++      result: {type: 'list', preferences: []},
++    });
++
++    await expect(resultPromise).resolves.toEqual({type: 'list', preferences: []});
++  });
++
++  it('acknowledges Gateway heartbeats', async () => {
++    const session = makeSession();
++    const upstream = makeUpstream(session);
++    const bindings = makeBindings();
++    const adapter = new OpenClawAdapter(bindings, upstream, makeTimer());
++    const profile = makeProfile(allCapabilities);
++    const execution = adapter.create(profile);
++    const controller = new AbortController();
++
++    await execution.connect(profile, controller.signal);
++    const subscribeListener = session.subscribe.mock.calls[0][0] as (message: unknown) => void;
++    session.send.mockClear();
++    subscribeListener({type: 'gateway.heartbeat'});
++
++    expect(session.send).toHaveBeenCalledWith(expect.objectContaining({type: 'gateway.heartbeat.ack'}));
++  });
++
++  it('rejects a pending preferences request when the Gateway disconnects', async () => {
++    const session = makeSession();
++    const upstream = makeUpstream(session);
++    const bindings = makeBindings();
++    const adapter = new OpenClawAdapter(bindings, upstream, makeTimer());
++    const profile = makeProfile(allCapabilities);
++    const execution = adapter.create(profile);
++    const controller = new AbortController();
++
++    await execution.connect(profile, controller.signal);
++    const subscribeListener = session.subscribe.mock.calls[0][0] as (message: unknown) => void;
++
++    const resultPromise = execution.requestPreferences({type: 'list'}, controller.signal);
++    subscribeListener({type: 'gateway.disconnected'});
++
++    await expect(resultPromise).rejects.toThrow('visual_agent_disconnected');
++    expect(execution.getConnectionState().status).toBe('disconnected');
++  });
++
++  const fixture = createOpenClawConformanceFixture();
++  it('satisfies the shared Visual Agent adapter conformance suite', async () => {
++    await defineVisualAgentAdapterConformance(fixture, {
++      requiredStatuses: ['queued', 'running', 'waiting_approval'],
++      negotiatedCapabilities: [
++        'imageInput',
++        'structuredAction',
++        'stream',
++        'cancel',
++        'approval',
++        'resume',
++        'steer',
++        'preferences',
++      ],
++    });
++    expect(fixture.fallbackSpy.callCount()).toBe(0);
++  });
++});
+diff --git a/AwesomeProject/src/connectorBridge/visualAgent/adapters/openclaw/OpenClawAdapter.ts b/AwesomeProject/src/connectorBridge/visualAgent/adapters/openclaw/OpenClawAdapter.ts
+new file mode 100644
+index 0000000..7432850
+--- /dev/null
++++ b/AwesomeProject/src/connectorBridge/visualAgent/adapters/openclaw/OpenClawAdapter.ts
+@@ -0,0 +1,541 @@
++// OpenClaw Gateway WebSocket adapter (capability-domain Task 9, Wave 2B Worker A).
++// All IO goes through the injected `VisualAgentUpstreamPort` (protocol `gateway_ws`);
++// this adapter never opens a socket or spawns a process itself. Every public
++// failure surfaces as a generic `CapabilityError` — Gateway frames, URLs, and
++// tokens are never echoed back to callers.
++import {CapabilityError} from '@core/engine/capabilities/shared/CapabilityError';
++import type {TimerPort} from '@core/engine/capabilities/shared/CapabilityPorts';
++import type {
++  VisualAgentCapabilitySet,
++  VisualAgentConnectionState,
++  VisualAgentErrorCode,
++  VisualAgentExecutionPort,
++  VisualAgentPreferenceCommand,
++  VisualAgentProfileV1,
++  VisualAgentResultV1,
++  VisualAgentStructuredAction,
++  VisualAgentTaskEnvelopeV1,
++  VisualAgentTaskEvent,
++  VisualAgentToolAdapter,
++  VisualAgentToolManifestV1,
++} from '@core/engine/operateRuntime/visualAgent/VisualAgentContracts';
++import type {
++  VisualAgentBindingPort,
++  VisualAgentUpstreamPort,
++  VisualAgentUpstreamSession,
++} from '../../ports/VisualAgentUpstreamPort';
++import {parseOpenClawBindingV1, toOpenClawUpstreamBinding} from './OpenClawBinding';
++
++const HEARTBEAT_TIMEOUT_MS = 45_000;
++
++const CAPABILITY_KEYS = [
++  'imageInput',
++  'structuredAction',
++  'stream',
++  'cancel',
++  'approval',
++  'resume',
++  'steer',
++  'preferences',
++] as const;
++
++const VISUAL_AGENT_ERROR_CODES = new Set<string>([
++  'visual_agent_invalid_profile',
++  'visual_agent_adapter_not_found',
++  'visual_agent_adapter_duplicate',
++  'visual_agent_capability_unsupported',
++  'visual_agent_not_ready',
++  'visual_agent_auth_failed',
++  'visual_agent_protocol_error',
++  'visual_agent_disconnected',
++  'visual_agent_execution_failed',
++  'visual_agent_cancel_timeout',
++  'visual_agent_approval_required',
++  'visual_agent_resume_unsupported',
++]);
++
++export const openClawManifest: VisualAgentToolManifestV1 = {
++  toolId: 'openclaw',
++  displayName: 'OpenClaw',
++  maturity: 'stable',
++  adapterVersion: '1.0.0',
++  protocolVersions: [1],
++  declaredCapabilities: {
++    imageInput: true,
++    structuredAction: true,
++    stream: true,
++    cancel: true,
++    approval: true,
++    resume: true,
++    steer: true,
++    preferences: true,
++  },
++};
++
++function isObject(value: unknown): value is Record<string, unknown> {
++  return typeof value === 'object' && value !== null && !Array.isArray(value);
++}
++
++function isNonEmptyString(value: unknown): value is string {
++  return typeof value === 'string' && value.length > 0;
++}
++
++function isFiniteNumber(value: unknown): value is number {
++  return typeof value === 'number' && Number.isFinite(value);
++}
++
++function isVisualAgentErrorCode(value: unknown): value is VisualAgentErrorCode {
++  return typeof value === 'string' && VISUAL_AGENT_ERROR_CODES.has(value);
++}
++
++/**
++ * Intersects requested with Gateway-negotiated capabilities: a capability is
++ * only granted when it was both requested and returned by the Gateway.
++ * Throws when a requested capability was not granted.
++ */
++function computeGrantedCapabilities(
++  requested: VisualAgentCapabilitySet,
++  negotiatedFromGateway: VisualAgentCapabilitySet,
++): VisualAgentCapabilitySet {
++  const granted: Record<string, boolean> = {};
++  for (const key of CAPABILITY_KEYS) {
++    if (requested[key] && !negotiatedFromGateway[key]) {
++      throw new CapabilityError('visual_agent_capability_unsupported');
++    }
++    granted[key] = requested[key] === true && negotiatedFromGateway[key] === true;
++  }
++  return granted as unknown as VisualAgentCapabilitySet;
++}
++
++type PendingPreferenceRequest = {
++  resolve(value: unknown): void;
++  reject(error: unknown): void;
++};
++
++class OpenClawExecutionPort implements VisualAgentExecutionPort {
++  private state: VisualAgentConnectionState = {status: 'disconnected'};
++  private session: VisualAgentUpstreamSession | null = null;
++  private negotiatedCapabilities: VisualAgentCapabilitySet | null = null;
++  private readonly listeners = new Set<(event: VisualAgentTaskEvent) => void>();
++  private readonly pendingPreferenceRequests = new Map<string, PendingPreferenceRequest>();
++  private unsubscribeUpstream: (() => void) | null = null;
++  private cancelHeartbeatTimeout: (() => void) | null = null;
++  private requestSequence = 0;
++
++  constructor(
++    private readonly bindings: VisualAgentBindingPort,
++    private readonly upstream: VisualAgentUpstreamPort,
++    private readonly timer: TimerPort,
++  ) {}
++
++  getConnectionState(): VisualAgentConnectionState {
++    return this.state;
++  }
++
++  async connect(
++    profile: VisualAgentProfileV1,
++    signal: AbortSignal,
++  ): Promise<VisualAgentCapabilitySet> {
++    this.state = {status: 'connecting'};
++    let binding: ReturnType<typeof parseOpenClawBindingV1>;
++    try {
++      const rawBinding = await this.bindings.read(profile.connector.bindingId, 'openclaw');
++      binding = parseOpenClawBindingV1(rawBinding);
++    } catch (error) {
++      const errorCode: VisualAgentErrorCode =
++        error instanceof CapabilityError && isVisualAgentErrorCode(error.code)
++          ? error.code
++          : 'visual_agent_invalid_profile';
++      this.state = {status: 'failed', errorCode};
++      throw new CapabilityError(errorCode);
++    }
++
++    this.state = {status: 'authenticating'};
++    let session: VisualAgentUpstreamSession;
++    try {
++      session = await this.upstream.open({
++        protocol: 'gateway_ws',
++        binding: toOpenClawUpstreamBinding(binding),
++        signal,
++      });
++    } catch {
++      this.state = {status: 'failed', errorCode: 'visual_agent_auth_failed'};
++      throw new CapabilityError('visual_agent_auth_failed');
++    }
++
++    this.state = {status: 'negotiating'};
++    let negotiatedFromGateway: VisualAgentCapabilitySet;
++    try {
++      negotiatedFromGateway = await session.negotiate(profile.requestedCapabilities);
++    } catch {
++      await this.closeSessionQuietly(session);
++      this.state = {status: 'failed', errorCode: 'visual_agent_not_ready'};
++      throw new CapabilityError('visual_agent_not_ready');
++    }
++
++    let granted: VisualAgentCapabilitySet;
++    try {
++      granted = computeGrantedCapabilities(profile.requestedCapabilities, negotiatedFromGateway);
++    } catch (error) {
++      await this.closeSessionQuietly(session);
++      this.state = {status: 'failed', errorCode: 'visual_agent_capability_unsupported'};
++      throw error;
++    }
++
++    this.session = session;
++    this.negotiatedCapabilities = granted;
++    this.unsubscribeUpstream = session.subscribe(message => this.handleUpstreamMessage(message));
++    this.scheduleHeartbeatTimeout();
++    this.state = {status: 'ready', negotiatedCapabilities: granted};
++    return granted;
++  }
++
++  async disconnect(): Promise<void> {
++    if (this.state.status === 'disconnected' || this.state.status === 'disabled') {
++      return;
++    }
++    const session = this.session;
++    this.teardownConnection('visual_agent_disconnected');
++    if (session) {
++      await this.closeSessionQuietly(session);
++    }
++  }
++
++  async execute(
++    envelope: VisualAgentTaskEnvelopeV1,
++    _signal: AbortSignal,
++  ): Promise<{taskId: string}> {
++    this.assertReady();
++    await this.sendOrFail({
++      type: 'task.start',
++      taskId: envelope.taskId,
++      sessionRevision: envelope.sessionRevision,
++      profileId: envelope.profileId,
++      instruction: envelope.instruction,
++      idempotencyKey: envelope.idempotencyKey,
++      requiredCapabilities: envelope.requiredCapabilities,
++      ...(envelope.image ? {image: envelope.image} : {}),
++    });
++    return {taskId: envelope.taskId};
++  }
++
++  async cancel(
++    input: {taskId: string; sessionRevision: number},
++    _signal: AbortSignal,
++  ): Promise<void> {
++    this.assertReady();
++    this.assertCapability('cancel');
++    await this.sendOrFail({type: 'task.cancel', taskId: input.taskId, sessionRevision: input.sessionRevision});
++  }
++
++  async resolveApproval(
++    input: {
++      taskId: string;
++      sessionRevision: number;
++      approvalId: string;
++      decision: 'approve' | 'reject';
++    },
++    _signal: AbortSignal,
++  ): Promise<void> {
++    this.assertReady();
++    this.assertCapability('approval');
++    await this.sendOrFail({
++      type: 'task.approval.resolve',
++      taskId: input.taskId,
++      sessionRevision: input.sessionRevision,
++      approvalId: input.approvalId,
++      decision: input.decision,
++    });
++  }
++
++  async resume(
++    input: {taskId: string; sessionRevision: number; resumeToken: string},
++    _signal: AbortSignal,
++  ): Promise<void> {
++    this.assertReady();
++    this.assertCapability('resume');
++    await this.sendOrFail({
++      type: 'task.resume',
++      taskId: input.taskId,
++      sessionRevision: input.sessionRevision,
++      resumeToken: input.resumeToken,
++    });
++  }
++
++  async steer(
++    input: {taskId: string; sessionRevision: number; instruction: string},
++    _signal: AbortSignal,
++  ): Promise<void> {
++    this.assertReady();
++    this.assertCapability('steer');
++    await this.sendOrFail({
++      type: 'task.steer',
++      taskId: input.taskId,
++      sessionRevision: input.sessionRevision,
++      instruction: input.instruction,
++    });
++  }
++
++  async requestPreferences(command: VisualAgentPreferenceCommand, signal: AbortSignal): Promise<unknown> {
++    this.assertReady();
++    this.assertCapability('preferences');
++    const requestId = this.nextRequestId();
++    return new Promise((resolve, reject) => {
++      if (signal.aborted) {
++        reject(new CapabilityError('visual_agent_disconnected'));
++        return;
++      }
++      this.pendingPreferenceRequests.set(requestId, {resolve, reject});
++      this.sendOrFail({type: 'preference.request', requestId, command}).catch(error => {
++        this.pendingPreferenceRequests.delete(requestId);
++        reject(error);
++      });
++    });
++  }
++
++  subscribe(listener: (event: VisualAgentTaskEvent) => void): () => void {
++    this.listeners.add(listener);
++    return () => this.listeners.delete(listener);
++  }
++
++  private assertReady(): void {
++    if (this.state.status !== 'ready' || !this.session) {
++      throw new CapabilityError('visual_agent_not_ready');
++    }
++  }
++
++  private assertCapability(key: keyof VisualAgentCapabilitySet): void {
++    if (!this.negotiatedCapabilities || this.negotiatedCapabilities[key] !== true) {
++      throw new CapabilityError('visual_agent_capability_unsupported');
++    }
++  }
++
++  private async sendOrFail(message: Readonly<Record<string, unknown>>): Promise<void> {
++    if (!this.session) {
++      throw new CapabilityError('visual_agent_disconnected');
++    }
++    try {
++      await this.session.send(message);
++    } catch {
++      throw new CapabilityError('visual_agent_disconnected');
++    }
++  }
++
++  private nextRequestId(): string {
++    this.requestSequence += 1;
++    return `openclaw-req-${this.requestSequence}`;
++  }
++
++  private scheduleHeartbeatTimeout(): void {
++    this.cancelHeartbeatTimeout?.();
++    this.cancelHeartbeatTimeout = this.timer.schedule(
++      () => this.handleUpstreamDisconnected(),
++      HEARTBEAT_TIMEOUT_MS,
++    );
++  }
++
++  private teardownConnection(rejectionCode: VisualAgentErrorCode): void {
++    this.cancelHeartbeatTimeout?.();
++    this.cancelHeartbeatTimeout = null;
++    this.unsubscribeUpstream?.();
++    this.unsubscribeUpstream = null;
++    for (const pending of this.pendingPreferenceRequests.values()) {
++      pending.reject(new CapabilityError(rejectionCode));
++    }
++    this.pendingPreferenceRequests.clear();
++    this.session = null;
++    this.negotiatedCapabilities = null;
++    this.state = {status: 'disconnected'};
++  }
++
++  private async closeSessionQuietly(session: VisualAgentUpstreamSession): Promise<void> {
++    try {
++      await session.close();
++    } catch {
++      // Disconnect is best-effort; the caller already has the outcome it needs.
++    }
++  }
++
++  private handleUpstreamDisconnected(): void {
++    if (this.state.status === 'disconnected' || this.state.status === 'disabled') {
++      return;
++    }
++    this.teardownConnection('visual_agent_disconnected');
++  }
++
++  private handleUpstreamMessage(message: unknown): void {
++    if (!isObject(message) || typeof message.type !== 'string') {
++      return;
++    }
++    switch (message.type) {
++      case 'gateway.heartbeat':
++        this.scheduleHeartbeatTimeout();
++        this.sendOrFail({type: 'gateway.heartbeat.ack'}).catch(() => {
++          // Heartbeat ack failures are surfaced to callers via the next
++          // operation's rejection, not as an unhandled promise here.
++        });
++        return;
++      case 'gateway.disconnected':
++        this.handleUpstreamDisconnected();
++        return;
++      case 'task.accepted':
++        this.emitStatusEvent(message, 'queued');
++        return;
++      case 'task.event':
++        this.emitTaskEvent(message);
++        return;
++      case 'task.completed':
++        this.emitTerminalCompleted(message);
++        return;
++      case 'task.failed':
++        this.emitTerminalFailed(message);
++        return;
++      case 'task.cancelled':
++        this.emitTerminalCancelled(message);
++        return;
++      case 'preference.result':
++        this.resolvePreferenceResult(message);
++        return;
++      default:
++        return;
++    }
++  }
++
++  private correlated(message: Record<string, unknown>): {taskId: string; sessionRevision: number; sequence: number} | null {
++    if (
++      !isNonEmptyString(message.taskId) ||
++      !isFiniteNumber(message.sessionRevision) ||
++      !isFiniteNumber(message.sequence)
++    ) {
++      return null;
++    }
++    return {
++      taskId: message.taskId,
++      sessionRevision: message.sessionRevision,
++      sequence: message.sequence,
++    };
++  }
++
++  private emitStatusEvent(message: Record<string, unknown>, status: 'queued' | 'running'): void {
++    const base = this.correlated(message);
++    if (!base) {
++      return;
++    }
++    this.emit({type: 'status', ...base, status});
++  }
++
++  private emitTaskEvent(message: Record<string, unknown>): void {
++    const base = this.correlated(message);
++    if (!base) {
++      return;
++    }
++    if (message.kind === 'running') {
++      this.emit({type: 'status', ...base, status: 'running'});
++      return;
++    }
++    if (message.kind === 'waiting_approval') {
++      if (!isNonEmptyString(message.approvalId)) {
++        return;
++      }
++      this.emit({type: 'status', ...base, status: 'waiting_approval', approvalId: message.approvalId});
++      return;
++    }
++    if (message.kind === 'delta') {
++      const delta: {
++        type: 'delta';
++        taskId: string;
++        sessionRevision: number;
++        sequence: number;
++        textDelta?: string;
++        visualUnderstandingDelta?: string;
++        structuredAction?: VisualAgentStructuredAction;
++      } = {type: 'delta', ...base};
++      if (typeof message.textDelta === 'string') {
++        delta.textDelta = message.textDelta;
++      }
++      if (typeof message.visualUnderstandingDelta === 'string') {
++        delta.visualUnderstandingDelta = message.visualUnderstandingDelta;
++      }
++      if (isObject(message.structuredAction)) {
++        delta.structuredAction = message.structuredAction as unknown as VisualAgentStructuredAction;
++      }
++      this.emit(delta);
++    }
++  }
++
++  private emitTerminalCompleted(message: Record<string, unknown>): void {
++    const base = this.correlated(message);
++    if (!base || !isObject(message.result)) {
++      return;
++    }
++    this.emit({
++      type: 'terminal',
++      ...base,
++      status: 'completed',
++      result: message.result as unknown as VisualAgentResultV1,
++    });
++  }
++
++  private emitTerminalFailed(message: Record<string, unknown>): void {
++    const base = this.correlated(message);
++    if (!base) {
++      return;
++    }
++    const errorCode = isVisualAgentErrorCode(message.errorCode)
++      ? message.errorCode
++      : 'visual_agent_execution_failed';
++    this.emit({
++      type: 'terminal',
++      ...base,
++      status: 'failed',
++      errorCode,
++      ...(isNonEmptyString(message.resumeToken) ? {resumeToken: message.resumeToken} : {}),
++    });
++  }
++
++  private emitTerminalCancelled(message: Record<string, unknown>): void {
++    const base = this.correlated(message);
++    if (!base) {
++      return;
++    }
++    this.emit({
++      type: 'terminal',
++      ...base,
++      status: 'cancelled',
++      ...(isNonEmptyString(message.resumeToken) ? {resumeToken: message.resumeToken} : {}),
++    });
++  }
++
++  private resolvePreferenceResult(message: Record<string, unknown>): void {
++    if (!isNonEmptyString(message.requestId)) {
++      return;
++    }
++    const pending = this.pendingPreferenceRequests.get(message.requestId);
++    if (!pending) {
++      return;
++    }
++    this.pendingPreferenceRequests.delete(message.requestId);
++    pending.resolve(message.result);
++  }
++
++  private emit(event: VisualAgentTaskEvent): void {
++    for (const listener of this.listeners) {
++      listener(event);
++    }
++  }
++}
++
++export class OpenClawAdapter implements VisualAgentToolAdapter {
++  readonly toolId = 'openclaw' as const;
++  readonly manifest = openClawManifest;
++
++  constructor(
++    private readonly bindings: VisualAgentBindingPort,
++    private readonly upstream: VisualAgentUpstreamPort,
++    private readonly timer: TimerPort,
++  ) {}
++
++  create(_profile: VisualAgentProfileV1): VisualAgentExecutionPort {
++    return new OpenClawExecutionPort(this.bindings, this.upstream, this.timer);
++  }
++}
+diff --git a/AwesomeProject/src/connectorBridge/visualAgent/adapters/openclaw/OpenClawBinding.ts b/AwesomeProject/src/connectorBridge/visualAgent/adapters/openclaw/OpenClawBinding.ts
+new file mode 100644
+index 0000000..d64955f
+--- /dev/null
++++ b/AwesomeProject/src/connectorBridge/visualAgent/adapters/openclaw/OpenClawBinding.ts
+@@ -0,0 +1,79 @@
++// OpenClaw Gateway WS binding shape (capability-domain Task 9). Sanitized: the
++// upstream binding record forwarded to `VisualAgentUpstreamPort.open` carries
++// only `{gatewayUrl, deviceId, cluster, secretRef}` — no schema/tool metadata.
++import {CapabilityError} from '@core/engine/capabilities/shared/CapabilityError';
++
++export interface OpenClawBindingV1 {
++  readonly schemaVersion: 1;
++  readonly toolId: 'openclaw';
++  readonly protocol: 'gateway_ws';
++  readonly gatewayUrl: string;
++  readonly deviceId: string;
++  readonly cluster: string;
++  readonly secretRef: string | null;
++}
++
++function fail(): never {
++  throw new CapabilityError('visual_agent_invalid_profile');
++}
++
++function isObject(value: unknown): value is Record<string, unknown> {
++  return typeof value === 'object' && value !== null && !Array.isArray(value);
++}
++
++function isNonEmptyString(value: unknown): value is string {
++  return typeof value === 'string' && value.length > 0;
++}
++
++function isWssUrl(value: unknown): value is string {
++  if (typeof value !== 'string') {
++    return false;
++  }
++  try {
++    return new URL(value).protocol === 'wss:';
++  } catch {
++    return false;
++  }
++}
++
++export function parseOpenClawBindingV1(value: unknown): OpenClawBindingV1 {
++  if (!isObject(value)) {
++    fail();
++  }
++  if (
++    value.schemaVersion !== 1 ||
++    value.toolId !== 'openclaw' ||
++    value.protocol !== 'gateway_ws'
++  ) {
++    fail();
++  }
++  if (!isWssUrl(value.gatewayUrl)) {
++    fail();
++  }
++  if (!isNonEmptyString(value.deviceId) || !isNonEmptyString(value.cluster)) {
++    fail();
++  }
++  if (!(value.secretRef === null || isNonEmptyString(value.secretRef))) {
++    fail();
++  }
++  return {
++    schemaVersion: 1,
++    toolId: 'openclaw',
++    protocol: 'gateway_ws',
++    gatewayUrl: value.gatewayUrl,
++    deviceId: value.deviceId as string,
++    cluster: value.cluster as string,
++    secretRef: (value.secretRef as string | null) ?? null,
++  };
++}
++
++export function toOpenClawUpstreamBinding(
++  binding: OpenClawBindingV1,
++): Readonly<Record<string, unknown>> {
++  return Object.freeze({
++    gatewayUrl: binding.gatewayUrl,
++    deviceId: binding.deviceId,
++    cluster: binding.cluster,
++    secretRef: binding.secretRef,
++  });
++}
+diff --git a/AwesomeProject/src/connectorBridge/visualAgent/adapters/openclaw/conformanceFixture.ts b/AwesomeProject/src/connectorBridge/visualAgent/adapters/openclaw/conformanceFixture.ts
+new file mode 100644
+index 0000000..71ca341
+--- /dev/null
++++ b/AwesomeProject/src/connectorBridge/visualAgent/adapters/openclaw/conformanceFixture.ts
+@@ -0,0 +1,220 @@
++// Fixture driving `defineVisualAgentAdapterConformance` against the OpenClaw
++// adapter's own in-memory mock of the Gateway WS upstream. No real socket,
++// process, or shared adapter code is touched.
++import type {
++  VisualAgentCapabilitySet,
++  VisualAgentErrorCode,
++  VisualAgentPreferenceCommand,
++  VisualAgentPreferenceResult,
++  VisualAgentProfileV1,
++  VisualAgentResultV1,
++  VisualAgentStructuredAction,
++} from '@core/engine/operateRuntime/visualAgent/VisualAgentContracts';
++import type {VisualAgentAdapterConformanceFixture} from '../../conformance/VisualAgentAdapterConformance';
++import type {
++  VisualAgentBindingPort,
++  VisualAgentUpstreamPort,
++  VisualAgentUpstreamSession,
++} from '../../ports/VisualAgentUpstreamPort';
++import {OpenClawAdapter} from './OpenClawAdapter';
++
++const CONFORMANCE_TASK_ID = 'conformance-task';
++const CONFORMANCE_SESSION_REVISION = 1;
++
++const allCapabilities: VisualAgentCapabilitySet = {
++  imageInput: true,
++  structuredAction: true,
++  stream: true,
++  cancel: true,
++  approval: true,
++  resume: true,
++  steer: true,
++  preferences: true,
++};
++
++const conformanceBinding = Object.freeze({
++  schemaVersion: 1,
++  toolId: 'openclaw',
++  protocol: 'gateway_ws',
++  gatewayUrl: 'wss://gateway.conformance.internal/ws',
++  deviceId: 'conformance-device',
++  cluster: 'conformance-cluster',
++  secretRef: 'conformance-secret-ref',
++});
++
++function isObject(value: unknown): value is Record<string, unknown> {
++  return typeof value === 'object' && value !== null && !Array.isArray(value);
++}
++
++/** Synthesizes the Gateway's `preference.result` reply for a request. */
++function buildPreferenceResult(command: unknown): VisualAgentPreferenceResult {
++  const typed = command as VisualAgentPreferenceCommand;
++  if (typed.type === 'upsert') {
++    return {
++      type: 'upsert',
++      preference: {
++        id: typed.preference.id,
++        kind: typed.preference.kind,
++        title: typed.preference.title,
++        summary: typed.preference.summary,
++        createdAtEpochMs: 0,
++        updatedAtEpochMs: 0,
++      },
++    };
++  }
++  if (typed.type === 'delete') {
++    return {type: 'delete', preferenceId: typed.preferenceId};
++  }
++  if (typed.type === 'clear') {
++    return {type: 'clear'};
++  }
++  return {type: 'list', preferences: []};
++}
++
++export function createOpenClawConformanceFixture(): VisualAgentAdapterConformanceFixture {
++  let subscribedListener: ((message: unknown) => void) | null = null;
++  let sequence = 0;
++
++  const session: jest.Mocked<VisualAgentUpstreamSession> = {
++    negotiate: jest.fn().mockResolvedValue(allCapabilities),
++    send: jest.fn().mockImplementation(async (message: unknown) => {
++      if (isObject(message) && message.type === 'preference.request' && typeof message.requestId === 'string') {
++        const requestId = message.requestId;
++        const result = buildPreferenceResult(message.command);
++        queueMicrotask(() => {
++          subscribedListener?.({type: 'preference.result', requestId, result});
++        });
++      }
++    }),
++    subscribe: jest.fn().mockImplementation((listener: (message: unknown) => void) => {
++      subscribedListener = listener;
++      return () => {
++        subscribedListener = null;
++      };
++    }),
++    close: jest.fn().mockResolvedValue(undefined),
++  };
++
++  const upstream: VisualAgentUpstreamPort = {
++    open: jest.fn().mockResolvedValue(session),
++  };
++
++  const bindings: VisualAgentBindingPort = {
++    read: jest.fn().mockResolvedValue(conformanceBinding),
++  };
++
++  const timer = {schedule: jest.fn().mockReturnValue(() => {})};
++
++  const profile: VisualAgentProfileV1 = {
++    schemaVersion: 1,
++    profileId: 'conformance-profile',
++    toolId: 'openclaw',
++    enabled: true,
++    connector: {
++      kind: 'connector_bridge',
++      bridgeUrl: 'https://bridge.conformance.internal',
++      bindingId: 'conformance-binding',
++      secretRef: null,
++    },
++    requestedCapabilities: allCapabilities,
++  };
++
++  const nextSequence = (): number => {
++    sequence += 1;
++    return sequence;
++  };
++
++  const emitRaw = (message: Record<string, unknown>): void => {
++    subscribedListener?.(message);
++  };
++
++  return {
++    toolId: 'openclaw',
++    adapter: new OpenClawAdapter(bindings, upstream, timer),
++    profile,
++    binding: conformanceBinding,
++    upstream,
++    supportedCapabilities: allCapabilities,
++    fallbackSpy: {callCount: () => 0},
++
++    emitStatus(status: 'queued' | 'running'): void {
++      if (status === 'queued') {
++        emitRaw({
++          type: 'task.accepted',
++          taskId: CONFORMANCE_TASK_ID,
++          sessionRevision: CONFORMANCE_SESSION_REVISION,
++          sequence: nextSequence(),
++        });
++        return;
++      }
++      emitRaw({
++        type: 'task.event',
++        kind: 'running',
++        taskId: CONFORMANCE_TASK_ID,
++        sessionRevision: CONFORMANCE_SESSION_REVISION,
++        sequence: nextSequence(),
++      });
++    },
++
++    emitApproval(approvalId: string): void {
++      emitRaw({
++        type: 'task.event',
++        kind: 'waiting_approval',
++        approvalId,
++        taskId: CONFORMANCE_TASK_ID,
++        sessionRevision: CONFORMANCE_SESSION_REVISION,
++        sequence: nextSequence(),
++      });
++    },
++
++    emitDelta(input: {
++      textDelta?: string;
++      visualUnderstandingDelta?: string;
++      structuredAction?: VisualAgentStructuredAction;
++    }): void {
++      emitRaw({
++        type: 'task.event',
++        kind: 'delta',
++        taskId: CONFORMANCE_TASK_ID,
++        sessionRevision: CONFORMANCE_SESSION_REVISION,
++        sequence: nextSequence(),
++        ...input,
++      });
++    },
++
++    emitCompleted(result: VisualAgentResultV1): void {
++      emitRaw({
++        type: 'task.completed',
++        taskId: CONFORMANCE_TASK_ID,
++        sessionRevision: CONFORMANCE_SESSION_REVISION,
++        sequence: nextSequence(),
++        result,
++      });
++    },
++
++    emitFailed(errorCode: VisualAgentErrorCode, resumeToken?: string): void {
++      emitRaw({
++        type: 'task.failed',
++        taskId: CONFORMANCE_TASK_ID,
++        sessionRevision: CONFORMANCE_SESSION_REVISION,
++        sequence: nextSequence(),
++        errorCode,
++        ...(resumeToken ? {resumeToken} : {}),
++      });
++    },
++
++    emitCancelled(resumeToken?: string): void {
++      emitRaw({
++        type: 'task.cancelled',
++        taskId: CONFORMANCE_TASK_ID,
++        sessionRevision: CONFORMANCE_SESSION_REVISION,
++        sequence: nextSequence(),
++        ...(resumeToken ? {resumeToken} : {}),
++      });
++    },
++
++    emitDisconnect(): void {
++      emitRaw({type: 'gateway.disconnected'});
++    },
++  };
++}

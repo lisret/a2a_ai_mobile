@@ -5,9 +5,8 @@ import type {BuiltInVisualAgentToolId} from '../../application/facades/UiRuntime
 
 export type RootStackParamList = {
   MainTabs: NavigatorScreenParams<MainTabParamList>;
-  AddModel:
-    | {importedData?: Partial<import('./Model').AIModelFormData>; list?: ModelListKey}
-    | undefined;
+  // Navigation params must never carry secrets; only the non-sensitive list key.
+  AddModel: {list?: ModelListKey} | undefined;
   // Binding id is the canonical runtime identity; never reuse `modelId` here.
   EditModel: {bindingId: string; list?: ModelListKey};
   TaskHistory: {modelId: string};

@@ -59,6 +59,7 @@ import type {ProviderFetch} from '../../core/engine/operateRuntime/model/transpo
 import {
   AsyncStorageCredentialRetirementRepository,
   AsyncStorageRuntimeConfigRepository,
+  RuntimeConfigError,
 } from '../../core/engine/operateRuntime/config';
 import {
   AsyncStorageModelCatalogCache,
@@ -197,7 +198,7 @@ const newId = (): string =>
     .toString(36)
     .slice(2, 8)}`;
 
-class RuntimePhoneOperatePort implements PhoneOperateApplicationPort {
+export class RuntimePhoneOperatePort implements PhoneOperateApplicationPort {
   constructor(
     private readonly repo: RuntimeConfigRepository,
     private readonly eligibility: NativeLocalModelEligibilityChecker,
@@ -246,8 +247,14 @@ class RuntimePhoneOperatePort implements PhoneOperateApplicationPort {
 
   async activate(
     mode: AgentModeId,
-    _expectedRevision: number,
+    expectedRevision: number,
   ): Promise<PhoneOperateViewState> {
+    // Guard on the persisted config revision before any write so a stale draft
+    // never silently overwrites a concurrently-changed configuration.
+    const envelope = await this.repo.load();
+    if (envelope.revision !== expectedRevision) {
+      throw new RuntimeConfigError('runtime_config_conflict');
+    }
     await nonoConfigService.saveActiveMode(mode);
     return this.read();
   }
@@ -318,7 +325,7 @@ class RuntimePhoneOperatePort implements PhoneOperateApplicationPort {
   }
 }
 
-class RuntimeModelConfigPort implements ModelConfigApplicationPort {
+export class RuntimeModelConfigPort implements ModelConfigApplicationPort {
   constructor(
     private readonly repo: RuntimeConfigRepository,
     private readonly registry: ModelProviderRegistry,
@@ -500,6 +507,11 @@ class RuntimeModelConfigPort implements ModelConfigApplicationPort {
 
   async save(input: ModelConfigSaveInput): Promise<ModelConfigViewState> {
     const envelope = await this.repo.load();
+    // Optimistic-concurrency gate: reject a stale save before any credential or
+    // config write so a mismatched revision never mutates the runtime config.
+    if (envelope.revision !== input.expectedRevision) {
+      throw new RuntimeConfigError('runtime_config_conflict');
+    }
     const active = envelope.active;
     const role = ROLE_BY_LIST[input.list];
     const existingBinding = input.bindingId

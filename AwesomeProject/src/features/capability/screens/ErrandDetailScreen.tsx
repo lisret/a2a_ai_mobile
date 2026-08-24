@@ -1,4 +1,4 @@
-import React, {useCallback, useState} from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 import {
   ScrollView,
   View,
@@ -14,47 +14,101 @@ import type {RouteProp} from '@react-navigation/native';
 import type {RootStackParamList} from '@shared/types/navigation';
 import {PageLayout} from '@shared/components/PageLayout';
 import {COLORS} from '@shared/constants';
-import {nonoConfigService} from '@features/capability/services/NonoConfigService';
-import type {MemoryItem} from '@features/capability/types';
+import {useAppFacades} from '../../../application/facades/AppFacadesContext';
+import type {ErrandItemViewState} from '../../../application/facades/UiRuntimeContracts';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 type ScreenRoute = RouteProp<RootStackParamList, 'ErrandDetail'>;
 
+const STATUS_LABELS: Record<ErrandItemViewState['status'], string> = {
+  pending: '待办',
+  leased: '进行中',
+  failed: '失败',
+  completed: '已完成',
+  cancelled: '已取消',
+};
+
 export const ErrandDetailScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
   const {errandId} = useRoute<ScreenRoute>().params;
-  const [item, setItem] = useState<MemoryItem | null>(null);
+  const {errands} = useAppFacades();
+  const [item, setItem] = useState<ErrandItemViewState | null>(null);
+  const [notFound, setNotFound] = useState(false);
 
-  React.useEffect(() => {
-    nonoConfigService.getMemories().then(items => {
-      setItem(items.find(entry => entry.id === errandId) || null);
-    });
-  }, [errandId]);
+  useEffect(() => {
+    let active = true;
+    errands
+      .getViewState()
+      .then(state => {
+        if (!active) {
+          return;
+        }
+        const match = state.items.find(entry => entry.id === errandId) ?? null;
+        setItem(match);
+        setNotFound(match === null);
+      })
+      .catch(() => active && setNotFound(true));
+    return () => {
+      active = false;
+    };
+  }, [errandId, errands]);
+
+  const editable = item?.status === 'pending';
 
   const save = useCallback(async () => {
-    if (!item) return;
+    if (!item || !editable) {
+      return;
+    }
     const title = item.title.trim();
     if (!title) {
       Alert.alert('请写下要办的事');
       return;
     }
-    if (item.errandType === 'schedule' && !item.when?.trim()) {
+    if (item.kind === 'schedule' && !item.scheduleLabel.trim()) {
       Alert.alert('定时需要写下时间');
       return;
     }
-    await nonoConfigService.updateMemory({...item, title});
+    await errands.update({...item, title});
     navigation.goBack();
-  }, [item, navigation]);
+  }, [item, editable, errands, navigation]);
 
-  if (!item) return null;
+  if (notFound) {
+    return (
+      <PageLayout title="交代详情" showBackButton>
+        <View style={styles.content}>
+          <Text style={styles.label}>这件交代已不存在。</Text>
+        </View>
+      </PageLayout>
+    );
+  }
+
+  if (!item) {
+    return (
+      <PageLayout title="交代详情" showBackButton>
+        <View style={styles.content}>
+          <Text style={styles.label}>读取中…</Text>
+        </View>
+      </PageLayout>
+    );
+  }
 
   return (
     <PageLayout title="交代详情" showBackButton>
       <ScrollView contentContainerStyle={styles.content}>
+        <View style={styles.stateRow}>
+          <Text style={styles.stateText}>{STATUS_LABELS[item.status]}</Text>
+        </View>
+        {!editable ? (
+          <Text style={styles.caption}>
+            这件交代当前不可编辑，只能查看或取消。
+          </Text>
+        ) : null}
+
         <Text style={styles.label}>要办的事</Text>
         <TextInput
-          style={styles.input}
+          style={[styles.input, !editable && styles.inputDisabled]}
           value={item.title}
+          editable={editable}
           onChangeText={title => setItem({...item, title})}
         />
         <Text style={styles.label}>类型</Text>
@@ -67,46 +121,48 @@ export const ErrandDetailScreen: React.FC = () => {
           ).map(([key, label]) => (
             <TouchableOpacity
               key={key}
-              style={[
-                styles.segBtn,
-                item.errandType === key && styles.segBtnOn,
-              ]}
+              disabled={!editable}
+              style={[styles.segBtn, item.kind === key && styles.segBtnOn]}
               onPress={() =>
                 setItem({
                   ...item,
-                  errandType: key,
-                  when: key === 'schedule' ? item.when : '',
+                  kind: key,
+                  scheduleLabel: key === 'schedule' ? item.scheduleLabel : '',
                 })
               }>
               <Text
-                style={[
-                  styles.segText,
-                  item.errandType === key && styles.segTextOn,
-                ]}>
+                style={[styles.segText, item.kind === key && styles.segTextOn]}>
                 {label}
               </Text>
             </TouchableOpacity>
           ))}
         </View>
         <Text style={styles.caption}>
-          {item.errandType === 'schedule'
+          {item.kind === 'schedule'
             ? '到点再办。这一次办完仍留在交代里，直到取消。'
             : '说一次，记着去办。办完进入「做过的事」。'}
         </Text>
-        {item.errandType === 'schedule' ? (
+        {item.kind === 'schedule' ? (
           <>
             <Text style={styles.label}>时间</Text>
             <TextInput
-              style={styles.input}
-              value={item.when || ''}
-              onChangeText={when => setItem({...item, when})}
+              style={[styles.input, !editable && styles.inputDisabled]}
+              value={item.scheduleLabel}
+              editable={editable}
+              onChangeText={scheduleLabel => setItem({...item, scheduleLabel})}
               placeholder="例如 周五 18:00"
             />
           </>
         ) : null}
-        <TouchableOpacity style={styles.primary} onPress={save}>
-          <Text style={styles.primaryText}>保存</Text>
-        </TouchableOpacity>
+        {item.errorMessage ? (
+          <Text style={styles.errorText}>{item.errorMessage}</Text>
+        ) : null}
+
+        {editable ? (
+          <TouchableOpacity style={styles.primary} onPress={save}>
+            <Text style={styles.primaryText}>保存</Text>
+          </TouchableOpacity>
+        ) : null}
         <TouchableOpacity
           style={styles.danger}
           onPress={() =>
@@ -116,7 +172,7 @@ export const ErrandDetailScreen: React.FC = () => {
                 text: '取消交代',
                 style: 'destructive',
                 onPress: async () => {
-                  await nonoConfigService.deleteMemory(item.id);
+                  await errands.cancel(item.id);
                   navigation.goBack();
                 },
               },
@@ -134,6 +190,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingBottom: 40,
   },
+  stateRow: {
+    marginBottom: 12,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: '#eceaf6',
+  },
+  stateText: {
+    color: COLORS.text.secondary,
+    fontSize: 10,
+    fontWeight: '800',
+  },
   label: {
     marginBottom: 8,
     color: COLORS.text.secondary,
@@ -147,6 +216,10 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: '#ffffff',
     color: COLORS.text.primary,
+  },
+  inputDisabled: {
+    backgroundColor: '#f0eff5',
+    color: COLORS.text.secondary,
   },
   caption: {
     marginTop: -8,
@@ -180,6 +253,11 @@ const styles = StyleSheet.create({
   },
   segTextOn: {
     color: '#ffffff',
+  },
+  errorText: {
+    marginBottom: 16,
+    color: COLORS.error,
+    fontSize: 11,
   },
   primary: {
     minHeight: 52,

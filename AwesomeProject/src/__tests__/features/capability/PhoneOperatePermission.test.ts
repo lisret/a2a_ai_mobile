@@ -137,12 +137,12 @@ describe('phone operate permission gate', () => {
       ),
       'utf8',
     );
-    expect(source).toContain("key === 'phoneOperate' && value");
+    // Capabilities is now ViewState-driven via `useAppFacades`; the device
+    // permission request still fires immediately when a device-operating
+    // capability is switched on, without waiting on the async facade write.
+    expect(source).toContain('useAppFacades');
     expect(source).toContain('requestOperatePermissions()');
-    expect(source).toMatch(/setFlags\(current =>/);
-    expect(source).not.toContain(
-      'setFlags(await nonoConfigService.setCapability',
-    );
+    expect(source).not.toContain('nonoConfigService');
   });
 
   it('keeps the ADB switch on the phone-operate page, not Settings', () => {

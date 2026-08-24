@@ -5,51 +5,109 @@ import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import type {RootStackParamList} from '@shared/types/navigation';
 import {PageLayout} from '@shared/components/PageLayout';
 import {COLORS} from '@shared/constants';
-import {nonoConfigService} from '../services/NonoConfigService';
+import {useAppFacades} from '../../../application/facades/AppFacadesContext';
+import type {
+  ErrandsViewState,
+  PhoneOperateViewState,
+  PrivacyViewState,
+  VisualAgentToolsViewState,
+} from '../../../application/facades/UiRuntimeContracts';
 import {requestOperatePermissions} from '../services/operatePermissions';
-import {MODE_LABELS, type CapabilityFlags, type PrivacySettings} from '../types';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 export const CapabilitiesScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
-  const [flags, setFlags] = useState<CapabilityFlags | null>(null);
-  const [privacy, setPrivacy] = useState<PrivacySettings | null>(null);
-  const [modeLabel, setModeLabel] = useState('云端一体');
-  const [errandCount, setErrandCount] = useState(0);
-  const [gateway, setGateway] = useState('');
+  const {phoneOperate, errands, visualAgentTools, privacy} = useAppFacades();
 
-  const load = useCallback(async () => {
-    const [nextFlags, nextPrivacy, agent, memories, openclaw] =
-      await Promise.all([
-        nonoConfigService.getCapabilities(),
-        nonoConfigService.getPrivacy(),
-        nonoConfigService.getAgentMode(),
-        nonoConfigService.getMemories(),
-        nonoConfigService.getOpenClaw(),
-      ]);
-    setFlags(nextFlags);
-    setPrivacy(nextPrivacy);
-    setModeLabel(MODE_LABELS[agent.activeMode]);
-    setErrandCount(memories.filter(item => item.kind === 'errand').length);
-    setGateway(openclaw.gateway);
-  }, []);
+  const [phone, setPhone] = useState<PhoneOperateViewState | null>(null);
+  const [errand, setErrand] = useState<ErrandsViewState | null>(null);
+  const [tools, setTools] = useState<VisualAgentToolsViewState | null>(null);
+  const [privacyState, setPrivacyState] = useState<PrivacyViewState | null>(null);
 
   useFocusEffect(
     useCallback(() => {
-      load();
-    }, [load]),
+      let active = true;
+      const load = <T,>(
+        read: () => Promise<T>,
+        apply: (value: T) => void,
+      ) => {
+        read()
+          .then(next => active && apply(next))
+          .catch(() => {
+            // A rejected read leaves that card blank rather than fabricating a
+            // success; each Facade is independent.
+          });
+      };
+      load(() => phoneOperate.getViewState(), setPhone);
+      load(() => errands.getViewState(), setErrand);
+      load(() => visualAgentTools.getViewState(), setTools);
+      load(() => privacy.getViewState(), setPrivacyState);
+      return () => {
+        active = false;
+      };
+    }, [phoneOperate, errands, visualAgentTools, privacy]),
   );
 
-  const toggle = (key: keyof CapabilityFlags, value: boolean) => {
-    setFlags(current => (current ? {...current, [key]: value} : current));
-    if (key === 'phoneOperate' && value) {
-      void requestOperatePermissions();
-    }
-    void nonoConfigService.setCapability(key, value).then(setFlags);
+  const phoneMeta = phone
+    ? `${phone.modes[phone.activeMode].label} · ${
+        phone.modes[phone.activeMode].runnable ? '可用' : '需配置'
+      } ›`
+    : '读取中 ›';
+
+  const errandMeta = errand
+    ? errand.enabled
+      ? `已开 · ${errand.pendingCount} 件在记着 ›`
+      : '已关 ›'
+    : '读取中 ›';
+
+  const activeProfile = tools?.profiles.find(
+    profile => profile.profileId === tools.activeProfileId,
+  );
+  const toolsMeta = tools
+    ? tools.enabled
+      ? activeProfile
+        ? `${activeProfile.displayName} · ${
+            tools.canOperate ? '可操作' : '待连接'
+          } ›`
+        : '已开 · 未选择连接 ›'
+      : '已关 ›'
+    : '读取中 ›';
+
+  const privacyMeta = privacyState
+    ? privacyState.memoryEnabled
+      ? `记忆开启 · ${
+          privacyState.memoryLocation === 'visual_agent'
+            ? '随视觉工具'
+            : '仅这台手机'
+        } ›`
+      : '记忆已关闭 ›'
+    : '读取中 ›';
+
+  const toggleErrands = (value: boolean) => {
+    setErrand(current => (current ? {...current, enabled: value} : current));
+    void errands
+      .setEnabled(value)
+      .then(setErrand)
+      .catch(() => {
+        // Keep the last known state on failure; no silent success.
+      });
   };
 
-  if (!flags || !privacy) return null;
+  const toggleTools = (value: boolean) => {
+    if (!tools) {
+      return;
+    }
+    if (value) {
+      void requestOperatePermissions();
+    }
+    void visualAgentTools
+      .setEnabled(value, tools.revision)
+      .then(setTools)
+      .catch(() => {
+        // Optimistic-concurrency or read failure keeps the prior state.
+      });
+  };
 
   return (
     <PageLayout
@@ -57,46 +115,44 @@ export const CapabilitiesScreen: React.FC = () => {
       kicker="它会做什么"
       backgroundColor={COLORS.background.default}>
       <ScrollView contentContainerStyle={styles.content}>
-        <CapabilityCard
-          title="替我操作手机"
-          body="这台机自己看屏、点应用。对话模型在设置里单独配。"
-          meta={flags.phoneOperate ? `已开 · ${modeLabel} ›` : '已关 ›'}
-          value={flags.phoneOperate}
-          onToggle={value => toggle('phoneOperate', value)}
+        <TouchableOpacity
+          style={styles.card}
           onPress={() => navigation.navigate('PhoneOperate')}
-        />
+          activeOpacity={0.85}>
+          <Text style={styles.title}>替我操作手机</Text>
+          <Text style={styles.body}>
+            这台机自己看屏、点应用。对话模型在设置里单独配。
+          </Text>
+          <Text style={styles.meta}>{phoneMeta}</Text>
+        </TouchableOpacity>
+
         <CapabilityCard
           title="交代的事"
           body="你说一次要办，或到点再办。办完进「做过的事」。"
-          meta={flags.errands ? `已开 · ${errandCount} 件在记着 ›` : '已关 ›'}
-          value={flags.errands}
-          onToggle={value => toggle('errands', value)}
+          meta={errandMeta}
+          value={errand?.enabled ?? false}
+          onToggle={toggleErrands}
           onPress={() => navigation.navigate('Errands')}
         />
+
         <CapabilityCard
-          title="OpenClaw 远程"
-          body="大脑在网关，这台手机当手脚；可进机群。"
-          meta={flags.openclaw ? `已开 · ${gateway} ›` : '已关 ›'}
-          value={flags.openclaw}
-          onToggle={value => toggle('openclaw', value)}
-          onPress={() => navigation.navigate('OpenClaw')}
+          title="视觉工具"
+          body="接入外部视觉智能体，让它看屏、操作。可进机群。"
+          meta={toolsMeta}
+          value={tools?.enabled ?? false}
+          onToggle={toggleTools}
+          onPress={() => navigation.navigate('VisualAgentTools')}
         />
+
         <TouchableOpacity
           style={styles.card}
           onPress={() => navigation.navigate('Privacy')}
           activeOpacity={0.85}>
           <Text style={styles.title}>隐私</Text>
           <Text style={styles.body}>截图去哪、记忆存在哪、诊断包含什么。</Text>
-          <Text style={styles.meta}>
-            {privacy.memoryEnabled
-              ? `记忆开启 · ${
-                  privacy.memoryLocation === 'openclaw'
-                    ? '随 OpenClaw 在网关'
-                    : '仅这台手机'
-                } ›`
-              : '记忆已关闭 ›'}
-          </Text>
+          <Text style={styles.meta}>{privacyMeta}</Text>
         </TouchableOpacity>
+
         <View style={styles.card}>
           <Text style={styles.title}>后续能力</Text>
           <Text style={styles.body}>信息整理会放在这里。首页不用改。</Text>

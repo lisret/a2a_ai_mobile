@@ -6,7 +6,6 @@ import {
   FlatList,
   ScrollView,
   TouchableOpacity,
-  RefreshControl,
   Alert,
 } from 'react-native';
 import {useNavigation, useFocusEffect} from '@react-navigation/native';
@@ -14,124 +13,108 @@ import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import type {RootStackParamList} from '@shared/types/navigation';
 import {PageLayout} from '@shared/components/PageLayout';
 import {NoNoMascot} from '@shared/components/NoNoMascot';
-import {taskHistoryService} from '../services/TaskHistoryService';
-import {modelService} from '@features/model/services/ModelService';
 import {COLORS} from '@shared/constants';
 import {ConfirmModal} from '@shared/components/ConfirmModal';
-import {getTaskTitle} from '@shared/utils/taskHelpers';
-import type {Task} from '@core/engine/taskEngine';
-import type {AIModel} from '@shared/types/Model';
-import {nonoConfigService} from '@features/capability/services/NonoConfigService';
+import {useAppFacades} from '../../../application/facades/AppFacadesContext';
 import type {
-  CapabilityFlags,
-  MemoryItem,
-  PrivacySettings,
-} from '@features/capability/types';
+  ActivityTaskViewState,
+  ActivityViewState,
+  ErrandItemViewState,
+  PreferenceViewState,
+} from '../../../application/facades/UiRuntimeContracts';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 type ActivityTab = 'remember' | 'done';
 type ActivityFilter = 'all' | 'success' | 'failed';
 
+const LOADING_STATE: ActivityViewState = {
+  status: 'loading',
+  memoryEnabled: true,
+  memoryLocationLabel: '仅这台手机',
+  preferences: [],
+  errands: [],
+  tasks: [],
+};
+
+const ERROR_STATE: ActivityViewState = {
+  status: 'error',
+  memoryEnabled: true,
+  memoryLocationLabel: '仅这台手机',
+  preferences: [],
+  errands: [],
+  tasks: [],
+  errorMessage: '暂时读不到活动记录',
+};
+
 export const TaskHistoryScreenTab: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
-  const [model, setModel] = useState<AIModel | null>(null);
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [refreshing, setRefreshing] = useState(false);
+  const {activity} = useAppFacades();
+  const [viewState, setViewState] = useState<ActivityViewState | null>(null);
   const [deleteTaskId, setDeleteTaskId] = useState<string | null>(null);
   const [filter, setFilter] = useState<ActivityFilter>('all');
   const [tab, setTab] = useState<ActivityTab>('remember');
-  const [memories, setMemories] = useState<MemoryItem[]>([]);
-  const [privacy, setPrivacy] = useState<PrivacySettings | null>(null);
-  const [flags, setFlags] = useState<CapabilityFlags | null>(null);
-
-  const loadData = useCallback(async () => {
-    try {
-      const [selectedModel, nextMemories, nextPrivacy, nextFlags] =
-        await Promise.all([
-          modelService.getSelectedModel(),
-          nonoConfigService.getMemories(),
-          nonoConfigService.getPrivacy(),
-          nonoConfigService.getCapabilities(),
-        ]);
-      setModel(selectedModel);
-      setMemories(nextMemories);
-      setPrivacy(nextPrivacy);
-      setFlags(nextFlags);
-
-      if (selectedModel) {
-        setTasks(await taskHistoryService.getTasksByModelId(selectedModel.id));
-      } else {
-        setTasks(await taskHistoryService.getAllTasks());
-      }
-    } catch (error) {
-      console.error('加载数据失败:', error);
-    }
-  }, []);
 
   useFocusEffect(
     useCallback(() => {
-      loadData();
-    }, [loadData]),
+      let active = true;
+      setViewState(current => current ?? LOADING_STATE);
+      activity
+        .getViewState()
+        .then(next => active && setViewState(next))
+        .catch(() => active && setViewState(ERROR_STATE));
+      return () => {
+        active = false;
+      };
+    }, [activity]),
   );
 
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await loadData();
-    setRefreshing(false);
-  }, [loadData]);
+  const state = viewState ?? LOADING_STATE;
 
   const confirmDelete = async () => {
-    if (!deleteTaskId) return;
+    if (!deleteTaskId) {
+      return;
+    }
     try {
-      await taskHistoryService.deleteTask(deleteTaskId);
-      setDeleteTaskId(null);
-      await loadData();
-    } catch (error) {
-      console.error('删除任务失败:', error);
-      Alert.alert('错误', '删除任务失败');
+      setViewState(await activity.deleteTask(deleteTaskId));
+    } catch {
+      setViewState(ERROR_STATE);
+    } finally {
       setDeleteTaskId(null);
     }
   };
 
-  const formatDemoTime = (timestamp: number): string => {
-    const date = new Date(timestamp);
-    return `${date.getMonth() + 1}月${date.getDate()}日 ${String(
-      date.getHours(),
-    ).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-  };
-
-  const forgetMemory = (item: MemoryItem) => {
+  const forgetPreference = (item: PreferenceViewState) => {
     Alert.alert('忘掉这条？', item.title, [
       {text: '取消', style: 'cancel'},
       {
         text: '忘掉',
         style: 'destructive',
         onPress: async () => {
-          await nonoConfigService.deleteMemory(item.id);
-          await loadData();
+          try {
+            setViewState(await activity.forgetPreference(item.id));
+          } catch {
+            setViewState(ERROR_STATE);
+          }
         },
       },
     ]);
   };
 
-  const memoryOn = privacy?.memoryEnabled ?? true;
-  const errandsOn = flags?.errands ?? true;
-  const names = memoryOn ? memories.filter(item => item.kind === 'name') : [];
-  const prefs = memoryOn
-    ? memories.filter(item => item.kind === 'preference')
-    : [];
-  const errands = errandsOn
-    ? memories.filter(item => item.kind === 'errand')
-    : [];
-  const locationLabel =
-    privacy?.memoryLocation === 'openclaw' ? '随 OpenClaw 在网关' : '仅这台手机';
+  const formatTime = (timestamp: number): string => {
+    const date = new Date(timestamp);
+    return `${date.getMonth() + 1}月${date.getDate()}日 ${String(
+      date.getHours(),
+    ).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+  };
 
-  const filteredTasks = tasks.filter(task => {
-    if (filter === 'all') return true;
+  const filteredTasks = state.tasks.filter(task => {
+    if (filter === 'all') {
+      return true;
+    }
     return task.status === filter;
   });
 
-  const renderTaskItem = ({item}: {item: Task}) => {
+  const renderTaskItem = ({item}: {item: ActivityTaskViewState}) => {
     const isFailed = item.status === 'failed';
     return (
       <TouchableOpacity
@@ -140,7 +123,7 @@ export const TaskHistoryScreenTab: React.FC = () => {
         onLongPress={() => setDeleteTaskId(item.id)}
         activeOpacity={0.8}>
         <View style={styles.metaRow}>
-          <Text style={styles.metaText}>{formatDemoTime(item.createdAt)}</Text>
+          <Text style={styles.metaText}>{formatTime(item.createdAtMs)}</Text>
           <View style={[styles.badge, isFailed && styles.badgeDanger]}>
             <Text style={[styles.badgeText, isFailed && styles.badgeDangerText]}>
               {isFailed ? '失败' : item.status === 'success' ? '已完成' : '执行中'}
@@ -148,12 +131,10 @@ export const TaskHistoryScreenTab: React.FC = () => {
           </View>
         </View>
         <Text style={styles.title} numberOfLines={2}>
-          {getTaskTitle(item, 40)}
+          {item.title}
         </Text>
         <View style={styles.metaRow}>
-          <Text style={styles.metaText}>
-            {item.output?.steps?.length || 0} 个步骤
-          </Text>
+          <Text style={styles.metaText}>{item.stepCount} 个步骤</Text>
           <Text style={styles.metaText}>查看详情 ›</Text>
         </View>
       </TouchableOpacity>
@@ -187,50 +168,79 @@ export const TaskHistoryScreenTab: React.FC = () => {
       headerAccessory={<NoNoMascot size={50} />}
       backgroundColor={COLORS.background.default}>
       {tab === 'remember' ? (
-        <ScrollView
-          contentContainerStyle={styles.listContent}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
-          }>
+        <ScrollView contentContainerStyle={styles.listContent}>
           {tabBar}
-          <MemoryGroup
-            title="称呼"
-            hint={memoryOn ? locationLabel : '已关闭'}
-            emptyTitle={memoryOn ? '还没有称呼' : '记忆已关闭'}
-            emptyBody={
-              memoryOn
-                ? '确认过怎么叫它会出现在这里。'
-                : '可在能力 · 隐私里打开。'
-            }
-            items={names}
-            onForget={forgetMemory}
-          />
-          <MemoryGroup
-            title="偏好"
-            hint={`${prefs.length} 条`}
-            emptyTitle={memoryOn ? '还没有偏好' : '记忆已关闭'}
-            emptyBody={
-              memoryOn
-                ? '确认过的习惯会一条条列在这里。'
-                : '可在能力 · 隐私里打开。'
-            }
-            items={prefs}
-            onForget={forgetMemory}
-          />
-          <MemoryGroup
-            title="交代的事"
-            hint={errandsOn ? `${errands.length} 件` : '已关闭'}
-            emptyTitle={errandsOn ? '还没有交代' : '能力已关闭'}
-            emptyBody={
-              errandsOn
-                ? '单次或定时交代会出现在这里。'
-                : '可在能力里打开「交代的事」。'
-            }
-            items={errands}
-            onOpenErrand={id =>
-              navigation.navigate('ErrandDetail', {errandId: id})
-            }
-          />
+          <View style={styles.group}>
+            <View style={styles.groupHead}>
+              <Text style={styles.groupTitle}>它还记得</Text>
+              <Text style={styles.groupHint}>
+                {state.memoryEnabled ? state.memoryLocationLabel : '已关闭'}
+              </Text>
+            </View>
+            {state.preferences.length === 0 ? (
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyTitle}>
+                  {state.memoryEnabled ? '还没有称呼或偏好' : '记忆已关闭'}
+                </Text>
+                <Text style={styles.emptyBody}>
+                  {state.memoryEnabled
+                    ? '确认过的称呼和习惯会出现在这里。'
+                    : '可在能力 · 隐私里打开。'}
+                </Text>
+              </View>
+            ) : (
+              state.preferences.map(item => (
+                <View key={item.id} style={styles.taskItem}>
+                  <Text style={styles.kind}>
+                    {item.kind === 'name' ? '称呼' : '偏好'}
+                  </Text>
+                  <Text style={styles.title}>{item.title}</Text>
+                  {item.body ? (
+                    <Text style={styles.emptyBody}>{item.body}</Text>
+                  ) : null}
+                  <TouchableOpacity
+                    style={styles.forget}
+                    onPress={() => forgetPreference(item)}>
+                    <Text style={styles.forgetText}>忘掉</Text>
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
+          </View>
+
+          <View style={styles.group}>
+            <View style={styles.groupHead}>
+              <Text style={styles.groupTitle}>交代的事</Text>
+              <Text style={styles.groupHint}>{state.errands.length} 件</Text>
+            </View>
+            {state.errands.length === 0 ? (
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyTitle}>还没有交代</Text>
+                <Text style={styles.emptyBody}>
+                  单次或定时交代会出现在这里。
+                </Text>
+              </View>
+            ) : (
+              state.errands.map((item: ErrandItemViewState) => (
+                <TouchableOpacity
+                  key={item.id}
+                  style={styles.taskItem}
+                  onPress={() =>
+                    navigation.navigate('ErrandDetail', {errandId: item.id})
+                  }
+                  activeOpacity={0.8}>
+                  <View style={styles.metaRow}>
+                    <Text style={styles.kind}>
+                      {item.kind === 'schedule' ? '定时' : '单次'}
+                    </Text>
+                    <Text style={styles.metaText}>编辑 ›</Text>
+                  </View>
+                  <Text style={styles.title}>{item.title}</Text>
+                  <Text style={styles.metaText}>{item.scheduleLabel}</Text>
+                </TouchableOpacity>
+              ))
+            )}
+          </View>
         </ScrollView>
       ) : (
         <FlatList
@@ -269,18 +279,11 @@ export const TaskHistoryScreenTab: React.FC = () => {
           ListEmptyComponent={
             <View style={styles.emptyCard}>
               <Text style={styles.emptyTitle}>暂无匹配记录</Text>
-              <Text style={styles.emptyBody}>
-                {model
-                  ? '完成一个任务后会出现在这里。'
-                  : '请先选择一个模型。'}
-              </Text>
+              <Text style={styles.emptyBody}>完成一个任务后会出现在这里。</Text>
             </View>
           }
           renderItem={renderTaskItem}
           contentContainerStyle={styles.listContent}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
-          }
         />
       )}
 
@@ -297,77 +300,6 @@ export const TaskHistoryScreenTab: React.FC = () => {
     </PageLayout>
   );
 };
-
-const MemoryGroup = ({
-  title,
-  hint,
-  emptyTitle,
-  emptyBody,
-  items,
-  onForget,
-  onOpenErrand,
-}: {
-  title: string;
-  hint: string;
-  emptyTitle: string;
-  emptyBody: string;
-  items: MemoryItem[];
-  onForget?: (item: MemoryItem) => void;
-  onOpenErrand?: (id: string) => void;
-}) => (
-  <View style={styles.group}>
-    <View style={styles.groupHead}>
-      <Text style={styles.groupTitle}>{title}</Text>
-      <Text style={styles.groupHint}>{hint}</Text>
-    </View>
-    {items.length === 0 ? (
-      <View style={styles.emptyCard}>
-        <Text style={styles.emptyTitle}>{emptyTitle}</Text>
-        <Text style={styles.emptyBody}>{emptyBody}</Text>
-      </View>
-    ) : (
-      items.map(item =>
-        item.kind === 'errand' ? (
-          <TouchableOpacity
-            key={item.id}
-            style={styles.taskItem}
-            onPress={() => onOpenErrand?.(item.id)}
-            activeOpacity={0.8}>
-            <View style={styles.metaRow}>
-              <Text style={styles.kind}>
-                {item.errandType === 'schedule' ? '定时' : '单次'}
-              </Text>
-              <Text style={styles.metaText}>编辑 ›</Text>
-            </View>
-            <Text style={styles.title}>{item.title}</Text>
-            <Text style={styles.metaText}>
-              {item.errandType === 'schedule'
-                ? item.when || '到点再办'
-                : '还没办 · 办完会进「做过的事」'}
-            </Text>
-          </TouchableOpacity>
-        ) : (
-          <View key={item.id} style={styles.taskItem}>
-            <Text style={styles.kind}>
-              {item.kind === 'name' ? '称呼' : '偏好'}
-            </Text>
-            <Text style={styles.title}>{item.title}</Text>
-            {item.body ? (
-              <Text style={styles.emptyBody}>{item.body}</Text>
-            ) : null}
-            {onForget ? (
-              <TouchableOpacity
-                style={styles.forget}
-                onPress={() => onForget(item)}>
-                <Text style={styles.forgetText}>忘掉</Text>
-              </TouchableOpacity>
-            ) : null}
-          </View>
-        ),
-      )
-    )}
-  </View>
-);
 
 const styles = StyleSheet.create({
   listContent: {

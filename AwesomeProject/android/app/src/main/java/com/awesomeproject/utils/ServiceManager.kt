@@ -72,11 +72,16 @@ class ServiceManager(private val context: Context) {
     }
 
     /**
-     * 停止任务执行前台服务
+     * 停止任务执行前台服务。
+     * 携带本次会话的精确 identity（{taskId, sessionRevision}），与 start/cancel
+     * 使用相同的 identity 字段，避免误停其它会话。
      */
-    fun stopTaskExecutionService(): Boolean {
+    fun stopTaskExecutionService(taskId: String, sessionRevision: Double): Boolean {
         return try {
-            val intent = Intent(context, TaskExecutionService::class.java)
+            val intent = Intent(context, TaskExecutionService::class.java).apply {
+                putExtra("taskId", taskId)
+                putExtra("sessionRevision", sessionRevision)
+            }
             context.stopService(intent)
             Log.d("ServiceManager", "任务执行前台服务已停止")
             true

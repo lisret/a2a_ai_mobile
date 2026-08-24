@@ -397,9 +397,9 @@ class AccessibilityModule(reactContext: ReactApplicationContext) :
      * 停止任务执行前台服务
      */
     @ReactMethod
-    fun stopTaskExecutionService(promise: Promise) {
+    fun stopTaskExecutionService(taskId: String, sessionRevision: Double, promise: Promise) {
         try {
-            val success = serviceManager.stopTaskExecutionService()
+            val success = serviceManager.stopTaskExecutionService(taskId, sessionRevision)
             if (success) {
                 promise.resolve(true)
             } else {

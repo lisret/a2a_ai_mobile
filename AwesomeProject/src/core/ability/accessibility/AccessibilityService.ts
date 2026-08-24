@@ -162,15 +162,15 @@ class AccessibilityService {
     catch (error) { console.warn('更新前台服务失败:', error); }
   }
 
-  // Identity is optional so the legacy no-arg stop (Home) still compiles; the
-  // native service already holds the running session's identity from start, so
-  // stop targets it by instance and never broadcasts a wildcard cancel.
+  // Stop targets the exact running session identity `{taskId, sessionRevision}`;
+  // Android/iOS use these fields to scope the stop (iOS to the exact notification
+  // identifier), never a wildcard sweep.
   async stopTaskExecutionService(
-    _taskId?: string,
-    _sessionRevision?: number,
+    taskId: string,
+    sessionRevision: number,
   ): Promise<void> {
     if (!AccessibilityModule) return;
-    try { await AccessibilityModule.stopTaskExecutionService(); }
+    try { await AccessibilityModule.stopTaskExecutionService(taskId, sessionRevision); }
     catch (error) { console.warn('停止前台服务失败:', error); }
   }
 

@@ -508,12 +508,14 @@ export const TaskHistoryScreen: React.FC = () => {
                 await operate.cancel(active.taskId);
               }
 
-              // 停止后台服务（强制后台运行，始终执行）
+              // 停止后台服务：仅在已知精确 identity 时按会话停止（fail-closed）
               try {
-                await accessibilityService.stopTaskExecutionService(
-                  active?.taskId,
-                  active?.sessionRevision,
-                );
+                if (active) {
+                  await accessibilityService.stopTaskExecutionService(
+                    active.taskId,
+                    active.sessionRevision,
+                  );
+                }
                 await accessibilityService.releaseWakeLock();
                 await floatingWindowService.hideFloatingWindow();
               } catch (error) {

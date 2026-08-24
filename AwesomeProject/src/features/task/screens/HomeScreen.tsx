@@ -393,7 +393,8 @@ export const HomeScreen: React.FC = () => {
       DeviceEventEmitter.emit('TaskCancelRequested', { taskId: 'current' });
       
       try {
-        await accessibilityService.stopTaskExecutionService();
+        // Home 尚未跟踪当前会话 identity（operate 接线在 Task 8）；缺少精确
+        // {taskId, sessionRevision} 时按 fail-closed 跳过原生停止，避免误停其它会话。
         await accessibilityService.releaseWakeLock();
         await floatingWindowService.hideFloatingWindow();
       } catch (error) {

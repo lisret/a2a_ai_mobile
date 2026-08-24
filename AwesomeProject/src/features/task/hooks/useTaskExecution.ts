@@ -11,7 +11,7 @@ import {useCallback, useRef, useState} from 'react';
 import {useAppFacades} from '../../../application/facades/AppFacadesContext';
 import {accessibilityService} from '@core/ability';
 import {taskHistoryService} from '../services/TaskHistoryService';
-import type {Task, TaskAction} from '@core/engine/taskEngine';
+import type {Task} from '@core/engine/taskEngine';
 import type {AIModel} from '@shared/types/Model';
 import type {
   TaskUiEvent,
@@ -27,7 +27,13 @@ export type UseTaskExecutionOptions = {
   model: AIModel | null;
   onTaskStart?: (taskId: string, sessionRevision: number) => void | Promise<void>;
   onTaskComplete?: (task: Task) => void | Promise<void>;
-  onStepUpdate?: (step: number, action: TaskAction, modelResponse?: string) => void;
+  // Second arg is the scoped event's action label (a string). The frozen
+  // `step_started` event carries no label yet, so a placeholder empty label is
+  // passed for it; `step_completed` forwards the event's `actionLabel`.
+  onStepUpdate?: (step: number, actionLabel: string, modelResponse?: string) => void;
+  // `onStreamUpdate` is kept for callers that pass it, but the frozen Task-1
+  // `TaskUiEvent` union has no streaming variant, so it is intentionally never
+  // invoked here (see report — Task-1 contract limit, not a dropped step update).
   onStreamUpdate?: (step: number, content: string) => void;
 } & {[K in `onTask${'Failed'}`]?: FailureCallback};
 
@@ -75,8 +81,12 @@ export function useTaskExecution(options: UseTaskExecutionOptions) {
           setCurrentStep(0);
           break;
         case 'step_started':
+          setCurrentStep(event.step);
+          options.onStepUpdate?.(event.step, '');
+          break;
         case 'step_completed':
           setCurrentStep(event.step);
+          options.onStepUpdate?.(event.step, event.actionLabel);
           break;
         case 'completed': {
           const taskId = event.taskId;

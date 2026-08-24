@@ -22,3 +22,7 @@ NativeModules.AccessibilityActionModule = {};
 NativeModules.ADBModule = {};
 
 jest.mock('react-native-vector-icons/FontAwesome', () => 'Icon');
+
+// react-native-webview ships ESM that Jest's transformIgnorePatterns does not
+// transform; stub it as a host component so screens embedding the avatar render.
+jest.mock('react-native-webview', () => 'WebView');

@@ -76,5 +76,8 @@ export const STORAGE_KEYS = {
   
   /** 无障碍服务权限最后检查时间存储键 */
   PERMISSION_ACCESSIBILITY_LAST_CHECK: '@autoglm:permission_last_check:accessibility',
+
+  /** 当前激活的头像外观 */
+  AVATAR_ACTIVE: '@nono:avatar_active',
 } as const;
 

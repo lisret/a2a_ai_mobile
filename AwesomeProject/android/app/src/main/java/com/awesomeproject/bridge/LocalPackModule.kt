@@ -8,6 +8,7 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import java.io.File
+import java.io.FileInputStream
 import java.net.URL
 import java.security.MessageDigest
 import java.util.concurrent.Executors
@@ -209,11 +210,9 @@ class LocalPackModule(reactContext: ReactApplicationContext) :
     }
 
     /**
-     * 从 APK assets 的 [assetDir] 拷贝 [filesJson] 里列出的文件到 pack 目录，
-     * 逐个按 pins 的 bytes + SHA-256 校验；若目标已存在且哈希匹配则跳过（no-op）。
-     * 任一文件校验失败都不会留下半成品（先写 `.part` 再原子 rename）。
-     *
-     * Copies pinned files out of bundled assets, hash-verified and idempotent.
+     * 从 APK assets 的 [assetDir] 安装一个包：按 pins 的 name/bytes/sha256 逐文件校验拷贝。
+     * 若目标文件已存在且哈希匹配则跳过（首页 focus 可重复调用，命中即 no-op）。
+     * assetDir 相对 `assets/`（如 `nono-asr/builtin`），fileName 必须扁平。
      */
     @ReactMethod
     fun installFromAssets(
@@ -226,16 +225,14 @@ class LocalPackModule(reactContext: ReactApplicationContext) :
         io.execute {
             try {
                 val dir = root(kind, id)
-                val files = JSONArray(filesJson)
                 dir.mkdirs()
+                val files = JSONArray(filesJson)
+                val assets = reactApplicationContext.assets
                 for (i in 0 until files.length()) {
                     val entry = files.getJSONObject(i)
                     val name = entry.getString("name")
                     val expectedBytes = entry.getLong("bytes")
                     val expectedSha = entry.getString("sha256")
-                    if (!expectedSha.matches(SHA256_REGEX)) {
-                        throw IllegalArgumentException(CODE_INVALID_SHA256)
-                    }
                     val target = fileIn(dir, name)
                     if (target.isFile &&
                         target.length() == expectedBytes &&
@@ -244,12 +241,10 @@ class LocalPackModule(reactContext: ReactApplicationContext) :
                         continue
                     }
                     val part = File(dir, "$name.part")
-                    if (part.exists()) {
-                        part.delete()
-                    }
+                    if (part.exists()) part.delete()
                     val digest = MessageDigest.getInstance("SHA-256")
                     var total = 0L
-                    reactApplicationContext.assets.open("$assetDir/$name").use { input ->
+                    assets.open("$assetDir/$name").use { input ->
                         part.outputStream().use { output ->
                             val buffer = ByteArray(BUFFER_SIZE)
                             while (true) {
@@ -262,12 +257,8 @@ class LocalPackModule(reactContext: ReactApplicationContext) :
                             output.flush()
                         }
                     }
-                    if (total != expectedBytes) {
-                        part.delete()
-                        throw IllegalStateException(CODE_SIZE_MISMATCH)
-                    }
-                    val actualHex = digest.digest().joinToString("") { "%02x".format(it) }
-                    if (actualHex != expectedSha) {
+                    val hex = digest.digest().joinToString("") { "%02x".format(it) }
+                    if (total != expectedBytes || hex != expectedSha) {
                         part.delete()
                         throw IllegalStateException(CODE_HASH_MISMATCH)
                     }
@@ -285,9 +276,124 @@ class LocalPackModule(reactContext: ReactApplicationContext) :
         }
     }
 
+    /**
+     * 下载 tar.bz2 到 `nono/{kind}/{id}.part`（与 avatars 的包内 `{id}.part` 不冲突），
+     * 校验 archive 字节数 + SHA-256 后，仅解压 pins 声明的文件到 pack 目录并逐一校验。
+     * 任一文件缺失/不符即删除整包并 reject —— 绝不留下半损坏的升级目录。
+     */
+    @ReactMethod
+    fun installArchiveFromUrl(
+        kind: String,
+        id: String,
+        url: String,
+        bytes: Double,
+        sha256: String,
+        filesJson: String,
+        promise: Promise,
+    ) {
+        io.execute {
+            val dir = root(kind, id)
+            val part = File(dir.parentFile, "$id.part")
+            try {
+                if (!sha256.matches(SHA256_REGEX)) {
+                    throw IllegalArgumentException(CODE_INVALID_SHA256)
+                }
+                val expectedBytes = bytes.toLong()
+                if (expectedBytes <= 0L) {
+                    throw IllegalArgumentException(CODE_INVALID_BYTES)
+                }
+                val parsed = URL(url)
+                if (!parsed.protocol.equals("https", ignoreCase = true)) {
+                    throw IllegalArgumentException(CODE_INVALID_URL)
+                }
+                val pins = JSONArray(filesJson)
+
+                dir.parentFile?.mkdirs()
+                if (part.exists()) part.delete()
+
+                val digest = MessageDigest.getInstance("SHA-256")
+                var total = 0L
+                val connection = parsed.openConnection() as HttpsURLConnection
+                try {
+                    connection.connectTimeout = CONNECT_TIMEOUT_MS
+                    connection.readTimeout = READ_TIMEOUT_MS
+                    connection.instanceFollowRedirects = true
+                    connection.inputStream.use { input ->
+                        part.outputStream().use { output ->
+                            val buffer = ByteArray(BUFFER_SIZE)
+                            while (true) {
+                                val read = input.read(buffer)
+                                if (read < 0) break
+                                output.write(buffer, 0, read)
+                                digest.update(buffer, 0, read)
+                                total += read
+                            }
+                            output.flush()
+                        }
+                    }
+                } finally {
+                    connection.disconnect()
+                }
+
+                if (total != expectedBytes) {
+                    throw IllegalStateException(CODE_SIZE_MISMATCH)
+                }
+                val hex = digest.digest().joinToString("") { "%02x".format(it) }
+                if (hex != sha256) {
+                    throw IllegalStateException(CODE_HASH_MISMATCH)
+                }
+
+                dir.deleteRecursively()
+                dir.mkdirs()
+                val wanted = HashSet<String>()
+                for (i in 0 until pins.length()) {
+                    wanted.add(pins.getJSONObject(i).getString("name"))
+                }
+                FileInputStream(part).use { fis ->
+                    BZip2CompressorInputStream(fis).use { bz ->
+                        TarArchiveInputStream(bz).use { tar ->
+                            var e = tar.nextTarEntry
+                            while (e != null) {
+                                if (!e.isDirectory) {
+                                    val flat = e.name.substringAfterLast('/')
+                                    if (wanted.contains(flat)) {
+                                        val out = fileIn(dir, flat)
+                                        out.outputStream().use { tar.copyTo(it) }
+                                    }
+                                }
+                                e = tar.nextTarEntry
+                            }
+                        }
+                    }
+                }
+                part.delete()
+
+                for (i in 0 until pins.length()) {
+                    val entry = pins.getJSONObject(i)
+                    val name = entry.getString("name")
+                    val file = fileIn(dir, name)
+                    if (!file.isFile ||
+                        file.length() != entry.getLong("bytes") ||
+                        sha256Of(file) != entry.getString("sha256")
+                    ) {
+                        throw IllegalStateException(CODE_HASH_MISMATCH)
+                    }
+                }
+                promise.resolve(null)
+            } catch (error: IllegalArgumentException) {
+                part.delete()
+                promise.reject(CODE_INVALID_ARG, error.message, error)
+            } catch (error: Exception) {
+                part.delete()
+                dir.deleteRecursively()
+                promise.reject(CODE_FAILURE, error.message, error)
+            }
+        }
+    }
+
     private fun sha256Of(file: File): String {
         val digest = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { input ->
+        FileInputStream(file).use { input ->
             val buffer = ByteArray(BUFFER_SIZE)
             while (true) {
                 val read = input.read(buffer)

@@ -14,6 +14,10 @@
 
 | Command | Exit | Result | Evidence excerpt |
 | --- | ---: | --- | --- |
+| `node jest src/__tests__/integration --runInBand` (cwd AwesomeProject) | 0 | PRE-CANDIDATE PASS | 3 suites / 29 tests |
+| `npx tsc --noEmit --pretty false` | 0 | PRE-CANDIDATE PASS | no diagnostics |
+| `./gradlew :app:compileDebugKotlin` | n/a | WAIVED | no JDK on this machine |
+| iOS XCTest | n/a | WAIVED | no Xcode / iOS dictation out of scope |
 
 ## User-path Matrix
 
@@ -24,6 +28,9 @@
 
 | Gate | Reason | Impact | Owner | Manual follow-up date |
 | --- | --- | --- | --- | --- |
+| Android Gradle compile/assemble | Unable to locate a Java Runtime; `android/gradlew` not executable | Cannot produce debug APK on this host | integration coordinator | 2026-08-27 |
+| iOS listen / XCTest | Product scope: 当前版本听写仅支持 Android; no Xcode | iOS dictation remains copy-only | integration coordinator | 2026-08-27 |
+| Privacy rg SCAN1/2/3 raw exit | Hits are redaction destructure + versioned `NonoTaskCancelRequestedV1` + tests asserting absence of SpeechRecognizer/CDN | No plaintext credential or system ASR in persist/UI | integration coordinator | Task 12 re-run on candidate |
 
 ## Findings and Fixes
 

@@ -126,4 +126,96 @@ describe('production application ports', () => {
     });
     await expect(activity.read()).resolves.toMatchObject({status: 'ready'});
   });
+
+  it('operate fail keeps task identity so Home can leave RUNNING', async () => {
+    const events = new TaskUiEventBus();
+    const received: Array<{type: string; taskId: string}> = [];
+    events.subscribe(event => {
+      received.push({type: event.type, taskId: event.taskId});
+    });
+    const port = new RuntimeOperatePort(
+      repoWith(emptyRoute()),
+      events,
+      {
+        resolveCatalog: jest.fn(),
+        resolveExecutionTarget: jest.fn(),
+        resolveTransport: jest.fn(),
+        listPresets: jest.fn(),
+      } as never,
+      {getCurrent: jest.fn().mockResolvedValue({state: 'failed'})} as never,
+    );
+    (port as unknown as {current: object; fail: (code: string, message: string) => void}).current =
+      {phase: 'running', taskId: 'task-1', sessionRevision: 3, steps: []};
+    (port as unknown as {fail: (code: string, message: string) => void}).fail(
+      'claim_failed',
+      '无法开始这次操作',
+    );
+    await expect(port.getCurrent()).resolves.toMatchObject({
+      phase: 'failed',
+      taskId: 'task-1',
+      sessionRevision: 3,
+    });
+    expect(received).toEqual([{type: 'failed', taskId: 'task-1'}]);
+  });
+
+  it('visual save with keep preserves the existing secretRef', async () => {
+    const route: RuntimeRouteConfigV1 = {
+      ...emptyRoute(),
+      visualAgent: {
+        enabled: true,
+        activeProfileId: 'vap-1',
+        profiles: [
+          {
+            schemaVersion: 1,
+            profileId: 'vap-1',
+            toolId: 'openclaw',
+            enabled: true,
+            connector: {
+              kind: 'connector_bridge',
+              bridgeUrl: 'http://127.0.0.1:18789',
+              bindingId: 'bind-1',
+              secretRef: 'visual:vap-1',
+            },
+            requestedCapabilities: {
+              imageInput: true,
+              structuredAction: true,
+              stream: false,
+              cancel: false,
+              approval: false,
+              resume: false,
+              steer: false,
+              preferences: false,
+            },
+          },
+        ],
+      },
+    };
+    const repo = repoWith(route);
+    const visual = new RuntimeVisualAgentToolsPort(repo);
+    await visual.saveProfile(
+      {
+        profileId: 'vap-1',
+        toolId: 'openclaw',
+        enabled: true,
+        bridgeUrl: 'http://127.0.0.1:18789',
+        bindingId: 'bind-1',
+        credential: {action: 'keep'},
+        requestedCapabilities: {
+          imageInput: true,
+          structuredAction: true,
+          stream: false,
+          cancel: false,
+          approval: false,
+          resume: false,
+          steer: false,
+          preferences: false,
+        },
+      },
+      1,
+    );
+    const envelope = await repo.load();
+    expect(envelope.active.visualAgent.profiles[0]?.connector.secretRef).toBe(
+      'visual:vap-1',
+    );
+  });
 });

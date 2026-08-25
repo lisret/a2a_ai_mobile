@@ -294,6 +294,13 @@ export class RuntimeOperatePort implements OperateApplicationPort {
     });
     try {
       await runner.run(claim.lease);
+      this.current = {
+        phase: 'success',
+        taskId,
+        sessionRevision,
+        instruction,
+        steps: this.current.steps,
+      };
     } catch (error) {
       this.fail(
         'operate_failed',
@@ -303,12 +310,20 @@ export class RuntimeOperatePort implements OperateApplicationPort {
   }
 
   private fail(code: string, message: string): void {
-    this.current = {phase: 'failed', steps: this.current.steps, errorMessage: message};
-    if (this.current.taskId && this.current.sessionRevision) {
+    const taskId = this.current.taskId;
+    const sessionRevision = this.current.sessionRevision;
+    this.current = {
+      phase: 'failed',
+      taskId,
+      sessionRevision,
+      steps: this.current.steps,
+      errorMessage: message,
+    };
+    if (taskId && sessionRevision != null) {
       this.events.emit({
         type: 'failed',
-        taskId: this.current.taskId,
-        sessionRevision: this.current.sessionRevision,
+        taskId,
+        sessionRevision,
         sequence: ++this.sequence,
         occurredAtMs: Date.now(),
         code,
@@ -405,7 +420,11 @@ export class RuntimeVisualAgentToolsPort implements VisualAgentToolsApplicationP
     expectedRevision: number,
   ): Promise<VisualAgentToolsViewState> {
     const profileId = draft.profileId ?? newId('vap');
-    let secretRef: string | null = null;
+    const envelope = await this.repo.load();
+    const existing = envelope.active.visualAgent.profiles.find(
+      item => item.profileId === profileId,
+    );
+    let secretRef: string | null = existing?.connector.secretRef ?? null;
     if (draft.credential.action === 'replace' && this.credentials) {
       secretRef = `visual:${profileId}`;
       await this.credentials.put(secretRef, draft.credential.plaintext);

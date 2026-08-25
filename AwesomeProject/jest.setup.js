@@ -20,6 +20,7 @@ const {NativeModules} = require('react-native');
 NativeModules.AccessibilityModule = {};
 NativeModules.AccessibilityActionModule = {};
 NativeModules.ADBModule = {};
+NativeModules.LocalPackModule = {};
 
 jest.mock('react-native-vector-icons/FontAwesome', () => 'Icon');
 

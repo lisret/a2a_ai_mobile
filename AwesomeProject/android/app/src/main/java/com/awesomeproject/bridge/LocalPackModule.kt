@@ -190,9 +190,6 @@ class LocalPackModule(reactContext: ReactApplicationContext) :
                     throw IllegalStateException(CODE_HASH_MISMATCH)
                 }
 
-                if (target.exists()) {
-                    target.delete()
-                }
                 if (!part.renameTo(target)) {
                     throw IllegalStateException(CODE_RENAME_FAILED)
                 }

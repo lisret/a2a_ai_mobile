@@ -28,7 +28,8 @@ class AccessibilityPackage : ReactPackage {
             ADBModule(reactContext),
             FloatingWindowModule(reactContext),
             SecureCredentialModule(reactContext),
-            LocalModelEligibilityModule(reactContext, UnavailableLocalModelOperations())
+            LocalModelEligibilityModule(reactContext, UnavailableLocalModelOperations()),
+            LocalPackModule(reactContext)
         )
     }
 

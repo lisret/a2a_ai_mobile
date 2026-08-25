@@ -79,5 +79,8 @@ export const STORAGE_KEYS = {
 
   /** 当前激活的头像外观 */
   AVATAR_ACTIVE: '@nono:avatar_active',
+
+  /** 离线 ASR 升级包（SenseVoice）是否就绪 */
+  ASR_UPGRADE_READY: '@nono:asr_upgrade_ready',
 } as const;
 

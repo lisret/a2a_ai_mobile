@@ -18,6 +18,20 @@ export interface LocalPackNative {
     sha256: string,
     fileName: string,
   ): Promise<string>;
+  installFromAssets(
+    kind: PackKind,
+    id: string,
+    assetDir: string,
+    filesJson: string,
+  ): Promise<void>;
+  installArchiveFromUrl(
+    kind: PackKind,
+    id: string,
+    url: string,
+    bytes: number,
+    sha256: string,
+    filesJson: string,
+  ): Promise<void>;
 }
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -106,5 +120,38 @@ export const localPack: LocalPackNative = {
       throw new Error('invalid_bytes');
     }
     return requireNative().installFromUrl(kind, id, url, bytes, sha256, fileName);
+  },
+
+  async installFromAssets(
+    kind: PackKind,
+    id: string,
+    assetDir: string,
+    filesJson: string,
+  ): Promise<void> {
+    assertKind(kind);
+    assertId(id);
+    return requireNative().installFromAssets(kind, id, assetDir, filesJson);
+  },
+
+  async installArchiveFromUrl(
+    kind: PackKind,
+    id: string,
+    url: string,
+    bytes: number,
+    sha256: string,
+    filesJson: string,
+  ): Promise<void> {
+    assertKind(kind);
+    assertId(id);
+    if (!SHA256_PATTERN.test(sha256)) {
+      throw new Error('invalid_sha256');
+    }
+    if (!url.startsWith('https://')) {
+      throw new Error('invalid_url');
+    }
+    if (!Number.isInteger(bytes) || bytes <= 0) {
+      throw new Error('invalid_bytes');
+    }
+    return requireNative().installArchiveFromUrl(kind, id, url, bytes, sha256, filesJson);
   },
 };

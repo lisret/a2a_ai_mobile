@@ -12,6 +12,9 @@ import java.net.URL
 import java.security.MessageDigest
 import java.util.concurrent.Executors
 import javax.net.ssl.HttpsURLConnection
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
+import org.json.JSONArray
 
 /**
  * 本地资源包管理原生模块 (Local Pack native module)
@@ -203,6 +206,96 @@ class LocalPackModule(reactContext: ReactApplicationContext) :
                 promise.reject(CODE_FAILURE, error.message, error)
             }
         }
+    }
+
+    /**
+     * 从 APK assets 的 [assetDir] 拷贝 [filesJson] 里列出的文件到 pack 目录，
+     * 逐个按 pins 的 bytes + SHA-256 校验；若目标已存在且哈希匹配则跳过（no-op）。
+     * 任一文件校验失败都不会留下半成品（先写 `.part` 再原子 rename）。
+     *
+     * Copies pinned files out of bundled assets, hash-verified and idempotent.
+     */
+    @ReactMethod
+    fun installFromAssets(
+        kind: String,
+        id: String,
+        assetDir: String,
+        filesJson: String,
+        promise: Promise,
+    ) {
+        io.execute {
+            try {
+                val dir = root(kind, id)
+                val files = JSONArray(filesJson)
+                dir.mkdirs()
+                for (i in 0 until files.length()) {
+                    val entry = files.getJSONObject(i)
+                    val name = entry.getString("name")
+                    val expectedBytes = entry.getLong("bytes")
+                    val expectedSha = entry.getString("sha256")
+                    if (!expectedSha.matches(SHA256_REGEX)) {
+                        throw IllegalArgumentException(CODE_INVALID_SHA256)
+                    }
+                    val target = fileIn(dir, name)
+                    if (target.isFile &&
+                        target.length() == expectedBytes &&
+                        sha256Of(target) == expectedSha
+                    ) {
+                        continue
+                    }
+                    val part = File(dir, "$name.part")
+                    if (part.exists()) {
+                        part.delete()
+                    }
+                    val digest = MessageDigest.getInstance("SHA-256")
+                    var total = 0L
+                    reactApplicationContext.assets.open("$assetDir/$name").use { input ->
+                        part.outputStream().use { output ->
+                            val buffer = ByteArray(BUFFER_SIZE)
+                            while (true) {
+                                val read = input.read(buffer)
+                                if (read < 0) break
+                                output.write(buffer, 0, read)
+                                digest.update(buffer, 0, read)
+                                total += read
+                            }
+                            output.flush()
+                        }
+                    }
+                    if (total != expectedBytes) {
+                        part.delete()
+                        throw IllegalStateException(CODE_SIZE_MISMATCH)
+                    }
+                    val actualHex = digest.digest().joinToString("") { "%02x".format(it) }
+                    if (actualHex != expectedSha) {
+                        part.delete()
+                        throw IllegalStateException(CODE_HASH_MISMATCH)
+                    }
+                    if (!part.renameTo(target)) {
+                        part.delete()
+                        throw IllegalStateException(CODE_RENAME_FAILED)
+                    }
+                }
+                promise.resolve(null)
+            } catch (error: IllegalArgumentException) {
+                promise.reject(CODE_INVALID_ARG, error.message, error)
+            } catch (error: Exception) {
+                promise.reject(CODE_FAILURE, error.message, error)
+            }
+        }
+    }
+
+    private fun sha256Of(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(BUFFER_SIZE)
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                digest.update(buffer, 0, read)
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun root(kind: String, id: String): File {

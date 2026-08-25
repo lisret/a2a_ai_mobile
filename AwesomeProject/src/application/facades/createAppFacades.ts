@@ -69,6 +69,16 @@ import type {ModelProviderRegistry} from '../../core/engine/operateRuntime/model
 import type {CredentialStore} from '../../core/engine/operateRuntime/contracts/CredentialStore';
 import {NativeCredentialStore} from '../../core/engine/agentRuntime/credentials/NativeCredentialStore';
 import {NativeLocalModelEligibilityChecker} from '../../core/engine/agentRuntime/config/NativeLocalModelEligibilityChecker';
+import {
+  RuntimeActivityPort,
+  RuntimeCompanionPort,
+  RuntimeErrandPort,
+  RuntimeOperatePort,
+  RuntimePrivacyPort,
+  RuntimeVisualAgentToolsPort,
+  TaskUiEventBus,
+  wireHeadlessOperate,
+} from './RuntimeApplicationPorts';
 import {nonoConfigService} from '../../features/capability/services/NonoConfigService';
 import {settingsService} from '../../features/settings/services/SettingsService';
 import {mapProviderCatalog} from '../../features/model/services/ModelListService';
@@ -138,17 +148,7 @@ export function projectVisualAgentToolOptions(
   });
 }
 
-// Production ports are wired incrementally by the serial Task 6-Task 10 screen
-// integration. This checkpoint wires the live `phoneOperate` and `modelConfig`
-// adapters over the runtime foundation; every other port stays a loud,
-// non-silent stub so no Screen accidentally binds to a fake success response.
-const PORT_NOT_WIRED = 'app_facade_port_not_wired';
-
-const notWired = (): never => {
-  throw new Error(PORT_NOT_WIRED);
-};
-
-// --- Live runtime wiring for phoneOperate + modelConfig ----------------------
+// --- Live runtime wiring for phoneOperate + modelConfig + Home/capability ports
 //
 // The UI-only `ModelListKey` is mapped to the canonical runtime `ModelRole`
 // exactly once here, at the ApplicationPort boundary. Repositories, bindings and
@@ -670,50 +670,25 @@ function createProductionRuntimePorts(): AppFacadePorts {
     catalogCache,
   });
   const eligibility = new NativeLocalModelEligibilityChecker();
+  const operateEvents = new TaskUiEventBus();
+  const operate = new RuntimeOperatePort(repo, operateEvents, registry, eligibility);
+  const companion = new RuntimeCompanionPort(repo);
+  const visualAgentTools = new RuntimeVisualAgentToolsPort(repo, credentials);
+  const errands = new RuntimeErrandPort(repo);
+  const privacy = new RuntimePrivacyPort(repo);
+  const activity = new RuntimeActivityPort(repo, errands);
+  wireHeadlessOperate(operate);
 
   return {
-    operate: {
-      getCurrent: notWired,
-      start: notWired,
-      cancel: notWired,
-    },
-    operateEvents: {
-      subscribe: notWired,
-    },
-    companion: {
-      getState: notWired,
-      submitTranscript: notWired,
-      confirmProposal: notWired,
-      dismissTurn: notWired,
-    },
+    operate,
+    operateEvents,
+    companion,
     phoneOperate: new RuntimePhoneOperatePort(repo, eligibility),
-    visualAgentTools: {
-      read: notWired,
-      setEnabled: notWired,
-      saveProfile: notWired,
-      deleteProfile: notWired,
-      setActiveProfile: notWired,
-      refreshProfile: notWired,
-    },
+    visualAgentTools,
     modelConfig: new RuntimeModelConfigPort(repo, registry, credentials),
-    errands: {
-      read: notWired,
-      setEnabled: notWired,
-      create: notWired,
-      update: notWired,
-      cancel: notWired,
-    },
-    privacy: {
-      read: notWired,
-      setMemoryEnabled: notWired,
-      setMemoryLocation: notWired,
-      forgetAllPreferences: notWired,
-    },
-    activity: {
-      read: notWired,
-      forgetPreference: notWired,
-      deleteTask: notWired,
-    },
+    errands,
+    privacy,
+    activity,
   };
 }
 

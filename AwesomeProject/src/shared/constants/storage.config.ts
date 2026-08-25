@@ -82,5 +82,11 @@ export const STORAGE_KEYS = {
 
   /** 离线 ASR 升级包（SenseVoice）是否就绪 */
   ASR_UPGRADE_READY: '@nono:asr_upgrade_ready',
+
+  /** 交代列表 */
+  ERRANDS: '@nono:errands',
+
+  /** 陪伴记住的偏好 */
+  PREFERENCES: '@nono:preferences',
 } as const;
 

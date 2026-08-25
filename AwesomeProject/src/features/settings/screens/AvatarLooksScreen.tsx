@@ -1,5 +1,6 @@
-import React, {useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 import {
+  Platform,
   ScrollView,
   View,
   Text,
@@ -10,16 +11,48 @@ import {PageLayout} from '@shared/components/PageLayout';
 import {ConfirmModal} from '@shared/components/ConfirmModal';
 import {COLORS} from '@shared/constants';
 import {NonoAvatar3D} from '@features/task/components/NonoAvatar3D';
+import {AVATAR_PINS} from '@features/task/avatar/AvatarArtifactPins';
 import {
-  getActiveAvatarLook,
-  installAvatarLook,
+  getActiveAvatarId,
+  installPinnedAvatar,
   listAvatarLooks,
-  selectAvatarLook,
-  type AvatarLook,
-} from '@features/task/avatar/avatarLooksDemo';
+  rollbackAvatarToBuiltin,
+  setActiveAvatarId,
+  resolveAvatarGltfUri,
+  type AvatarLookItem,
+} from '@features/task/avatar/AvatarPackStore';
+import {localPack} from '@features/task/avatar/LocalPack';
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  return `${Math.round(bytes / 1024)} KB`;
+}
+
+function pinBytes(id: string): number {
+  return AVATAR_PINS.find(pin => pin.id === id)?.bytes ?? 0;
+}
+
+async function looksWithInstallState(): Promise<AvatarLookItem[]> {
+  const catalog = listAvatarLooks();
+  return Promise.all(
+    catalog.map(async item => {
+      if (item.id === 'builtin' || item.installed) {
+        return item;
+      }
+      try {
+        const files = await localPack.listFiles('avatars', item.id);
+        return {...item, installed: files.includes('model.glb')};
+      } catch {
+        return item;
+      }
+    }),
+  );
+}
 
 function lookStatus(
-  item: AvatarLook,
+  item: AvatarLookItem,
   activeId: string,
   downloadingId: string | null,
 ): {label: string; tone: 'current' | 'ready' | 'muted' | 'busy'} {
@@ -36,56 +69,72 @@ function lookStatus(
 }
 
 export const AvatarLooksScreen: React.FC = () => {
-  const [items, setItems] = useState(listAvatarLooks);
-  const [activeId, setActiveId] = useState(getActiveAvatarLook().id);
+  const androidOnly = Platform.OS !== 'android';
+  const [items, setItems] = useState(() =>
+    androidOnly
+      ? listAvatarLooks().filter(item => item.id === 'builtin')
+      : listAvatarLooks(),
+  );
+  const [activeId, setActiveId] = useState('builtin');
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
+  const [gltfUri, setGltfUri] = useState<string | null>(null);
+  const [networkType, setNetworkType] = useState('Wi-Fi');
 
-  const refresh = () => {
-    setItems(listAvatarLooks());
-    setActiveId(getActiveAvatarLook().id);
-  };
+  const refresh = useCallback(async () => {
+    const catalog = androidOnly
+      ? listAvatarLooks().filter(item => item.id === 'builtin')
+      : await looksWithInstallState();
+    setItems(catalog);
+    const nextActive = await getActiveAvatarId();
+    setActiveId(nextActive);
+    const uri = androidOnly ? null : await resolveAvatarGltfUri();
+    setGltfUri(uri);
+  }, [androidOnly]);
 
   useEffect(() => {
-    if (!downloadingId) {
-      return;
-    }
-    const id = downloadingId;
-    setProgress(8);
-    const timer = setInterval(() => {
-      setProgress(current => {
-        const next = Math.min(100, current + 14);
-        if (next >= 100) {
-          clearInterval(timer);
-          installAvatarLook(id);
-          setDownloadingId(null);
-          refresh();
+    void refresh();
+    void localPack
+      .getNetworkType()
+      .then(type => {
+        if (type === 'wifi') {
+          setNetworkType('Wi-Fi');
+        } else if (type === 'cellular') {
+          setNetworkType('蜂窝网络');
         }
-        return next;
-      });
-    }, 140);
-    return () => clearInterval(timer);
-  }, [downloadingId]);
+      })
+      .catch(() => undefined);
+  }, [refresh]);
 
   const current = items.find(item => item.id === activeId) || items[0];
   const pending = items.find(item => item.id === pendingId);
+  const pendingBytes = pending ? pinBytes(pending.id) : 0;
 
   return (
     <PageLayout title="角色外观" showBackButton>
       <Text style={styles.caption}>
-        切换首页角色。未下载的要先下到本机；失败仍用默认 3D，不走 CDN。
+        {androidOnly
+          ? '当前版本换装仅支持 Android。iOS 只使用安装包内置角色。'
+          : '切换首页角色。未下载的要先下到本机；失败仍用默认 3D，不走 CDN。'}
       </Text>
       <View style={styles.preview} testID="avatar-look-preview">
         <NonoAvatar3D
           mood="idle"
           layout="preview"
-          skinId={current.id}
+          gltfUri={gltfUri}
+          onGltfFailed={() => {
+            void rollbackAvatarToBuiltin();
+            setGltfUri(null);
+            setActiveId('builtin');
+          }}
           width={220}
           height={168}
           style={styles.previewStage}
         />
-        <Text style={styles.previewLabel}>当前 · {current.title}</Text>
+        <Text style={styles.previewLabel}>
+          当前 · {current?.title || '默认角色'}
+        </Text>
       </View>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.heading}>
@@ -105,7 +154,9 @@ export const AvatarLooksScreen: React.FC = () => {
                 <View style={styles.copy}>
                   <Text style={styles.name}>{item.title}</Text>
                   <Text style={styles.meta}>
-                    {item.bundled ? '安装包内置' : '下载到本机'} · {item.sizeLabel}
+                    {item.id === 'builtin'
+                      ? '安装包内置'
+                      : `下载到本机 · ${formatBytes(pinBytes(item.id))}`}
                   </Text>
                 </View>
                 <View
@@ -141,8 +192,11 @@ export const AvatarLooksScreen: React.FC = () => {
                   style={styles.action}
                   testID={`look-use-${item.id}`}
                   onPress={() => {
-                    selectAvatarLook(item.id);
-                    refresh();
+                    void setActiveAvatarId(item.id)
+                      .then(() => refresh())
+                      .catch(() => {
+                        void rollbackAvatarToBuiltin().then(() => refresh());
+                      });
                   }}>
                   <Text style={styles.actionText}>使用</Text>
                 </TouchableOpacity>
@@ -167,7 +221,7 @@ export const AvatarLooksScreen: React.FC = () => {
         title={pending ? `下载「${pending.title}」？` : ''}
         message={
           pending
-            ? `约 ${pending.sizeLabel}，当前按 Wi-Fi 演示。确认后只走页面进度，不会访问真实网络。失败仍用默认角色。`
+            ? `约 ${formatBytes(pendingBytes)}，当前网络 ${networkType}。确认后下载到本机并校验。失败仍用默认角色。`
             : ''
         }
         confirmText="确认下载"
@@ -177,8 +231,17 @@ export const AvatarLooksScreen: React.FC = () => {
           if (!pending) {
             return;
           }
+          const id = pending.id;
           setPendingId(null);
-          setDownloadingId(pending.id);
+          setDownloadingId(id);
+          setProgress(12);
+          void installPinnedAvatar(id)
+            .then(() => refresh())
+            .catch(() => rollbackAvatarToBuiltin().then(() => refresh()))
+            .finally(() => {
+              setDownloadingId(null);
+              setProgress(0);
+            });
         }}
       />
     </PageLayout>

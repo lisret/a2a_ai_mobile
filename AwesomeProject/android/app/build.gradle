@@ -134,14 +134,22 @@ android {
 
 tasks.register('copyNonoAvatarAssets', Copy) {
     from("${rootProject.projectDir}/../src/features/task/avatar") {
-        include 'avatar.html', 'scene.js'
-    }
-    from("${rootProject.projectDir}/../node_modules/three/build") {
-        include 'three.min.js'
+        include 'avatar.html', 'scene.js', 'GLTFLoader.js', 'three.module.js'
     }
     into("${projectDir}/src/main/assets/nono-avatar")
 }
-tasks.named('preBuild').configure { dependsOn('copyNonoAvatarAssets') }
+
+tasks.register('prepareAsrNativePins') {
+    doLast {
+        def aar = file("${projectDir}/libs/sherpa-onnx.aar")
+        def builtin = file("${projectDir}/src/main/assets/nono-asr/builtin")
+        logger.lifecycle("[asr] local pins aar=${aar.exists()} builtin=${builtin.exists()} (no remote JS download)")
+    }
+}
+
+tasks.named('preBuild').configure {
+    dependsOn('copyNonoAvatarAssets', 'prepareAsrNativePins')
+}
 
 // 强制使用兼容 compileSdk 34 的 androidx.core 版本
 configurations.all {
@@ -161,6 +169,11 @@ dependencies {
         implementation("com.facebook.react:hermes-android")
     } else {
         implementation jscFlavor
+    }
+
+    def sherpaAar = file("${projectDir}/libs/sherpa-onnx.aar")
+    if (sherpaAar.exists()) {
+        implementation files('libs/sherpa-onnx.aar')
     }
 }
 

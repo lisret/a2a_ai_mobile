@@ -1,9 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 import React from 'react';
+import {Platform} from 'react-native';
 import {fireEvent, render} from '@testing-library/react-native';
 import {AvatarLooksScreen} from '../../../../features/settings/screens/AvatarLooksScreen';
-import {resetAvatarLooksDemo} from '../../../../features/task/avatar/avatarLooksDemo';
 
 jest.mock('@react-navigation/native', () => {
   const actual = jest.requireActual('@react-navigation/native');
@@ -13,6 +13,25 @@ jest.mock('@react-navigation/native', () => {
     useIsFocused: () => true,
   };
 });
+
+jest.mock('../../../../features/task/avatar/AvatarPackStore', () => {
+  const actual = jest.requireActual(
+    '../../../../features/task/avatar/AvatarPackStore',
+  );
+  return {
+    ...actual,
+    installPinnedAvatar: jest.fn(() => new Promise(() => {})),
+    getActiveAvatarId: jest.fn().mockResolvedValue('builtin'),
+    resolveAvatarGltfUri: jest.fn().mockResolvedValue(null),
+  };
+});
+
+jest.mock('../../../../features/task/avatar/LocalPack', () => ({
+  localPack: {
+    listFiles: jest.fn().mockResolvedValue([]),
+    getNetworkType: jest.fn().mockResolvedValue('wifi'),
+  },
+}));
 
 jest.mock('@features/task/components/NonoAvatar3D', () => {
   const React = require('react');
@@ -44,7 +63,7 @@ jest.mock('@shared/components/PageLayout', () => {
 
 describe('AvatarLooksScreen', () => {
   beforeEach(() => {
-    resetAvatarLooksDemo();
+    Object.defineProperty(Platform, 'OS', {value: 'android', configurable: true});
   });
 
   it('puts the looks row under companion in Settings', () => {
@@ -74,19 +93,19 @@ describe('AvatarLooksScreen', () => {
     ).toBeNull();
     expect(screen.getByTestId('look-current-builtin')).toBeTruthy();
 
-    fireEvent.press(screen.getByTestId('look-download-look-box'));
+    fireEvent.press(screen.getByTestId('look-download-box'));
     expect(screen.getByText('下载「测试盒」？')).toBeTruthy();
     expect(screen.getAllByText(/2 KB/).length).toBeGreaterThan(0);
     expect(screen.getByText(/Wi-Fi/)).toBeTruthy();
-    expect(screen.getByTestId('look-status-look-box').props.children).toBe(
+    expect(screen.getByTestId('look-status-box').props.children).toBe(
       '未下载',
     );
 
     fireEvent.press(screen.getByText('取消'));
     expect(screen.queryByText('下载「测试盒」？')).toBeNull();
-    expect(screen.getByTestId('look-download-look-box')).toBeTruthy();
+    expect(screen.getByTestId('look-download-box')).toBeTruthy();
 
-    fireEvent.press(screen.getByTestId('look-download-look-box'));
+    fireEvent.press(screen.getByTestId('look-download-box'));
     fireEvent.press(screen.getByText('确认下载'));
     expect(screen.getByText('下载中')).toBeTruthy();
     expect(screen.queryByText('下载「测试盒」？')).toBeNull();

@@ -12,8 +12,9 @@ import type {NoNoMood} from '@shared/components/NoNoMascot';
 
 interface NonoAvatar3DProps {
   mood: NoNoMood;
+  gltfUri: string | null;
+  onGltfFailed(): void;
   layout?: 'stage' | 'preview';
-  skinId?: string;
   style?: StyleProp<ViewStyle>;
   width?: number;
   height?: number;
@@ -26,8 +27,9 @@ const AVATAR_URI =
 
 export const NonoAvatar3D: React.FC<NonoAvatar3DProps> = ({
   mood,
+  gltfUri,
+  onGltfFailed,
   layout = 'stage',
-  skinId = 'builtin',
   style,
   width,
   height,
@@ -36,20 +38,23 @@ export const NonoAvatar3D: React.FC<NonoAvatar3DProps> = ({
   const size = useRef({width: 1, height: 1});
 
   const injectState = () => {
+    const modelJs = gltfUri
+      ? `window.NonoAvatar&&window.NonoAvatar.loadGltf(${JSON.stringify(
+          gltfUri,
+        )});`
+      : 'window.NonoAvatar&&window.NonoAvatar.useBuiltin();';
     webRef.current?.injectJavaScript(
       `window.NonoAvatar&&window.NonoAvatar.setLayout(${JSON.stringify(
         layout,
-      )});window.NonoAvatar&&window.NonoAvatar.setSkin(${JSON.stringify(
-        skinId,
       )});window.NonoAvatar&&window.NonoAvatar.setMood(${JSON.stringify(
         mood,
-      )});true;`,
+      )});${modelJs}true;`,
     );
   };
 
   useEffect(() => {
     injectState();
-  }, [layout, mood, skinId]);
+  }, [layout, mood, gltfUri]);
 
   const setLook = (event: GestureResponderEvent) => {
     const {locationX, locationY} = event.nativeEvent;
@@ -67,6 +72,9 @@ export const NonoAvatar3D: React.FC<NonoAvatar3DProps> = ({
 
   return (
     <View
+      testID="nono-avatar-3d"
+      // Test seam: Home integration reads gltfUri / onGltfFailed off this host.
+      {...({gltfUri, onGltfFailed} as Record<string, unknown>)}
       style={[styles.wrap, boxStyle, style]}
       collapsable={false}
       onLayout={event => {
@@ -90,6 +98,16 @@ export const NonoAvatar3D: React.FC<NonoAvatar3DProps> = ({
         allowingReadAccessToURL={AVATAR_URI}
         setSupportMultipleWindows={false}
         onLoadEnd={injectState}
+        onMessage={event => {
+          try {
+            const payload = JSON.parse(String(event.nativeEvent.data));
+            if (payload?.type === 'avatar-load-failed') {
+              onGltfFailed();
+            }
+          } catch {
+            // Non-JSON host messages are ignored; only avatar-load-failed is wired.
+          }
+        }}
       />
     </View>
   );

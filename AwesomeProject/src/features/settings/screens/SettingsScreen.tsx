@@ -20,7 +20,10 @@ import { AppMark } from '@shared/components/AppMark';
 import { COLORS } from '@shared/constants';
 import { AppIcon, IconNames } from '@shared/components/Icon';
 import { modelService } from '@features/model/services/ModelService';
-import { getActiveAvatarLook } from '@features/task/avatar/avatarLooksDemo';
+import {
+  getActiveAvatarId,
+  listAvatarLooks,
+} from '@features/task/avatar/AvatarPackStore';
 import type { AIModel } from '@shared/types/Model';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
@@ -44,7 +47,10 @@ export const SettingsScreen: React.FC = () => {
   useFocusEffect(
     React.useCallback(() => {
       modelService.getSelectedModel('companion').then(setCompanion);
-      setLookTitle(getActiveAvatarLook().title);
+      void getActiveAvatarId().then(id => {
+        const look = listAvatarLooks().find(item => item.id === id);
+        setLookTitle(look?.title ?? '默认角色');
+      });
     }, []),
   );
 

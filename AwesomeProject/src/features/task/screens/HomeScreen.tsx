@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import {useFocusEffect} from '@react-navigation/native';
 import {COLORS} from '@shared/constants';
 import {ConfirmModal} from '@shared/components/ConfirmModal';
 import {showCustomAlert} from '@shared/utils/alert';
@@ -20,16 +21,25 @@ import type {
   TaskUiEvent,
   Unsubscribe,
 } from '../../../application/facades/UiRuntimeContracts';
+import {ensureBuiltinAsr} from '../asr/AsrModelStore';
+import {maybeSilentUpgradeAsr} from '../asr/SilentAsrUpgrade';
+import {startUtterance, stopUtterance} from '../asr/SpeechRouter';
+import {
+  resolveAvatarGltfUri,
+  rollbackAvatarToBuiltin,
+} from '../avatar/AvatarPackStore';
 
 // Home owns no business state. It renders exactly two Facade view states —
-// `CompanionViewState` and `OperateTaskViewState` — plus a little pure
-// presentation state (stop-confirm modal, the fixed dictation-unavailable
-// notice, and the active task subscription cleanup). There are no demo turns:
-// a transcript only ever exists because the Companion Facade produced a turn,
-// and Task 10 will replace the avatar tap with the real `SpeechRouter`.
+// `CompanionViewState` and `OperateTaskViewState` — plus listen/avatar host
+// state. A transcript only ever exists because CompanionFacade produced a turn.
 
 const IDLE_OPERATE: OperateTaskViewState = {phase: 'idle', steps: []};
-const DICTATION_UNAVAILABLE = '听写组件不可用';
+const IOS_DICTATION_NOTICE = '当前版本听写仅支持 Android';
+const LISTEN_RETRY_MESSAGES = new Set([
+  '需要麦克风才能说话',
+  '这次没听清，请再试',
+  IOS_DICTATION_NOTICE,
+]);
 
 const isTerminalPhase = (phase: OperateTaskViewState['phase']): boolean =>
   phase === 'success' || phase === 'failed' || phase === 'cancelled';
@@ -43,9 +53,11 @@ export const HomeScreen: React.FC = () => {
   const [operateState, setOperateState] =
     useState<OperateTaskViewState>(IDLE_OPERATE);
   const [stopConfirmVisible, setStopConfirmVisible] = useState(false);
-  const [dictationNotice, setDictationNotice] = useState<string | null>(null);
+  const [gltfUri, setGltfUri] = useState<string | null>(null);
 
   const unsubscribeRef = useRef<Unsubscribe | null>(null);
+  const companionStateRef = useRef(companionState);
+  companionStateRef.current = companionState;
 
   const applyTaskUiEvent = useCallback((event: TaskUiEvent) => {
     setOperateState(prev => {
@@ -119,9 +131,27 @@ export const HomeScreen: React.FC = () => {
     };
   }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS === 'android') {
+        void Promise.resolve(ensureBuiltinAsr()).catch(() => undefined);
+        void Promise.resolve(maybeSilentUpgradeAsr()).catch(() => undefined);
+        void Promise.resolve(resolveAvatarGltfUri())
+          .then(uri => {
+            setGltfUri(uri ?? null);
+          })
+          .catch(() => {
+            setGltfUri(null);
+          });
+      }
+      return () => {
+        void Promise.resolve(stopUtterance()).catch(() => undefined);
+      };
+    }, []),
+  );
+
   const handleStartOperate = useCallback(
     async (instruction: string) => {
-      setDictationNotice(null);
       const result = await operate.start(instruction);
       if (result.kind === 'blocked') {
         setOperateState({phase: 'blocked', steps: [], blocker: result.blocker});
@@ -176,16 +206,70 @@ export const HomeScreen: React.FC = () => {
     setOperateState({phase: 'cancelled', steps: []});
   }, [operate, operateState]);
 
-  const handleAvatarPress = useCallback(() => {
-    // Before Task 10 there is no dictation runtime. Never invent a transcript
-    // or start a listen timer: either prompt to configure the companion model
-    // or show the fixed unavailable notice.
-    if (companionState?.phase === 'error') {
+  const handleGltfFailed = useCallback(() => {
+    void rollbackAvatarToBuiltin();
+    setGltfUri(null);
+  }, []);
+
+  const startVoiceListen = useCallback(async () => {
+    if (Platform.OS !== 'android') {
+      setCompanionState(current => ({
+        ...(current ?? {phase: 'idle'}),
+        phase: 'error',
+        errorMessage: IOS_DICTATION_NOTICE,
+      }));
+      return;
+    }
+    if (
+      operateState.phase === 'running' ||
+      companionState?.phase === 'listening'
+    ) {
+      return;
+    }
+    if (
+      companionState?.phase === 'error' &&
+      !LISTEN_RETRY_MESSAGES.has(companionState.errorMessage ?? '')
+    ) {
       showCustomAlert('请先配置陪伴模型', '首页说话用设置里的对话模型。');
       return;
     }
-    setDictationNotice(DICTATION_UNAVAILABLE);
-  }, [companionState?.phase]);
+    const {PERMISSIONS, RESULTS, request} = require('react-native-permissions');
+    const permission = await request(PERMISSIONS.ANDROID.RECORD_AUDIO);
+    if (permission !== RESULTS.GRANTED) {
+      setCompanionState({phase: 'error', errorMessage: '需要麦克风才能说话'});
+      return;
+    }
+    await ensureBuiltinAsr();
+    setCompanionState(current => ({
+      ...(current ?? {phase: 'idle'}),
+      phase: 'listening',
+      partialText: '',
+    }));
+    await startUtterance(async event => {
+      if (event.type === 'partial') {
+        setCompanionState(current => ({
+          ...(current ?? {phase: 'listening'}),
+          partialText: event.text,
+        }));
+      } else if (event.type === 'final' && event.text.trim()) {
+        const turn = await companion.submitTranscript(event.text.trim());
+        setCompanionState({
+          phase: 'ready',
+          modelLabel: companionStateRef.current?.modelLabel,
+          turn,
+        });
+      } else if (event.type === 'error') {
+        setCompanionState({
+          phase: 'error',
+          errorMessage: '这次没听清，请再试',
+        });
+      }
+    });
+  }, [companion, companionState, operateState.phase]);
+
+  const handleAvatarPress = useCallback(() => {
+    void startVoiceListen();
+  }, [startVoiceListen]);
 
   const isRunning =
     operateState.phase === 'running' || operateState.phase === 'starting';
@@ -272,7 +356,11 @@ export const HomeScreen: React.FC = () => {
         </Text>
       </View>
       <View style={styles.avatarWrap}>
-        <NonoAvatar3D mood={mascotMood} />
+        <NonoAvatar3D
+          mood={mascotMood}
+          gltfUri={gltfUri}
+          onGltfFailed={handleGltfFailed}
+        />
         <TouchableOpacity
           style={styles.avatarHit}
           activeOpacity={0.92}
@@ -338,16 +426,19 @@ export const HomeScreen: React.FC = () => {
             )}
           </View>
         </View>
-      ) : dictationNotice ? (
-        <View style={[styles.bottomDock, styles.dockFloat]}>
-          <Text style={styles.dockKicker}>暂时不能听写</Text>
-          <Text style={styles.dockBody}>{dictationNotice}</Text>
-        </View>
       ) : (
         <View style={[styles.bottomDock, styles.dockFloat]}>
-          <Text style={styles.dockKicker}>点角色开始说</Text>
+          <Text style={styles.dockKicker}>
+            {companionState?.phase === 'listening'
+              ? '正在听'
+              : companionState?.phase === 'error'
+              ? '暂时不能听写'
+              : '点角色开始说'}
+          </Text>
           <Text style={styles.dockBody}>
-            {companionState?.errorMessage || '说完我会自己停'}
+            {companionState?.phase === 'listening'
+              ? companionState.partialText || '说完我会自己停'
+              : companionState?.errorMessage || '说完我会自己停'}
           </Text>
         </View>
       )}

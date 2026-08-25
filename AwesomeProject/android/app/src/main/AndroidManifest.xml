@@ -4,6 +4,8 @@
     <!-- 网络访问权限：用于连接AI模型API服务（必需） -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- 对着角色说话时把语音转成文字；点角色开始说话时请求 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <!-- ========== 自动化功能权限 ========== -->
     <!-- 无障碍服务权限：用于自动化操作（截图、点击、滑动等）（必需） -->

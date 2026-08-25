@@ -57,6 +57,15 @@ export const PERMISSION_CONFIG: Record<string, PermissionInfo> = {
     deniedMessage: '网络权限是应用运行的基础，无法使用AI功能',
   },
 
+  RECORD_AUDIO: {
+    name: 'android.permission.RECORD_AUDIO',
+    group: PermissionGroup.CORE,
+    purpose: '对着角色说话时把语音转成文字',
+    required: true,
+    requestTiming: '点角色开始说话时请求',
+    deniedMessage: '需要麦克风才能说话',
+  },
+
   // ========== 自动化功能权限 ==========
   BIND_ACCESSIBILITY_SERVICE: {
     name: 'android.permission.BIND_ACCESSIBILITY_SERVICE',

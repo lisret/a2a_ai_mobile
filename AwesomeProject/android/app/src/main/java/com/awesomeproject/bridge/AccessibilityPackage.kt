@@ -29,7 +29,8 @@ class AccessibilityPackage : ReactPackage {
             FloatingWindowModule(reactContext),
             SecureCredentialModule(reactContext),
             LocalModelEligibilityModule(reactContext, UnavailableLocalModelOperations()),
-            LocalPackModule(reactContext)
+            LocalPackModule(reactContext),
+            SherpaAsrModule(reactContext)
         )
     }
 

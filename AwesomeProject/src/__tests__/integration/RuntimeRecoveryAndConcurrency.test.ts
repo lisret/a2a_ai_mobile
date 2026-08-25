@@ -22,6 +22,7 @@ import type {
 } from '@core/engine/operateRuntime/contracts/RuntimeConfigContracts';
 import type {CredentialStore} from '@core/engine/operateRuntime/contracts/CredentialStore';
 import {taskHistoryService} from '../../features/task/services/TaskHistoryService';
+import {createRuntimeHarness as createRecoveryRuntimeHarnessImpl} from './fixtures/RuntimeRecoveryHarness';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
   getItem: jest.fn(),
@@ -355,16 +356,13 @@ interface RecoveryRuntimeHarness {
 }
 
 /**
- * Wave 4A scaffold placeholder. These behaviors need a composed runtime
- * (session resolver + task runner + due-task scheduler + model catalog
- * facade + ViewState/trace emitters) that does not exist as one harness yet.
- * A later wave's testing agent implements this against real production
- * classes; the assertions below must not change to make that pass.
+ * Delegates to the Wave 4B Task 11 Step 3 fixture, which composes the
+ * session resolver + task runner + model catalog facade + UI event dedup
+ * against real production classes with deterministic fakes; the assertions
+ * below are unchanged from the Wave 4A scaffold.
  */
 function createRuntimeHarness(): RecoveryRuntimeHarness {
-  throw new Error(
-    'createRuntimeHarness (recovery) is not implemented yet (Wave 4A acceptance scaffold placeholder)',
-  );
+  return createRecoveryRuntimeHarnessImpl();
 }
 
 it('keeps the task-owned immutable model-profile snapshot after active/profile content changes', async () => {

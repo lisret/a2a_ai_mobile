@@ -55,5 +55,23 @@ test('forbidden persistent boundaries contain no sensitive fields', () => {
     'src/features/debug/services/DebugLogService.ts',
   ];
   const source = files.map(read).join('\n');
-  expect(source).not.toMatch(/apiKey|Authorization|Bearer\s|data:image|modelResponse|finalScreenshot|screenshotUri/);
+  expect(source).not.toMatch(/apiKey|Authorization|Bearer\s|data:image/);
+
+  // `screenshotUri`/`modelResponse`/`finalScreenshot` are legitimately named
+  // in TaskHistoryService.ts's `projectStepForStorage`/`projectTaskForStorage`
+  // only as the destructured-and-discarded keys of the pre-persistence
+  // redaction idiom `const {field, ...rest} = value;`, plus in a comment
+  // describing that same idiom (`// ... individual steps still drop
+  // screenshotUri/modelResponse below.`) — never as a value that reaches
+  // `AsyncStorage.setItem`. Strip line comments and this exact discard idiom
+  // before scanning so a genuine persisted occurrence of these fields still
+  // fails the guard.
+  const withoutLineComments = source
+    .split('\n')
+    .map(line => line.replace(/\/\/.*$/, ''))
+    .join('\n');
+  const discardIdiom =
+    /\{\s*(?:screenshotUri|modelResponse|finalScreenshot)(?:\s*,\s*(?:screenshotUri|modelResponse|finalScreenshot))*\s*,\s*\.\.\.[A-Za-z_$][\w$]*\s*\}\s*=/g;
+  const withoutDiscardIdiom = withoutLineComments.replace(discardIdiom, '');
+  expect(withoutDiscardIdiom).not.toMatch(/modelResponse|finalScreenshot|screenshotUri/);
 });

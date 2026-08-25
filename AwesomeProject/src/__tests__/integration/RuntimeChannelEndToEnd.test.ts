@@ -1,10 +1,11 @@
-// Wave 4A Task 11 scaffold (acceptance channel gate). RED by design: no
-// production composition wires OperateRuntime + OperateTaskRunner + the model
-///visual-agent registries into one reusable end-to-end harness yet, so
-// `createRuntimeHarness` below is an intentionally-unimplemented placeholder.
-// A later wave's testing agent replaces its body with real injected fakes
-// (deterministic native ports, in-memory config/session repositories) without
-// touching the assertions in this file. Do not add production backdoors here.
+// Wave 4A Task 11 scaffold (acceptance channel gate), fixtures filled in by
+// Wave 4B Task 11 Step 3: `createRuntimeHarness` now composes the real
+// `OperateRuntime` + `OperateSessionResolver` + `OperateTaskRunner` with
+// deterministic fake native ports (fake `ModelProviderRegistry`/transports,
+// fake `VisualAgentToolRegistry`) from `./fixtures/RuntimeChannelHarness`.
+// No production backdoor or real timer was added; the assertions below are
+// unchanged from the Wave 4A scaffold.
+import {createRuntimeHarness as createRuntimeHarnessImpl} from './fixtures/RuntimeChannelHarness';
 
 type ChannelMode = 'cloud_direct' | 'cloud_split' | 'local_vision_cloud_planner';
 type FrozenProvider = 'openai-compatible' | 'anthropic' | 'gemini' | 'custom';
@@ -65,17 +66,13 @@ interface RuntimeHarness {
 }
 
 /**
- * Wave 4A scaffold placeholder. The real harness must compose the frozen
+ * Delegates to the Wave 4B Task 11 Step 3 fixture, which composes the frozen
  * `OperateRuntime` + `OperateTaskRunner` + `ModelProviderRegistry` +
- * `VisualAgentToolRegistry` with deterministic fake native ports (never a
- * production backdoor or a real timer) and expose the counters/spies this
- * file asserts against. Building that composition is explicitly out of scope
- * for this scaffold wave; every test below is expected to fail here.
+ * `VisualAgentToolRegistry` with deterministic fake native ports and exposes
+ * the counters/spies this file asserts against.
  */
-function createRuntimeHarness(_options: RuntimeHarnessOptions): RuntimeHarness {
-  throw new Error(
-    'createRuntimeHarness is not implemented yet (Wave 4A acceptance scaffold placeholder)',
-  );
+function createRuntimeHarness(options: RuntimeHarnessOptions): RuntimeHarness {
+  return createRuntimeHarnessImpl(options);
 }
 
 describe.each([

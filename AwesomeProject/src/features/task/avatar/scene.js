@@ -1,7 +1,10 @@
+import * as THREE from './three.module.js';
+import {GLTFLoader} from './GLTFLoader.js';
+
 (function () {
   var host = document.getElementById('host');
   var canvas = document.getElementById('avatar-canvas');
-  if (!host || !canvas || typeof THREE === 'undefined') {
+  if (!host || !canvas) {
     return;
   }
 
@@ -193,6 +196,48 @@
       requestAnimationFrame(tick);
     }
 
+    var packedRoot = null;
+    function useBuiltin() {
+      if (packedRoot) {
+        root.remove(packedRoot);
+        packedRoot = null;
+      }
+      body.visible = true;
+      leftEar.visible = true;
+      rightEar.visible = true;
+      visor.visible = true;
+      eyes.visible = true;
+      light.visible = true;
+      shadow.visible = true;
+    }
+    function loadGltf(fileUrl) {
+      var loader = new GLTFLoader();
+      loader.load(
+        fileUrl,
+        function (gltf) {
+          useBuiltin();
+          body.visible = false;
+          leftEar.visible = false;
+          rightEar.visible = false;
+          visor.visible = false;
+          eyes.visible = false;
+          light.visible = false;
+          packedRoot = gltf.scene;
+          packedRoot.scale.setScalar(0.9);
+          root.add(packedRoot);
+        },
+        undefined,
+        function () {
+          useBuiltin();
+          if (window.ReactNativeWebView) {
+            window.ReactNativeWebView.postMessage(
+              JSON.stringify({type: 'avatar-load-failed'}),
+            );
+          }
+        },
+      );
+    }
+
     window.NonoAvatar = {
       setLayout: function (next) {
         layout = next;
@@ -206,6 +251,8 @@
         targetLook.x = Math.max(-1, Math.min(1, x));
         targetLook.y = Math.max(-1, Math.min(1, y));
       },
+      useBuiltin: useBuiltin,
+      loadGltf: loadGltf,
     };
 
     resize();

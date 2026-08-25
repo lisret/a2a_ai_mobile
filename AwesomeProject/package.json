@@ -13,7 +13,7 @@
     "kill:metro": "node scripts/kill-metro.js",
     "test": "jest",
     "generate-icons": "node scripts/generate-icons.js",
-    "postinstall": "patch-package && node scripts/copy-nono-avatar-vendor.js"
+    "postinstall": "patch-package && node scripts/copy-nono-avatar-vendor.js && node scripts/vendor-gltf-loader.js"
   },
   "dependencies": {
     "@react-navigation/bottom-tabs": "^6.5.11",

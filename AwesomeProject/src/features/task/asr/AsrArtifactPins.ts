@@ -13,7 +13,7 @@ export interface AsrPackPin {
   archiveUrl: string;
   archiveBytes: number;
   archiveSha256: string;
-  files: AsrFilePin[];
+  files: readonly AsrFilePin[];
 }
 
 export const ASR_PINS: {builtin: AsrPackPin; upgrade: AsrPackPin} = {

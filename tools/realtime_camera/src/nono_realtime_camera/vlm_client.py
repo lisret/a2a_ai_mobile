@@ -13,8 +13,8 @@ import cv2
 from .frames import FramePacket
 
 _SEMANTIC_PROMPT = (
-    "Compare these camera frames in time order. Briefly describe the scene and any "
-    "meaningful changes or actions in Chinese."
+    "仅描述画面中可见内容。请用简短中文 1–2 句，优先说明主要物体、动作和显著场景变化。"
+    "不要猜测身份、意图或画外信息。"
 )
 _MAX_SUMMARY_CHARACTERS = 500
 
@@ -70,7 +70,7 @@ class OpenAICompatibleVlmClient:
         if not summary:
             raise VlmProtocolError("VLM returned an empty summary")
         processing_ms = (self._monotonic_ns() - started_ns) // 1_000_000
-        return VlmResult(str(response.get("model") or self.model_id), summary, processing_ms)
+        return VlmResult(_response_model_id(response, self.model_id), summary, processing_ms)
 
     def _image_part(self, frame: FramePacket) -> dict[str, object]:
         try:
@@ -136,3 +136,12 @@ def _completion_text(response: dict[str, Any]) -> str:
     if not isinstance(content, str):
         raise VlmProtocolError("VLM returned an invalid completion")
     return content
+
+
+def _response_model_id(response: dict[str, Any], requested_model_id: str) -> str:
+    if "model" not in response or response["model"] is None:
+        return requested_model_id
+    model_id = response["model"]
+    if not isinstance(model_id, str) or not model_id.strip():
+        raise VlmProtocolError("VLM returned an invalid model identifier")
+    return model_id

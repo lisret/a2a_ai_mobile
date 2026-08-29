@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import socket
 import threading
@@ -9,6 +10,7 @@ from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+import cv2
 import numpy as np
 import pytest
 
@@ -27,6 +29,7 @@ class _FakeVlmServer(ThreadingHTTPServer):
         self.status = status
         self.delay_seconds = delay_seconds
         self.last_json: dict[str, Any] | None = None
+        self.last_path: str | None = None
 
     @property
     def base_url(self) -> str:
@@ -37,6 +40,7 @@ class _FakeVlmServer(ThreadingHTTPServer):
 class _FakeVlmHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         content_length = int(self.headers["Content-Length"])
+        self.server.last_path = self.path  # type: ignore[attr-defined]
         self.server.last_json = json.loads(self.rfile.read(content_length))  # type: ignore[attr-defined]
         if self.server.delay_seconds:  # type: ignore[attr-defined]
             time.sleep(self.server.delay_seconds)  # type: ignore[attr-defined]
@@ -71,7 +75,7 @@ def make_frames(count: int) -> tuple[FramePacket, ...]:
         FramePacket(
             frame_id=index + 1,
             captured_at_ms=index * 100,
-            image=np.full((8, 8, 3), index, dtype=np.uint8),
+            image=np.full((8, 8, 3), 20 + index * 100, dtype=np.uint8),
         )
         for index in range(count)
     )
@@ -100,6 +104,7 @@ def test_client_sends_in_memory_multi_image_request_and_parses_result() -> None:
     assert result.model_id == "mlx-community/Qwen3-VL-2B-Instruct-4bit"
     assert result.processing_ms >= 0
     assert body is not None
+    assert server.last_path == "/v1/chat/completions"
     content = body["messages"][0]["content"]
     image_parts = [part for part in content if part["type"] == "image_url"]
     assert len(image_parts) == 3
@@ -108,6 +113,45 @@ def test_client_sends_in_memory_multi_image_request_and_parses_result() -> None:
     assert body["temperature"] == 0
     assert all("base64," in part["image_url"]["url"] for part in image_parts)
     assert content[-1]["type"] == "text"
+    prompt = content[-1]["text"]
+    assert "仅描述画面中可见内容" in prompt
+    assert "简短中文 1–2 句" in prompt
+    assert "主要物体、动作和显著场景变化" in prompt
+    assert "不要猜测身份、意图或画外信息" in prompt
+
+    decoded_means = []
+    for part in image_parts:
+        encoded_image = part["image_url"]["url"].split(",", maxsplit=1)[1]
+        jpeg = np.frombuffer(base64.b64decode(encoded_image), dtype=np.uint8)
+        decoded_image = cv2.imdecode(jpeg, cv2.IMREAD_COLOR)
+        assert decoded_image is not None
+        decoded_means.append(float(decoded_image.mean()))
+    assert decoded_means == pytest.approx([20, 120, 220], abs=2)
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"choices": [{"message": {"content": "有一个水瓶。"}}]},
+        {"model": None, "choices": [{"message": {"content": "有一个水瓶。"}}]},
+    ],
+)
+def test_client_falls_back_to_requested_model_when_response_model_is_missing_or_null(
+    response: dict[str, Any],
+) -> None:
+    with fake_vlm_server(response=response) as server:
+        result = make_client(server).describe(make_frames(1))
+
+    assert result.model_id == "mlx-community/Qwen3-VL-2B-Instruct-4bit"
+
+
+@pytest.mark.parametrize("model", ["", "  ", {}, ["model"], 42])
+def test_client_rejects_invalid_response_model(model: Any) -> None:
+    with fake_vlm_server(
+        response={"model": model, "choices": [{"message": {"content": "有一个水瓶。"}}]}
+    ) as server:
+        with pytest.raises(VlmProtocolError, match="model"):
+            make_client(server).describe(make_frames(1))
 
 
 @pytest.mark.parametrize(

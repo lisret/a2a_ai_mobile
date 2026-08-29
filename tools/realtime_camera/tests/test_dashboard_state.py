@@ -83,3 +83,24 @@ def test_analysis_metrics_report_rolling_percentiles_and_emit_interval() -> None
     assert metrics["endToEmitP50Ms"] == 35.0
     assert metrics["endToEmitP95Ms"] == 50.0
     assert metrics["emitIntervalP95Ms"] == 1_020.0
+
+
+def test_session_metric_reset_drops_pre_restart_latency_history() -> None:
+    state = DashboardStateStore()
+    state.record_analysis_metrics(
+        processing_ms=900,
+        end_to_emit_ms=20_000,
+        emitted_at_ms=21_000,
+    )
+
+    state.reset_session_metrics()
+    state.record_analysis_metrics(
+        processing_ms=100,
+        end_to_emit_ms=150,
+        emitted_at_ms=30_000,
+    )
+    metrics = state.snapshot(DashboardConfigStore().snapshot())["metrics"]
+
+    assert metrics["processingP95Ms"] == 100.0
+    assert metrics["endToEmitP95Ms"] == 150.0
+    assert metrics["emitIntervalP95Ms"] == 0.0

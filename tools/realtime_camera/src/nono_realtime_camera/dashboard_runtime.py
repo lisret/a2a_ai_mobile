@@ -83,6 +83,7 @@ class DashboardRuntime:
         self._running = False
         self._closed = False
         self._tracker = ObjectStateTracker()
+        self._window_id = 0
 
     @property
     def is_running(self) -> bool:
@@ -98,6 +99,8 @@ class DashboardRuntime:
             self._running = True
             self._stop_event = threading.Event()
             self._camera = self._camera_factory()
+            self._tracker = ObjectStateTracker()
+            self.state_store.reset_session_metrics()
             self.state_store.set_lifecycle("starting")
             self._capture_thread = threading.Thread(
                 target=self._capture_loop,
@@ -178,13 +181,11 @@ class DashboardRuntime:
             camera.close()
 
     def _analysis_loop(self) -> None:
-        generation = 0
+        generation, _ = self.latest_frame_store.get()
         buffer = OneSecondRingBuffer(retention_ms=self._window_ms)
         window_started_at_ms: int | None = None
         window_ended_at_ms: int | None = None
         next_sample_at_ms: float | None = None
-        window_id = 0
-
         while not self._stop_event.is_set():
             generation, frame = self.latest_frame_store.wait_after(generation, timeout=0.1)
             if frame is None:
@@ -206,9 +207,9 @@ class DashboardRuntime:
             if frame.captured_at_ms < window_ended_at_ms:
                 continue
 
-            window_id += 1
+            self._window_id += 1
             window = buffer.freeze_window(
-                window_id=window_id,
+                window_id=self._window_id,
                 started_at_ms=window_started_at_ms,
                 ended_at_ms=window_ended_at_ms,
             )

@@ -80,6 +80,14 @@ class DashboardStateStore:
         with self._lock:
             self._metrics.update(metrics)
 
+    def reset_session_metrics(self) -> None:
+        with self._lock:
+            self._metrics = dict(_DEFAULT_METRICS)
+            self._processing_samples.clear()
+            self._end_to_emit_samples.clear()
+            self._emit_interval_samples.clear()
+            self._last_emitted_at_ms = None
+
     def record_analysis_metrics(
         self,
         *,

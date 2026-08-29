@@ -168,3 +168,24 @@ def test_camera_failure_keeps_actionable_error_message() -> None:
         "code": "camera_interrupted",
         "message": "camera index 0 failed to read a frame",
     }
+
+
+def test_restart_skips_stale_frame_and_keeps_window_ids_monotonic() -> None:
+    camera = ContinuousFakeCamera()
+    runtime = DashboardRuntime(camera_factory=lambda: camera, window_ms=100)
+
+    runtime.start()
+    wait_until(lambda: len(runtime.state_store.events_after(0)) >= 2)
+    before = runtime.state_store.events_after(0)
+    last_sequence = before[-1]["sequence"]
+    last_window_id = before[-1]["windowId"]
+    runtime.stop()
+    time.sleep(0.25)
+
+    runtime.start()
+    wait_until(lambda: len(runtime.state_store.events_after(last_sequence)) >= 1)
+    after = runtime.state_store.events_after(last_sequence)
+    runtime.close()
+
+    assert after[0]["windowId"] == last_window_id + 1
+    assert after[0]["sampledFrameCount"] > 0

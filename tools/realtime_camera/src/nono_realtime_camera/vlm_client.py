@@ -13,7 +13,8 @@ import cv2
 from .frames import FramePacket
 
 _SEMANTIC_PROMPT = (
-    "仅描述画面中可见内容。请用简短中文 1–2 句，优先说明主要物体、动作和显著场景变化。"
+    "仅描述画面中可见内容。请用简短中文 1–2 句，优先说明主要物体、人与对象关系、"
+    "简单动作或显著变化。"
     "不要猜测身份、意图或画外信息。"
 )
 _MAX_SUMMARY_CHARACTERS = 500

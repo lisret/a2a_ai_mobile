@@ -116,7 +116,7 @@ def test_client_sends_in_memory_multi_image_request_and_parses_result() -> None:
     prompt = content[-1]["text"]
     assert "仅描述画面中可见内容" in prompt
     assert "简短中文 1–2 句" in prompt
-    assert "主要物体、动作和显著场景变化" in prompt
+    assert "主要物体、人与对象关系、简单动作或显著变化" in prompt
     assert "不要猜测身份、意图或画外信息" in prompt
 
     decoded_means = []

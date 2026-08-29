@@ -154,6 +154,28 @@ class BlockingStream:
         self._closed.set()
 
 
+class TrackingCloseStream(io.StringIO):
+    def __init__(self) -> None:
+        super().__init__()
+        self.read_calls = 0
+
+    def read(self, size: int = -1) -> str:
+        self.read_calls += 1
+        return super().read(size)
+
+
+class FlakyCloseStream(TrackingCloseStream):
+    def __init__(self) -> None:
+        super().__init__()
+        self.close_calls = 0
+
+    def close(self) -> None:
+        self.close_calls += 1
+        if self.close_calls == 1:
+            raise OSError("transient close failure")
+        super().close()
+
+
 class FakeProcessFactory:
     def __init__(self, processes: Iterable[FakeProcess] = ()) -> None:
         self.processes = list(processes)
@@ -577,6 +599,8 @@ def test_close_does_not_block_on_factory_and_reaps_stale_child() -> None:
     factory_entered = threading.Event()
     release_factory = threading.Event()
     process = FakeProcess()
+    stale_stderr = TrackingCloseStream()
+    process.stderr = stale_stderr
 
     def blocking_factory(command: list[str], **kwargs: Any) -> FakeProcess:
         del command, kwargs
@@ -602,12 +626,16 @@ def test_close_does_not_block_on_factory_and_reaps_stale_child() -> None:
 
     assert elapsed < 0.25
     assert semantic_lifecycle(state_store)["phase"] == "stopped"
+    assert stale_stderr.closed
+    assert stale_stderr.read_calls == 0
 
 
 def test_restart_during_factory_does_not_orphan_or_spawn_concurrently() -> None:
     factory_entered = threading.Event()
     release_factory = threading.Event()
     first_process = FakeProcess()
+    first_stderr = TrackingCloseStream()
+    first_process.stderr = first_stderr
     second_process = FakeProcess()
     calls = 0
     calls_lock = threading.Lock()
@@ -643,6 +671,35 @@ def test_restart_during_factory_does_not_orphan_or_spawn_concurrently() -> None:
     wait_until(lambda: calls == 2)
 
     assert elapsed < 0.25
+    assert first_stderr.closed
+    assert first_stderr.read_calls == 0
+    supervisor.close()
+    assert second_process.terminate_calls == 1
+
+
+def test_transient_stderr_close_failure_is_retried_and_releases_ownership() -> None:
+    flaky_stderr = FlakyCloseStream()
+    first_process = FakeProcess()
+    first_process.stderr = flaky_stderr
+    second_process = FakeProcess()
+    process_factory = FakeProcessFactory([first_process, second_process])
+    state_store = DashboardStateStore()
+    supervisor = VlmSidecarSupervisor(
+        config=make_config(),
+        state_store=state_store,
+        health_probe=lambda _url: False,
+        process_factory=process_factory,
+    )
+
+    supervisor.start_async()
+    wait_until(lambda: len(process_factory.calls) == 1)
+    supervisor.close()
+
+    supervisor.restart()
+    wait_until(lambda: flaky_stderr.close_calls >= 2)
+    wait_until(lambda: len(process_factory.calls) == 2)
+
+    assert flaky_stderr.closed
     supervisor.close()
     assert second_process.terminate_calls == 1
 

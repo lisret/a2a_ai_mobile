@@ -69,11 +69,13 @@ class _OwnedChild:
     process: _Process
     generation: threading.Event
     stderr: object | None = None
+    stderr_capture_attempted: bool = False
     tail: _BoundedTail = field(default_factory=lambda: _BoundedTail(_STDERR_TAIL_LIMIT))
     reader: threading.Thread | None = None
     reader_stop: threading.Event = field(default_factory=threading.Event)
     close_thread: threading.Thread | None = None
-    close_errors: list[str] = field(default_factory=list)
+    close_error: str | None = None
+    stderr_closed: bool = False
     retiring: bool = False
     cleanup_lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -263,17 +265,12 @@ class VlmSidecarSupervisor:
                 self._publish_current_degraded(result.diagnostic)
             return None
 
-        if child.retiring:
-            result = self._retire_child(child)
-            self._handle_cleanup(child, result)
-            if result.diagnostic:
-                self._publish_current_degraded(result.diagnostic)
-            return None
-
         setup_error: str | None = None
         try:
             with child.cleanup_lock:
-                self._setup_reader(child)
+                self._capture_stderr(child)
+                if not child.retiring:
+                    self._start_reader(child)
         except Exception as exc:
             setup_error = _bounded(
                 f"stderr reader setup failed: {_exception_text(exc)}"
@@ -316,9 +313,15 @@ class VlmSidecarSupervisor:
         ]
 
     @staticmethod
-    def _setup_reader(child: _OwnedChild) -> None:
-        stderr = child.process.stderr
-        child.stderr = stderr
+    def _capture_stderr(child: _OwnedChild) -> None:
+        try:
+            child.stderr = child.process.stderr
+        finally:
+            child.stderr_capture_attempted = True
+
+    @staticmethod
+    def _start_reader(child: _OwnedChild) -> None:
+        stderr = child.stderr
         if stderr is None:
             return
 
@@ -431,21 +434,36 @@ class VlmSidecarSupervisor:
         child: _OwnedChild, *, drain_first: bool = False
     ) -> tuple[bool, str | None]:
         errors: list[str] = []
+        diagnostics: list[str] = []
+        if not child.stderr_capture_attempted:
+            try:
+                VlmSidecarSupervisor._capture_stderr(child)
+            except Exception as exc:
+                diagnostics.append(
+                    f"stderr capture failed: {_exception_text(exc)}"
+                )
         if drain_first and child.reader is not None:
             child.reader.join(timeout=0.1)
         child.reader_stop.set()
         if child.reader is not None:
             child.reader.join(timeout=_IO_JOIN_SECONDS)
 
-        if child.stderr is not None and child.close_thread is None:
+        if (
+            child.stderr is not None
+            and not child.stderr_closed
+            and child.close_thread is None
+        ):
+            child.close_error = None
 
             def close_stderr() -> None:
                 try:
                     child.stderr.close()  # type: ignore[attr-defined]
                 except Exception as exc:
-                    child.close_errors.append(
+                    child.close_error = (
                         f"stderr close failed: {_exception_text(exc)}"
                     )
+                else:
+                    child.stderr_closed = True
 
             close_thread = threading.Thread(
                 target=close_stderr,
@@ -455,7 +473,7 @@ class VlmSidecarSupervisor:
             try:
                 close_thread.start()
             except Exception as exc:
-                child.close_errors.append(
+                errors.append(
                     f"stderr close start failed: {_exception_text(exc)}"
                 )
             else:
@@ -465,13 +483,21 @@ class VlmSidecarSupervisor:
             child.close_thread.join(timeout=_IO_JOIN_SECONDS)
             if child.close_thread.is_alive():
                 errors.append("stderr close did not stop")
-        errors.extend(child.close_errors)
+            else:
+                child.close_thread = None
+                if child.close_error:
+                    errors.append(child.close_error)
+                    child.close_error = None
 
         if child.reader is not None:
             child.reader.join(timeout=_IO_JOIN_SECONDS)
             if child.reader.is_alive():
                 errors.append("stderr reader did not stop")
-        return not errors, _bounded("; ".join(errors)) if errors else None
+        diagnostic = _join_diagnostics(
+            "; ".join(diagnostics) if diagnostics else None,
+            "; ".join(errors) if errors else None,
+        )
+        return not errors, diagnostic
 
     def _handle_cleanup(
         self, child: _OwnedChild | None, result: _CleanupResult

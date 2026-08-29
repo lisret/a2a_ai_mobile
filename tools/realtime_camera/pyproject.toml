@@ -11,6 +11,9 @@ dependencies = [
   "psutil==7.0.0",
 ]
 
+[project.optional-dependencies]
+vlm = ["mlx-vlm==0.6.16"]
+
 [project.scripts]
 nono-camera = "nono_realtime_camera.cli:main"
 

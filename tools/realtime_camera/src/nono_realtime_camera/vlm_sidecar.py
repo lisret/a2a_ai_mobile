@@ -233,7 +233,11 @@ class VlmSidecarSupervisor:
         try:
             process = self._process_factory(
                 self._command(),
-                env={**os.environ, "HF_HOME": str(self._config.cache_dir)},
+                env={
+                    **os.environ,
+                    "HF_HOME": str(self._config.cache_dir),
+                    "HF_HUB_DISABLE_XET": "1",
+                },
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
                 text=False,

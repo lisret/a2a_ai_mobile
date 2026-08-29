@@ -6,10 +6,12 @@
 
 ```bash
 cd tools/realtime_camera
-/Users/a/.local/bin/uv sync
+/Users/a/.local/bin/uv sync --extra vlm
 ```
 
 当前实机锁定组合：Python 3.11.15、MediaPipe 0.10.31、OpenCV 4.12.0、NumPy 2.2.6。MediaPipe 1.0.1 在本机加载两个官方 Object Detector 模型时都会在 `DrishtiMetalHelper` 原生 abort，因此不能升级后直接视为兼容。
+
+`--extra vlm` 同时安装锁定的 `mlx-vlm==0.6.16` 和 SOCKS 下载支持。真实语义模型固定为 `mlx-community/Qwen3-VL-2B-Instruct-4bit`；首次启动会下载约 1.8 GB 到 `.runtime/huggingface`，后续启动复用该缓存。sidecar 默认关闭 HF Xet、使用支持断点续传的普通 HTTP 下载，避免代理环境中大权重停在 0B。
 
 ## 模型
 
@@ -31,12 +33,13 @@ Path: .runtime/models/efficientdet_lite0.tflite
 MPLCONFIGDIR=.runtime/matplotlib .venv/bin/nono-camera dashboard \
   --camera-index 0 \
   --model .runtime/models/efficientdet_lite0.tflite \
+  --vlm \
   --open
 ```
 
-服务只监听 `127.0.0.1:8765`。页面包含实时视频、检测框、逐秒摘要、采集/采样/预览 FPS、处理延迟、事件历史，以及采样 FPS、预览 FPS、检测阈值、运动阈值和场景变化阈值。滑块参数在下一窗口热生效；停止会释放摄像头，开始可重新打开。原始画面和 MJPEG 不写磁盘。
+服务只监听 `127.0.0.1:8765`，VLM sidecar 只监听 `127.0.0.1:8766`。页面包含实时视频、检测框、逐秒摘要、采集/采样/预览 FPS、处理延迟、事件历史，以及采样 FPS、预览 FPS、检测阈值、运动阈值、场景变化阈值和 VLM 冷却时间。滑块参数在下一窗口热生效；停止会释放摄像头，开始可重新打开。原始画面和 MJPEG 不写磁盘。
 
-语义区只有连接真实 VLM worker 后才会显示可用；当前未配置时明确显示“未配置真实 VLM”，不会生成占位结果。
+快速路径始终约 1 Hz 输出，加载模型和语义推理都在异步 sidecar/worker 中执行，不阻塞快速事件。语义结果通常晚于对应的一秒快速摘要：静止窗口使用一帧，运动或场景变化窗口使用三帧。首次真实模型响应前，语义区只显示等待/加载状态，不会伪造占位结果；sidecar 加载失败、退出或推理报错时页面显示 degraded，快速路径和摄像头仍继续运行。可用“重启 VLM”单独恢复 sidecar，不会重启摄像头。
 
 摄像头预检：
 
@@ -74,7 +77,7 @@ MPLCONFIGDIR=.runtime/matplotlib .venv/bin/nono-camera run \
 - EfficientDet：15/15 个窗口，处理 76–94ms，无 stale。
 - 使用真实“处理完成时间”重测 8/12/15 FPS：发射间隔 P95 分别为 1003.7/1011.3/1003.0ms，窗口结束到输出 P95 为 117.4/154.45/133.3ms，当前建议 15 FPS。
 - 24 FPS 初测实际只采到约 17.75 FPS，受摄像头约 20 FPS 上限限制，不作为当前默认值。
-- 真实 VLM 语义增强尚未接入，不能把当前结果称为“完整 VLM 流程通过”。
+- 固定 Qwen3-VL 4-bit 模型对官方 candy.JPG 的真实离线冷启动推理 wall latency 为 125.90 秒，输出了非空中文描述；实时摄像头语义指标见 Task 9 验收报告和忽略的 `.runtime/vlm-acceptance.json`。
 
 ## 测试
 

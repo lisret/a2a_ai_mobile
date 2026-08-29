@@ -432,6 +432,7 @@ def test_incompatible_service_starts_owned_child_with_exact_command_and_environm
         "8080",
     ]
     assert kwargs["env"]["HF_HOME"] == "/tmp/nono-vlm-cache"
+    assert kwargs["env"]["HF_HUB_DISABLE_XET"] == "1"
     assert kwargs["stderr"] is not None
     supervisor.close()
     assert process.terminate_calls == 1

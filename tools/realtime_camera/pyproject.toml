@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-vlm = ["mlx-vlm==0.6.16"]
+vlm = ["mlx-vlm==0.6.16", "socksio==1.0.0"]
 
 [project.scripts]
 nono-camera = "nono_realtime_camera.cli:main"

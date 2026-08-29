@@ -6,7 +6,7 @@ import subprocess
 import sys
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, TextIO
 from urllib import error, request
@@ -16,8 +16,11 @@ from .dashboard_state import DashboardStateStore
 _LOOPBACK_HOSTS = frozenset(("127.0.0.1", "localhost"))
 _MONITOR_INTERVAL_SECONDS = 0.5
 _PROBE_TIMEOUT_SECONDS = 0.4
+_STDERR_READ_SIZE = 512
 _STDERR_TAIL_LIMIT = 900
 _MESSAGE_LIMIT = 1_000
+_CONTROL_JOIN_SECONDS = 0.05
+_READER_JOIN_SECONDS = 1.0
 
 
 class _Process(Protocol):
@@ -60,6 +63,23 @@ class _BoundedTail:
             return self._value
 
 
+@dataclass(slots=True)
+class _OwnedChild:
+    process: _Process
+    generation: threading.Event
+    stderr: TextIO | None
+    tail: _BoundedTail
+    reader: threading.Thread | None
+    retiring: bool = False
+    cleanup_lock: threading.Lock = field(default_factory=threading.Lock)
+
+
+@dataclass(frozen=True, slots=True)
+class _CleanupResult:
+    released: bool
+    diagnostic: str | None = None
+
+
 class VlmSidecarSupervisor:
     def __init__(
         self,
@@ -76,7 +96,8 @@ class VlmSidecarSupervisor:
         self._lock = threading.Lock()
         self._monitor_thread: threading.Thread | None = None
         self._monitor_stop: threading.Event | None = None
-        self._owned_process: _Process | None = None
+        self._spawn_generation: threading.Event | None = None
+        self._owned_child: _OwnedChild | None = None
         self._available = False
         self._closed = False
 
@@ -90,10 +111,6 @@ class VlmSidecarSupervisor:
         return f"http://{self._config.host}:{self._config.port}"
 
     def start_async(self) -> None:
-        if not self._config.auto_start:
-            self._publish(False, "disabled", "Local VLM auto-start is disabled")
-            return
-
         with self._lock:
             if self._closed or (
                 self._monitor_thread is not None and self._monitor_thread.is_alive()
@@ -111,12 +128,12 @@ class VlmSidecarSupervisor:
             self._available = False
             self._state_store.set_semantic_available(False)
             self._state_store.set_semantic_lifecycle(
-                "starting", message="Checking local VLM"
+                "loading", message="Checking local VLM"
             )
             monitor.start()
 
     def restart(self) -> None:
-        self._stop_current(mark_disabled=False)
+        self._stop_current(close_requested=False)
         with self._lock:
             self._closed = False
         self.start_async()
@@ -124,53 +141,122 @@ class VlmSidecarSupervisor:
     def close(self) -> None:
         with self._lock:
             self._closed = True
-        self._stop_current(mark_disabled=True)
+        self._stop_current(close_requested=True)
 
     def _monitor(self, stop: threading.Event) -> None:
-        if self._probe():
-            self._publish_if_active(stop, True, "ready", f"{self._config.model_id} ready")
-            process = None
-        else:
-            process = self._start_owned_process(stop)
-            if process is None:
+        self._monitor_once(stop)
+        while not stop.wait(_MONITOR_INTERVAL_SECONDS):
+            self._monitor_once(stop)
+
+    def _monitor_once(self, stop: threading.Event) -> None:
+        if not self._is_active(stop):
+            return
+
+        child = self._owned_snapshot()
+        if child is not None:
+            if child.retiring or child.generation is not stop:
+                result = self._retire_child(child)
+                self._handle_cleanup(child, result)
+                if result.diagnostic:
+                    self._publish_if_active(
+                        stop, False, "degraded", result.diagnostic
+                    )
+                return
+            returncode, poll_error = self._poll(child.process)
+            if poll_error is not None:
+                child.retiring = True
+                self._publish_if_active(stop, False, "degraded", poll_error)
+                return
+            if returncode is not None:
+                result = self._finish_exited_child(child)
+                tail = child.tail.get().strip()
+                message = f"MLX-VLM exited with exit code {returncode}"
+                if tail:
+                    message = f"{message}: {tail}"
+                if result.diagnostic:
+                    message = f"{message}; {result.diagnostic}"
+                self._handle_cleanup(child, result)
+                self._publish_if_active(stop, False, "degraded", _bounded(message))
                 return
 
-        stderr_tail = _BoundedTail(_STDERR_TAIL_LIMIT)
-        stderr_thread = self._start_stderr_drain(process, stderr_tail)
+        if self._probe():
+            self._publish_if_active(stop, True, "ready", f"{self._config.model_id} ready")
+            return
 
-        while not stop.wait(_MONITOR_INTERVAL_SECONDS):
-            if process is not None:
-                returncode = process.poll()
-                if returncode is not None:
-                    if stderr_thread is not None:
-                        stderr_thread.join(timeout=0.1)
-                    tail = stderr_tail.get().strip()
-                    message = f"MLX-VLM exited with exit code {returncode}"
-                    if tail:
-                        message = f"{message}: {tail}"
-                    self._release_owned(process)
-                    self._publish_if_active(
-                        stop, False, "degraded", message[:_MESSAGE_LIMIT]
-                    )
-                    return
+        if child is not None:
+            self._publish_if_active(stop, False, "loading", "Loading local VLM")
+            return
 
-            if self._probe():
-                self._publish_if_active(
-                    stop, True, "ready", f"{self._config.model_id} ready"
-                )
-            elif process is None:
-                self._publish_if_active(
-                    stop, False, "degraded", "Compatible local VLM is unavailable"
-                )
-                process = self._start_owned_process(stop)
-                if process is None:
-                    return
-                stderr_thread = self._start_stderr_drain(process, stderr_tail)
-            else:
-                self._publish_if_active(stop, False, "starting", "Loading local VLM")
+        if not self._config.auto_start:
+            self._publish_if_active(
+                stop,
+                False,
+                "degraded",
+                "Waiting for a compatible existing local VLM service",
+            )
+            return
 
-    def _start_owned_process(self, stop: threading.Event) -> _Process | None:
-        command = [
+        child = self._start_owned_process(stop)
+        if child is not None or self._spawn_pending():
+            self._publish_if_active(stop, False, "loading", "Loading local VLM")
+
+    def _start_owned_process(self, stop: threading.Event) -> _OwnedChild | None:
+        with self._lock:
+            if (
+                stop.is_set()
+                or self._monitor_stop is not stop
+                or self._owned_child is not None
+                or self._spawn_generation is not None
+            ):
+                return None
+            self._spawn_generation = stop
+
+        try:
+            process = self._process_factory(
+                self._command(),
+                env={**os.environ, "HF_HOME": str(self._config.cache_dir)},
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+            )
+        except Exception as exc:
+            with self._lock:
+                if self._spawn_generation is stop:
+                    self._spawn_generation = None
+            self._publish_if_active(
+                stop,
+                False,
+                "degraded",
+                _bounded(f"Could not start MLX-VLM: {_exception_text(exc)}"),
+            )
+            return None
+
+        child = self._make_child(process, stop)
+        with self._lock:
+            if (
+                self._spawn_generation is stop
+                and not stop.is_set()
+                and self._monitor_stop is stop
+                and self._owned_child is None
+            ):
+                self._spawn_generation = None
+                self._owned_child = child
+                return child
+
+        child.retiring = True
+        result = self._retire_child(child)
+        with self._lock:
+            if self._spawn_generation is stop:
+                self._spawn_generation = None
+            if not result.released and self._owned_child is None:
+                self._owned_child = child
+        if result.diagnostic:
+            self._publish_current_degraded(result.diagnostic)
+        return None
+
+    def _command(self) -> list[str]:
+        return [
             sys.executable,
             "-m",
             "mlx_vlm.server",
@@ -181,44 +267,152 @@ class VlmSidecarSupervisor:
             "--port",
             str(self._config.port),
         ]
-        environment = {**os.environ, "HF_HOME": str(self._config.cache_dir)}
-        try:
-            with self._lock:
-                if stop.is_set() or self._monitor_stop is not stop:
-                    return None
-                process = self._process_factory(
-                    command,
-                    env=environment,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    bufsize=1,
-                )
-                self._owned_process = process
-                return process
-        except OSError as exc:
-            self._publish_if_active(
-                stop,
-                False,
-                "degraded",
-                f"Could not start MLX-VLM: {exc}"[:_MESSAGE_LIMIT],
-            )
-            return None
 
     @staticmethod
-    def _start_stderr_drain(
-        process: _Process | None, tail: _BoundedTail
-    ) -> threading.Thread | None:
-        if process is None or process.stderr is None:
-            return None
+    def _make_child(process: _Process, generation: threading.Event) -> _OwnedChild:
+        tail = _BoundedTail(_STDERR_TAIL_LIMIT)
+        stderr = process.stderr
+        reader: threading.Thread | None = None
+        if stderr is not None:
 
-        def drain() -> None:
-            for line in iter(process.stderr.readline, ""):
-                tail.append(line)
+            def drain() -> None:
+                try:
+                    while chunk := stderr.read(_STDERR_READ_SIZE):
+                        tail.append(chunk)
+                except (OSError, ValueError):
+                    pass
 
-        thread = threading.Thread(target=drain, name="vlm-sidecar-stderr", daemon=True)
-        thread.start()
-        return thread
+            reader = threading.Thread(
+                target=drain,
+                name="vlm-sidecar-stderr",
+                daemon=True,
+            )
+            reader.start()
+        return _OwnedChild(process, generation, stderr, tail, reader)
+
+    def _stop_current(self, *, close_requested: bool) -> None:
+        with self._lock:
+            stop = self._monitor_stop
+            monitor = self._monitor_thread
+            child = self._owned_child
+            self._monitor_stop = None
+            self._monitor_thread = None
+            self._available = False
+            if stop is not None:
+                stop.set()
+            if child is not None:
+                child.retiring = True
+
+        result = self._retire_child(child) if child is not None else _CleanupResult(True)
+        self._handle_cleanup(child, result)
+        if monitor is not None and monitor is not threading.current_thread():
+            monitor.join(timeout=_CONTROL_JOIN_SECONDS)
+
+        if result.diagnostic:
+            self._publish_current_degraded(result.diagnostic)
+        elif close_requested:
+            self._publish(False, "stopped", None)
+
+    def _retire_child(self, child: _OwnedChild) -> _CleanupResult:
+        with child.cleanup_lock:
+            errors: list[str] = []
+            returncode, poll_error = self._poll(child.process)
+            if poll_error is not None:
+                errors.append(poll_error)
+                return _CleanupResult(False, _bounded("; ".join(errors)))
+
+            reaped = returncode is not None
+            if not reaped:
+                try:
+                    child.process.terminate()
+                except Exception as exc:
+                    errors.append(f"terminate failed: {_exception_text(exc)}")
+                else:
+                    try:
+                        child.process.wait(timeout=1)
+                    except (subprocess.TimeoutExpired, TimeoutError):
+                        errors.append("wait after terminate timed out")
+                    except Exception as exc:
+                        errors.append(f"wait after terminate failed: {_exception_text(exc)}")
+                    else:
+                        reaped = True
+
+            if not reaped:
+                try:
+                    child.process.kill()
+                except Exception as exc:
+                    errors.append(f"kill failed: {_exception_text(exc)}")
+                else:
+                    try:
+                        child.process.wait(timeout=1)
+                    except (subprocess.TimeoutExpired, TimeoutError):
+                        errors.append("wait after kill timed out")
+                    except Exception as exc:
+                        errors.append(f"wait after kill failed: {_exception_text(exc)}")
+                    else:
+                        reaped = True
+
+            reader_released = False
+            if reaped:
+                reader_released, reader_error = self._close_reader(child)
+                if reader_error:
+                    errors.append(reader_error)
+
+            return _CleanupResult(
+                reaped and reader_released,
+                _bounded("; ".join(errors)) if errors else None,
+            )
+
+    def _finish_exited_child(self, child: _OwnedChild) -> _CleanupResult:
+        with child.cleanup_lock:
+            released, diagnostic = self._close_reader(child, drain_first=True)
+            return _CleanupResult(released, diagnostic)
+
+    @staticmethod
+    def _close_reader(
+        child: _OwnedChild, *, drain_first: bool = False
+    ) -> tuple[bool, str | None]:
+        errors: list[str] = []
+        if drain_first and child.reader is not None:
+            child.reader.join(timeout=0.1)
+        if child.stderr is not None:
+            try:
+                child.stderr.close()
+            except Exception as exc:
+                errors.append(f"stderr close failed: {_exception_text(exc)}")
+        if child.reader is not None:
+            child.reader.join(timeout=_READER_JOIN_SECONDS)
+            if child.reader.is_alive():
+                errors.append("stderr reader did not stop")
+        return not errors, _bounded("; ".join(errors)) if errors else None
+
+    def _handle_cleanup(
+        self, child: _OwnedChild | None, result: _CleanupResult
+    ) -> None:
+        if child is None or not result.released:
+            return
+        with self._lock:
+            if self._owned_child is child:
+                self._owned_child = None
+
+    @staticmethod
+    def _poll(process: _Process) -> tuple[int | None, str | None]:
+        try:
+            return process.poll(), None
+        except Exception as exc:
+            return None, _bounded(f"poll failed: {_exception_text(exc)}")
+
+    def _owned_snapshot(self) -> _OwnedChild | None:
+        with self._lock:
+            return self._owned_child
+
+    def _spawn_pending(self) -> bool:
+        with self._lock:
+            return self._spawn_generation is not None
+
+    def _is_active(self, stop: threading.Event) -> bool:
+        with self._lock:
+            return not stop.is_set() and self._monitor_stop is stop
 
     def _probe(self) -> bool:
         try:
@@ -249,42 +443,6 @@ class VlmSidecarSupervisor:
             for model in payload["data"]
         )
 
-    def _stop_current(self, *, mark_disabled: bool) -> None:
-        with self._lock:
-            stop = self._monitor_stop
-            monitor = self._monitor_thread
-            process = self._owned_process
-            self._monitor_stop = None
-            self._monitor_thread = None
-            self._owned_process = None
-            self._available = False
-            if stop is not None:
-                stop.set()
-
-        if process is not None:
-            self._terminate_owned(process)
-        if monitor is not None and monitor is not threading.current_thread():
-            monitor.join(timeout=1)
-        if mark_disabled:
-            self._state_store.set_semantic_available(False)
-            self._state_store.set_semantic_lifecycle("disabled", message=None)
-
-    @staticmethod
-    def _terminate_owned(process: _Process) -> None:
-        if process.poll() is not None:
-            return
-        process.terminate()
-        try:
-            process.wait(timeout=1)
-        except (subprocess.TimeoutExpired, TimeoutError):
-            process.kill()
-            process.wait(timeout=1)
-
-    def _release_owned(self, process: _Process) -> None:
-        with self._lock:
-            if self._owned_process is process:
-                self._owned_process = None
-
     def _publish_if_active(
         self,
         stop: threading.Event,
@@ -299,8 +457,19 @@ class VlmSidecarSupervisor:
         self._state_store.set_semantic_available(available)
         self._state_store.set_semantic_lifecycle(phase, message=message)
 
+    def _publish_current_degraded(self, message: str) -> None:
+        self._publish(False, "degraded", _bounded(message))
+
     def _publish(self, available: bool, phase: str, message: str | None) -> None:
         with self._lock:
             self._available = available
         self._state_store.set_semantic_available(available)
         self._state_store.set_semantic_lifecycle(phase, message=message)
+
+
+def _exception_text(exc: Exception) -> str:
+    return str(exc) or type(exc).__name__
+
+
+def _bounded(message: str) -> str:
+    return message[:_MESSAGE_LIMIT]

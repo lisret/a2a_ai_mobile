@@ -73,6 +73,24 @@ def build_parser() -> argparse.ArgumentParser:
     dashboard.add_argument("--host", choices=("127.0.0.1", "localhost"), default="127.0.0.1")
     dashboard.add_argument("--port", type=_valid_port, default=8765)
     dashboard.add_argument("--open", action="store_true", dest="open_browser")
+    dashboard.add_argument("--vlm", action="store_true")
+    dashboard.add_argument(
+        "--vlm-model",
+        default="mlx-community/Qwen3-VL-2B-Instruct-4bit",
+    )
+    dashboard.add_argument(
+        "--vlm-host",
+        choices=("127.0.0.1", "localhost"),
+        default="127.0.0.1",
+    )
+    dashboard.add_argument("--vlm-port", type=_valid_port, default=8766)
+    dashboard.add_argument(
+        "--vlm-timeout-seconds",
+        type=_valid_vlm_timeout_seconds,
+        default=15,
+    )
+    dashboard.add_argument("--vlm-max-tokens", type=_positive_int, default=48)
+    dashboard.add_argument("--vlm-no-auto-start", action="store_true")
     return parser
 
 
@@ -118,17 +136,75 @@ def _valid_port(value: str) -> int:
     return port
 
 
+def _positive_int(value: str) -> int:
+    result = int(value)
+    if result <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return result
+
+
+def _valid_vlm_timeout_seconds(value: str) -> int:
+    timeout_seconds = _positive_int(value)
+    if timeout_seconds > 15:
+        raise argparse.ArgumentTypeError("VLM timeout must be at most 15 seconds")
+    return timeout_seconds
+
+
 def _run_dashboard(args: argparse.Namespace) -> int:
+    from .dashboard_config import DashboardConfigStore, DashboardConfigV1
     from .dashboard_runtime import DashboardRuntime
+    from .dashboard_state import DashboardStateStore
     from .dashboard_web import create_dashboard_app
 
     model_path = Path(args.model)
     if not model_path.is_file():
         raise FileNotFoundError(f"object detector model not found: {model_path}")
     detector = MediaPipeObjectDetector(model_path)
+    config_store = DashboardConfigStore()
+    state_store = DashboardStateStore()
+    semantic_worker = None
+    vlm_supervisor = None
+    if args.vlm:
+        from .semantic_worker import SemanticWorker
+        from .vlm_client import OpenAICompatibleVlmClient
+        from .vlm_sidecar import VlmSidecarConfig, VlmSidecarSupervisor
+
+        config_store = DashboardConfigStore(
+            DashboardConfigV1(semantic_enabled=True, semantic_cooldown_seconds=5)
+        )
+        vlm_supervisor = VlmSidecarSupervisor(
+            config=VlmSidecarConfig(
+                model_id=args.vlm_model,
+                host=args.vlm_host,
+                port=args.vlm_port,
+                cache_dir=Path(".runtime/huggingface"),
+                auto_start=not args.vlm_no_auto_start,
+            ),
+            state_store=state_store,
+        )
+        client = OpenAICompatibleVlmClient(
+            base_url=vlm_supervisor.base_url,
+            model_id=args.vlm_model,
+            timeout_seconds=args.vlm_timeout_seconds,
+            max_tokens=args.vlm_max_tokens,
+        )
+        semantic_worker = SemanticWorker(
+            client=client,
+            state_store=state_store,
+            available=lambda: vlm_supervisor.available,
+        )
+        semantic_worker.start()
+        vlm_supervisor.start_async()
+    else:
+        state_store.set_semantic_available(False)
+        state_store.set_semantic_lifecycle("disabled")
     runtime = DashboardRuntime(
         camera_factory=lambda: OpenCVCameraSource(camera_index=args.camera_index),
         detector=detector,
+        semantic_worker=semantic_worker,
+        vlm_supervisor=vlm_supervisor,
+        config_store=config_store,
+        state_store=state_store,
     )
     app = create_dashboard_app(runtime)
     url = f"http://{args.host}:{args.port}/"

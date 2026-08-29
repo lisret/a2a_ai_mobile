@@ -67,6 +67,11 @@ def create_dashboard_app(runtime: DashboardRuntime) -> Flask:
         runtime.restart_camera()
         return jsonify({"ok": True, "running": runtime.is_running})
 
+    @app.post("/api/control/vlm/restart")
+    def restart_vlm() -> Response:
+        runtime.restart_vlm()
+        return jsonify({"ok": True})
+
     return app
 
 

@@ -97,6 +97,31 @@ def test_control_routes_are_idempotent(client, runtime: DashboardRuntime) -> Non
     assert runtime.is_running is False
 
 
+def test_restart_vlm_route_does_not_restart_camera(
+    client, runtime: DashboardRuntime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vlm_restarts = 0
+    camera_restarts = 0
+
+    def restart_vlm() -> None:
+        nonlocal vlm_restarts
+        vlm_restarts += 1
+
+    def restart_camera() -> None:
+        nonlocal camera_restarts
+        camera_restarts += 1
+
+    monkeypatch.setattr(runtime, "restart_vlm", restart_vlm)
+    monkeypatch.setattr(runtime, "restart_camera", restart_camera)
+
+    response = client.post("/api/control/vlm/restart")
+
+    assert response.status_code == 200
+    assert response.json == {"ok": True}
+    assert vlm_restarts == 1
+    assert camera_restarts == 0
+
+
 def test_mjpeg_stream_yields_latest_jpeg(client, runtime: DashboardRuntime) -> None:
     runtime.latest_jpeg_store.put(b"jpeg-data")
 

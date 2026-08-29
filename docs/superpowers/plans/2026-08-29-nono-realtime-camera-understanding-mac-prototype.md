@@ -6,7 +6,7 @@
 
 **架构：** 原型位于独立的 `tools/realtime_camera/` Python 包。采集线程只写最新帧槽，8 FPS 采样器写一秒环形缓冲，单调时钟每秒冻结窗口；快速通道以最新窗口优先执行，700ms 后发射器复用最后确认状态；语义通道只有一个运行槽和一个最新待运行槽，通过 `windowId` 附加迟到但仍有效的短描述。
 
-**技术栈：** Python 3.11、uv、OpenCV 4.14、MediaPipe 1.0.1、NumPy、pytest；FastVLM-0.5B 使用独立 Python 环境与常驻 worker，避免其 PyTorch/Transformers 依赖污染快速通道。
+**技术栈：** Python 3.11、uv、MediaPipe 0.10.31、OpenCV 4.12、NumPy 2.2.6、pytest；FastVLM-0.5B 使用独立 Python 环境与常驻 worker，避免其 PyTorch/Transformers 依赖污染快速通道。
 
 **设计依据：** `docs/superpowers/specs/2026-08-29-nono-realtime-camera-understanding-design.md`
 
@@ -51,15 +51,17 @@ def test_summary_json_has_no_frame_payload() -> None:
 [project]
 requires-python = ">=3.11,<3.12"
 dependencies = [
-  "mediapipe==1.0.1",
-  "numpy==1.26.4",
-  "opencv-python==4.14.0.94",
+  "mediapipe==0.10.31",
+  "numpy==2.2.6",
+  "opencv-python==4.12.0.88",
   "psutil==7.0.0",
 ]
 
 [dependency-groups]
 dev = ["pytest==8.4.1", "pytest-cov==6.2.1", "ruff==0.12.11"]
 ```
+
+实机验证发现 MediaPipe 1.0.1 在当前 macOS/Apple M1 Pro 上会在 `DrishtiMetalHelper` 初始化处原生 abort，EfficientDet-Lite0 与 SSD MobileNet V2 均可复现；回退到官方 macOS arm64 wheel 0.10.31 后同一 EfficientDet 模型成功加载。FastVLM 的 NumPy 约束仅存在于独立 `.venv-fastvlm`。
 
 **验证：**
 

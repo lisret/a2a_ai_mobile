@@ -128,3 +128,16 @@ def test_start_and_stop_are_idempotent() -> None:
     runtime.stop()
 
     assert runtime.is_running is False
+
+
+def test_runtime_produces_latest_jpeg_preview() -> None:
+    camera = ContinuousFakeCamera()
+    runtime = DashboardRuntime(camera_factory=lambda: camera, window_ms=100)
+
+    runtime.start()
+    wait_until(lambda: runtime.latest_jpeg_store.get()[1] is not None)
+    _, jpeg = runtime.latest_jpeg_store.get()
+    runtime.stop()
+
+    assert jpeg is not None
+    assert jpeg.startswith(b"\xff\xd8")

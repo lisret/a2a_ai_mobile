@@ -62,6 +62,17 @@ class DashboardRuntime:
         self.state_store = state_store or DashboardStateStore()
         self.latest_frame_store: LatestValueStore[FramePacket] = LatestValueStore()
         self.latest_overlay_store: LatestValueStore[FastOverlay] = LatestValueStore()
+        self.latest_jpeg_store: LatestValueStore[bytes] = LatestValueStore()
+        from .preview import PreviewEncoder
+
+        self._preview_encoder = PreviewEncoder(
+            frame_store=self.latest_frame_store,
+            overlay_store=self.latest_overlay_store,
+            jpeg_store=self.latest_jpeg_store,
+            config_store=self.config_store,
+            state_store=self.state_store,
+            monotonic_ns=monotonic_ns,
+        )
         self._monotonic_ns = monotonic_ns
         self._window_ms = window_ms
         self._lifecycle_lock = threading.Lock()
@@ -100,6 +111,7 @@ class DashboardRuntime:
             )
             self._capture_thread.start()
             self._analysis_thread.start()
+            self._preview_encoder.start()
 
     def stop(self) -> None:
         with self._lifecycle_lock:
@@ -110,6 +122,7 @@ class DashboardRuntime:
             camera = self._camera
             capture_thread = self._capture_thread
             analysis_thread = self._analysis_thread
+        self._preview_encoder.stop()
         if camera is not None:
             camera.close()
         for thread in (capture_thread, analysis_thread):
@@ -132,6 +145,7 @@ class DashboardRuntime:
             self._detector.close()
         self.latest_frame_store.close()
         self.latest_overlay_store.close()
+        self.latest_jpeg_store.close()
 
     def _capture_loop(self) -> None:
         camera = self._camera

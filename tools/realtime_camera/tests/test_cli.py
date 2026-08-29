@@ -257,9 +257,11 @@ class DashboardFailureHarness:
         *,
         failure_point: str | None,
         cleanup_failures: set[str] | None = None,
+        runtime_close_error: Exception | None = None,
     ) -> None:
         self.failure_point = failure_point
         self.cleanup_failures = cleanup_failures or set()
+        self.runtime_close_error = runtime_close_error
         self.calls: list[str] = []
 
     def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -333,6 +335,8 @@ class DashboardFailureHarness:
                 if self.sidecar is not None:
                     self.sidecar.close()
                 self.detector.close()
+                if harness.runtime_close_error is not None:
+                    raise harness.runtime_close_error
 
         class FakeApp:
             def run(self, **_kwargs) -> None:
@@ -427,6 +431,48 @@ def test_run_dashboard_fast_only_runtime_owns_detector_on_failure(
         _run_dashboard(_dashboard_args(tmp_path, vlm=False))
 
     assert harness.close_calls == ["runtime.close", "detector.close"]
+
+
+@pytest.mark.parametrize("failure_point", ["app.create", "runtime.start", "app.run"])
+def test_run_dashboard_preserves_runtime_owned_primary_error_when_close_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure_point: str
+) -> None:
+    harness = DashboardFailureHarness(
+        failure_point=failure_point,
+        runtime_close_error=RuntimeError("runtime close failed"),
+    )
+    harness.install(monkeypatch)
+
+    with pytest.raises(RuntimeError, match=f"{failure_point} failed") as errors:
+        _run_dashboard(_dashboard_args(tmp_path, vlm=True))
+
+    assert errors.value.__notes__ == ["Dashboard runtime cleanup failed: runtime close failed"]
+    assert harness.close_calls == [
+        "runtime.close",
+        "worker.close",
+        "sidecar.close",
+        "detector.close",
+    ]
+
+
+def test_run_dashboard_exposes_runtime_close_error_without_primary_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    harness = DashboardFailureHarness(
+        failure_point=None,
+        runtime_close_error=RuntimeError("runtime close failed"),
+    )
+    harness.install(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="runtime close failed"):
+        _run_dashboard(_dashboard_args(tmp_path, vlm=True))
+
+    assert harness.close_calls == [
+        "runtime.close",
+        "worker.close",
+        "sidecar.close",
+        "detector.close",
+    ]
 
 
 @pytest.mark.parametrize("port", ["0", "65536"])

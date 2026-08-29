@@ -240,6 +240,60 @@ class RecordingVlmSupervisor:
             self._lifecycle.append("supervisor.close")
 
 
+class FailingCloseSemanticWorker(RecordingSemanticWorker):
+    def __init__(self, *, lifecycle: list[str], error: Exception) -> None:
+        super().__init__(available=True, lifecycle=lifecycle)
+        self.error = error
+
+    def close(self) -> None:
+        super().close()
+        raise self.error
+
+
+class FailingCloseVlmSupervisor(RecordingVlmSupervisor):
+    def __init__(self, *, lifecycle: list[str], error: Exception) -> None:
+        super().__init__(lifecycle=lifecycle)
+        self.error = error
+
+    def close(self) -> None:
+        super().close()
+        raise self.error
+
+
+class FailingCloseDetector:
+    def __init__(self, *, lifecycle: list[str], error: Exception | None = None) -> None:
+        self.lifecycle = lifecycle
+        self.error = error
+        self.close_count = 0
+
+    def detect(self, _image: object) -> tuple[DetectedObject, ...]:
+        return ()
+
+    def close(self) -> None:
+        self.close_count += 1
+        self.lifecycle.append("detector.close")
+        if self.error is not None:
+            raise self.error
+
+
+class BlockingFailingCloseSemanticWorker(RecordingSemanticWorker):
+    def __init__(self, *, lifecycle: list[str], error: Exception) -> None:
+        super().__init__(available=True, lifecycle=lifecycle)
+        self.error = error
+        self.close_started = threading.Event()
+        self.close_release = threading.Event()
+
+    def close(self) -> None:
+        with self._condition:
+            self.close_count += 1
+            self._condition.notify_all()
+        self.close_started.set()
+        assert self.close_release.wait(timeout=2)
+        if self._lifecycle is not None:
+            self._lifecycle.append("worker.close")
+        raise self.error
+
+
 class SequencedRestartSupervisor:
     def __init__(self, *, lifecycle: list[str] | None = None) -> None:
         self.first_started = threading.Event()
@@ -1124,6 +1178,89 @@ def test_close_releases_worker_before_sidecar_and_is_idempotent() -> None:
 
     assert lifecycle == ["worker.close", "supervisor.close"]
     assert semantic.close_count == 1
+    assert supervisor.close_count == 1
+
+
+def test_close_attempts_every_resource_and_aggregates_cleanup_errors() -> None:
+    lifecycle: list[str] = []
+    worker = FailingCloseSemanticWorker(
+        lifecycle=lifecycle,
+        error=RuntimeError("worker close failed"),
+    )
+    supervisor = FailingCloseVlmSupervisor(
+        lifecycle=lifecycle,
+        error=RuntimeError("sidecar close failed"),
+    )
+    detector = FailingCloseDetector(
+        lifecycle=lifecycle,
+        error=RuntimeError("detector close failed"),
+    )
+    runtime = DashboardRuntime(
+        camera_factory=ContinuousFakeCamera,
+        detector=detector,
+        semantic_worker=worker,
+        vlm_supervisor=supervisor,
+    )
+
+    with pytest.raises(ExceptionGroup) as errors:
+        runtime.close()
+
+    assert [str(error) for error in errors.value.exceptions] == [
+        "worker close failed",
+        "sidecar close failed",
+        "detector close failed",
+    ]
+    assert lifecycle == ["worker.close", "supervisor.close", "detector.close"]
+    assert runtime._closed is True
+    assert runtime._closing is False
+    runtime.close()
+    assert worker.close_count == 1
+    assert supervisor.close_count == 1
+    assert detector.close_count == 1
+
+
+def test_concurrent_close_waiter_returns_after_owner_cleanup_error() -> None:
+    lifecycle: list[str] = []
+    worker = BlockingFailingCloseSemanticWorker(
+        lifecycle=lifecycle,
+        error=RuntimeError("worker close failed"),
+    )
+    supervisor = RecordingVlmSupervisor(lifecycle=lifecycle)
+    runtime = DashboardRuntime(
+        camera_factory=ContinuousFakeCamera,
+        semantic_worker=worker,
+        vlm_supervisor=supervisor,
+    )
+    owner_errors: list[Exception] = []
+    waiter_returned = threading.Event()
+
+    def close_owner() -> None:
+        try:
+            runtime.close()
+        except Exception as error:
+            owner_errors.append(error)
+
+    def close_waiter() -> None:
+        runtime.close()
+        waiter_returned.set()
+
+    owner = threading.Thread(target=close_owner)
+    waiter = threading.Thread(target=close_waiter)
+    owner.start()
+    assert worker.close_started.wait(timeout=1)
+    waiter.start()
+    assert waiter_returned.wait(timeout=0.05) is False
+    worker.close_release.set()
+    owner.join(timeout=1)
+    waiter.join(timeout=1)
+
+    assert len(owner_errors) == 1
+    assert str(owner_errors[0]) == "worker close failed"
+    assert waiter_returned.is_set()
+    assert lifecycle == ["worker.close", "supervisor.close"]
+    assert runtime._closed is True
+    assert runtime._closing is False
+    assert worker.close_count == 1
     assert supervisor.close_count == 1
 
 

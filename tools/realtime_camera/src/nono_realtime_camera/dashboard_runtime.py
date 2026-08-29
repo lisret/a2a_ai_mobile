@@ -230,23 +230,35 @@ class DashboardRuntime:
                 self._lifecycle_condition.wait_for(lambda: self._closed)
                 return
             self._closing = True
+        cleanup_errors: list[Exception] = []
+
+        def attempt_cleanup(action: Callable[[], None]) -> None:
+            try:
+                action()
+            except Exception as error:
+                cleanup_errors.append(error)
+
         try:
-            self.stop()
+            attempt_cleanup(self.stop)
             with self._restart_lock:
                 if self._semantic_worker is not None:
-                    self._semantic_worker.close()
+                    attempt_cleanup(self._semantic_worker.close)
                 if self._vlm_supervisor is not None:
-                    self._vlm_supervisor.close()
+                    attempt_cleanup(self._vlm_supervisor.close)
             if self._detector is not None:
-                self._detector.close()
-            self.latest_frame_store.close()
-            self.latest_overlay_store.close()
-            self.latest_jpeg_store.close()
+                attempt_cleanup(self._detector.close)
+            attempt_cleanup(self.latest_frame_store.close)
+            attempt_cleanup(self.latest_overlay_store.close)
+            attempt_cleanup(self.latest_jpeg_store.close)
         finally:
             with self._lifecycle_condition:
                 self._closed = True
                 self._closing = False
                 self._lifecycle_condition.notify_all()
+        if len(cleanup_errors) == 1:
+            raise cleanup_errors[0]
+        if cleanup_errors:
+            raise ExceptionGroup("dashboard runtime cleanup failed", cleanup_errors)
 
     def _capture_loop(
         self,

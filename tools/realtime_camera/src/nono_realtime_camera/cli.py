@@ -175,6 +175,7 @@ def _run_dashboard(args: argparse.Namespace) -> int:
     vlm_supervisor = None
     runtime = None
     runtime_owns_resources = False
+    primary_error: BaseException | None = None
     try:
         config_store = DashboardConfigStore()
         state_store = DashboardStateStore()
@@ -234,10 +235,20 @@ def _run_dashboard(args: argparse.Namespace) -> int:
             debug=False,
             use_reloader=False,
         )
+    except BaseException as error:
+        primary_error = error
+        raise
     finally:
         if runtime_owns_resources:
             assert runtime is not None
-            runtime.close()
+            try:
+                runtime.close()
+            except Exception as cleanup_error:
+                if primary_error is None:
+                    raise
+                primary_error.add_note(
+                    f"Dashboard runtime cleanup failed: {cleanup_error}"
+                )
         else:
             _close_unowned_dashboard_resources(
                 semantic_worker,

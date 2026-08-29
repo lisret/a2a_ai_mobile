@@ -112,6 +112,7 @@ class DashboardRuntime:
         self._capture_thread: threading.Thread | None = None
         self._analysis_thread: threading.Thread | None = None
         self._running = False
+        self._stopping = False
         self._closing = False
         self._closed = False
         self._tracker = ObjectStateTracker()
@@ -125,6 +126,7 @@ class DashboardRuntime:
         )
         self._semantic_admission_lock = threading.Lock()
         self._semantic_accepting = False
+        self._restart_lock = threading.Lock()
 
     @property
     def is_running(self) -> bool:
@@ -133,24 +135,29 @@ class DashboardRuntime:
 
     def start(self) -> None:
         with self._lifecycle_condition:
+            self._lifecycle_condition.wait_for(lambda: not self._stopping)
             if self._closing or self._closed:
                 raise RuntimeError("dashboard runtime is closed")
             if self._running:
                 return
             self._running = True
-            self._stop_event = threading.Event()
-            self._camera = self._camera_factory()
+            stop_event = threading.Event()
+            camera = self._camera_factory()
+            self._stop_event = stop_event
+            self._camera = camera
             self._tracker = ObjectStateTracker()
             self.state_store.reset_session_metrics()
             self.state_store.set_lifecycle("starting")
-            self._capture_thread = threading.Thread(
-                target=self._capture_loop,
-                name="camera-capture",
-                daemon=True,
-            )
             self._analysis_thread = threading.Thread(
                 target=self._analysis_loop,
+                args=(stop_event,),
                 name="camera-analysis",
+                daemon=True,
+            )
+            self._capture_thread = threading.Thread(
+                target=self._capture_loop,
+                args=(camera, stop_event),
+                name="camera-capture",
                 daemon=True,
             )
             with self._semantic_admission_lock:
@@ -161,40 +168,59 @@ class DashboardRuntime:
 
     def stop(self) -> None:
         with self._lifecycle_condition:
+            if self._stopping:
+                self._lifecycle_condition.wait_for(lambda: not self._stopping)
+                return
             if not self._running:
                 return
+            self._stopping = True
             self._running = False
-            self._stop_event.set()
+            stop_event = self._stop_event
+            stop_event.set()
             camera = self._camera
             capture_thread = self._capture_thread
             analysis_thread = self._analysis_thread
-        with self._semantic_admission_lock:
-            self._semantic_accepting = False
-            if self._semantic_worker is not None:
-                self._semantic_worker.clear_pending()
-        self._preview_encoder.stop()
-        if camera is not None:
-            camera.close()
-        for thread in (capture_thread, analysis_thread):
-            if thread is not None and thread is not threading.current_thread():
-                thread.join(timeout=3)
-        self.state_store.set_lifecycle("stopped")
+        try:
+            with self._semantic_admission_lock:
+                self._semantic_accepting = False
+                if self._semantic_worker is not None:
+                    self._semantic_worker.clear_pending()
+            self._preview_encoder.stop()
+            if camera is not None:
+                camera.close()
+            for thread in (capture_thread, analysis_thread):
+                if thread is not None and thread is not threading.current_thread():
+                    thread.join()
+            self.state_store.set_lifecycle("stopped")
+        finally:
+            with self._lifecycle_condition:
+                self._stopping = False
+                self._lifecycle_condition.notify_all()
 
     def restart_camera(self) -> None:
         self.stop()
         self.start()
 
     def restart_vlm(self) -> None:
-        with self._semantic_admission_lock:
-            self._semantic_accepting = False
-            if self._semantic_worker is not None:
-                self._semantic_worker.clear_pending()
-        if self._vlm_supervisor is not None:
-            self._vlm_supervisor.restart()
-        with self._lifecycle_condition:
-            if self._running and not self._closing and not self._closed:
-                with self._semantic_admission_lock:
-                    self._semantic_accepting = True
+        with self._restart_lock:
+            with self._lifecycle_condition:
+                if self._closing or self._closed:
+                    raise RuntimeError("dashboard runtime is closed")
+            with self._semantic_admission_lock:
+                self._semantic_accepting = False
+                if self._semantic_worker is not None:
+                    self._semantic_worker.clear_pending()
+            if self._vlm_supervisor is not None:
+                self._vlm_supervisor.restart()
+            with self._lifecycle_condition:
+                if (
+                    self._running
+                    and not self._stopping
+                    and not self._closing
+                    and not self._closed
+                ):
+                    with self._semantic_admission_lock:
+                        self._semantic_accepting = True
 
     def close(self) -> None:
         with self._lifecycle_condition:
@@ -206,10 +232,11 @@ class DashboardRuntime:
             self._closing = True
         try:
             self.stop()
-            if self._semantic_worker is not None:
-                self._semantic_worker.close()
-            if self._vlm_supervisor is not None:
-                self._vlm_supervisor.close()
+            with self._restart_lock:
+                if self._semantic_worker is not None:
+                    self._semantic_worker.close()
+                if self._vlm_supervisor is not None:
+                    self._vlm_supervisor.close()
             if self._detector is not None:
                 self._detector.close()
             self.latest_frame_store.close()
@@ -221,14 +248,16 @@ class DashboardRuntime:
                 self._closing = False
                 self._lifecycle_condition.notify_all()
 
-    def _capture_loop(self) -> None:
-        camera = self._camera
-        assert camera is not None
+    def _capture_loop(
+        self,
+        camera: CameraSource,
+        stop_event: threading.Event,
+    ) -> None:
         timestamps: deque[int] = deque(maxlen=60)
         try:
             camera.open()
             self.state_store.set_lifecycle("running")
-            while not self._stop_event.is_set():
+            while not stop_event.is_set():
                 frame = camera.read()
                 self.latest_frame_store.put(frame)
                 timestamps.append(frame.captured_at_ms)
@@ -239,25 +268,25 @@ class DashboardRuntime:
                     )
                     self.state_store.update_metrics(captureFps=round(capture_fps, 2))
         except CameraInterruptedError as exc:
-            if not self._stop_event.is_set():
+            if not stop_event.is_set():
                 self.state_store.set_lifecycle(
                     "failed", code="camera_interrupted", message=str(exc)
                 )
         except Exception as exc:
-            if not self._stop_event.is_set():
+            if not stop_event.is_set():
                 self.state_store.set_lifecycle(
                     "failed", code="camera_unavailable", message=str(exc)
                 )
         finally:
             camera.close()
 
-    def _analysis_loop(self) -> None:
+    def _analysis_loop(self, stop_event: threading.Event) -> None:
         generation, _ = self.latest_frame_store.get()
         buffer = OneSecondRingBuffer(retention_ms=self._window_ms)
         window_started_at_ms: int | None = None
         window_ended_at_ms: int | None = None
         next_sample_at_ms: float | None = None
-        while not self._stop_event.is_set():
+        while not stop_event.is_set():
             generation, frame = self.latest_frame_store.wait_after(generation, timeout=0.1)
             if frame is None:
                 continue

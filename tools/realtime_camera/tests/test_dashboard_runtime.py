@@ -40,6 +40,18 @@ class ContinuousFakeCamera:
         self.closed = True
 
 
+class BlockingCloseCamera(ContinuousFakeCamera):
+    def __init__(self) -> None:
+        super().__init__()
+        self.close_started = threading.Event()
+        self.close_release = threading.Event()
+
+    def close(self) -> None:
+        self.close_started.set()
+        assert self.close_release.wait(timeout=2)
+        super().close()
+
+
 class BlockingDetector:
     def __init__(self) -> None:
         self.started = threading.Event()
@@ -224,6 +236,43 @@ class RecordingVlmSupervisor:
 
     def close(self) -> None:
         self.close_count += 1
+        if self._lifecycle is not None:
+            self._lifecycle.append("supervisor.close")
+
+
+class SequencedRestartSupervisor:
+    def __init__(self, *, lifecycle: list[str] | None = None) -> None:
+        self.first_started = threading.Event()
+        self.first_release = threading.Event()
+        self.second_started = threading.Event()
+        self.close_started = threading.Event()
+        self.restart_count = 0
+        self.close_count = 0
+        self.restart_completed_after_close = False
+        self._lifecycle = lifecycle
+        self._lock = threading.Lock()
+        self._closed = False
+
+    def restart(self) -> None:
+        with self._lock:
+            self.restart_count += 1
+            call_number = self.restart_count
+        if call_number == 1:
+            self.first_started.set()
+            assert self.first_release.wait(timeout=2)
+            with self._lock:
+                self.restart_completed_after_close = self._closed
+            if self._lifecycle is not None:
+                self._lifecycle.append("supervisor.restart")
+            return
+        self.second_started.set()
+        raise RuntimeError("second restart failed")
+
+    def close(self) -> None:
+        with self._lock:
+            self._closed = True
+            self.close_count += 1
+        self.close_started.set()
         if self._lifecycle is not None:
             self._lifecycle.append("supervisor.close")
 
@@ -711,6 +760,163 @@ def test_stop_marks_inflight_real_worker_result_stale() -> None:
     assert payload["metrics"]["semanticSuccessCount"] == 0
 
 
+def test_start_waits_for_stop_teardown_before_creating_next_session() -> None:
+    first_camera = BlockingCloseCamera()
+    second_camera = ContinuousFakeCamera()
+    cameras: list[ContinuousFakeCamera] = []
+
+    def camera_factory() -> ContinuousFakeCamera:
+        camera = first_camera if not cameras else second_camera
+        cameras.append(camera)
+        return camera
+
+    runtime = DashboardRuntime(camera_factory=camera_factory, window_ms=100)
+    runtime.start()
+    wait_until(lambda: last_fast_window_id(runtime) >= 1)
+    previous_window_id = last_fast_window_id(runtime)
+    previous_jpeg_generation = runtime.latest_jpeg_store.get()[0]
+    stop_done = threading.Event()
+    start_called = threading.Event()
+    start_done = threading.Event()
+
+    def stop_runtime() -> None:
+        runtime.stop()
+        stop_done.set()
+
+    def start_runtime() -> None:
+        start_called.set()
+        runtime.start()
+        start_done.set()
+
+    stop_thread = threading.Thread(target=stop_runtime)
+    start_thread = threading.Thread(target=start_runtime)
+    stop_thread.start()
+    assert first_camera.close_started.wait(timeout=1)
+    start_thread.start()
+    assert start_called.wait(timeout=1)
+    start_returned_during_teardown = start_done.wait(timeout=0.05)
+    cameras_created_during_teardown = len(cameras)
+
+    first_camera.close_release.set()
+    assert stop_done.wait(timeout=5)
+    assert start_done.wait(timeout=5)
+    stop_thread.join()
+    start_thread.join()
+    wait_until(lambda: last_fast_window_id(runtime) > previous_window_id)
+    wait_until(
+        lambda: runtime.latest_jpeg_store.get()[0] > previous_jpeg_generation
+    )
+    lifecycle = runtime.state_store.snapshot(runtime.config_store.snapshot())["lifecycle"]
+    runtime.close()
+
+    assert start_returned_during_teardown is False
+    assert cameras_created_during_teardown == 1
+    assert len(cameras) == 2
+    assert lifecycle["phase"] == "running"
+
+
+def test_concurrent_stop_callers_wait_for_same_teardown() -> None:
+    camera = BlockingCloseCamera()
+    runtime = DashboardRuntime(camera_factory=lambda: camera, window_ms=100)
+    runtime.start()
+    wait_until(lambda: last_fast_window_id(runtime) >= 1)
+    first_done = threading.Event()
+    second_called = threading.Event()
+    second_done = threading.Event()
+
+    def stop_first() -> None:
+        runtime.stop()
+        first_done.set()
+
+    def stop_second() -> None:
+        second_called.set()
+        runtime.stop()
+        second_done.set()
+
+    first_thread = threading.Thread(target=stop_first)
+    second_thread = threading.Thread(target=stop_second)
+    first_thread.start()
+    assert camera.close_started.wait(timeout=1)
+    second_thread.start()
+    assert second_called.wait(timeout=1)
+    second_returned_during_teardown = second_done.wait(timeout=0.05)
+
+    camera.close_release.set()
+    assert first_done.wait(timeout=1)
+    assert second_done.wait(timeout=1)
+    first_thread.join()
+    second_thread.join()
+    runtime.close()
+
+    assert second_returned_during_teardown is False
+
+
+def test_close_prevents_waiting_start_from_reviving_after_stop() -> None:
+    first_camera = BlockingCloseCamera()
+    cameras: list[ContinuousFakeCamera] = []
+
+    def camera_factory() -> ContinuousFakeCamera:
+        camera: ContinuousFakeCamera
+        if not cameras:
+            camera = first_camera
+        else:
+            camera = ContinuousFakeCamera()
+        cameras.append(camera)
+        return camera
+
+    runtime = DashboardRuntime(camera_factory=camera_factory, window_ms=100)
+    runtime.start()
+    wait_until(lambda: last_fast_window_id(runtime) >= 1)
+    stop_done = threading.Event()
+    start_called = threading.Event()
+    start_done = threading.Event()
+    close_called = threading.Event()
+    close_done = threading.Event()
+    start_errors: list[Exception] = []
+
+    def stop_runtime() -> None:
+        runtime.stop()
+        stop_done.set()
+
+    def start_runtime() -> None:
+        start_called.set()
+        try:
+            runtime.start()
+        except Exception as exc:
+            start_errors.append(exc)
+        finally:
+            start_done.set()
+
+    def close_runtime() -> None:
+        close_called.set()
+        runtime.close()
+        close_done.set()
+
+    stop_thread = threading.Thread(target=stop_runtime)
+    start_thread = threading.Thread(target=start_runtime)
+    close_thread = threading.Thread(target=close_runtime)
+    stop_thread.start()
+    assert first_camera.close_started.wait(timeout=1)
+    start_thread.start()
+    assert start_called.wait(timeout=1)
+    close_thread.start()
+    assert close_called.wait(timeout=1)
+    wait_until(lambda: runtime._closing)
+
+    first_camera.close_release.set()
+    assert stop_done.wait(timeout=5)
+    assert start_done.wait(timeout=5)
+    assert close_done.wait(timeout=5)
+    stop_thread.join()
+    start_thread.join()
+    close_thread.join()
+
+    assert len(start_errors) == 1
+    assert str(start_errors[0]) == "dashboard runtime is closed"
+    assert len(cameras) == 1
+    assert runtime.is_running is False
+
+
 def test_restart_vlm_clears_semantic_work_without_restarting_camera() -> None:
     camera = DynamicFakeCamera()
     factory_count = 0
@@ -783,6 +989,124 @@ def test_restart_vlm_failure_keeps_semantic_admission_paused() -> None:
 
     assert semantic.submit_count == submitted_before_restart
     assert supervisor.restart_count == 1
+
+
+def test_concurrent_restarts_serialize_and_latest_failure_keeps_admission_paused() -> None:
+    semantic = RecordingSemanticWorker(available=True)
+    supervisor = SequencedRestartSupervisor()
+    runtime = DashboardRuntime(
+        camera_factory=DynamicFakeCamera,
+        semantic_worker=semantic,
+        vlm_supervisor=supervisor,
+        config_store=DashboardConfigStore(
+            DashboardConfigV1(
+                semantic_enabled=True,
+                semantic_cooldown_seconds=1,
+            )
+        ),
+        window_ms=100,
+    )
+    runtime.start()
+    semantic.wait_for_submissions(1)
+    first_done = threading.Event()
+    second_done = threading.Event()
+    first_errors: list[Exception] = []
+    second_errors: list[Exception] = []
+
+    def restart_first() -> None:
+        try:
+            runtime.restart_vlm()
+        except Exception as exc:
+            first_errors.append(exc)
+        finally:
+            first_done.set()
+
+    def restart_second() -> None:
+        try:
+            runtime.restart_vlm()
+        except Exception as exc:
+            second_errors.append(exc)
+        finally:
+            second_done.set()
+
+    first_thread = threading.Thread(target=restart_first)
+    second_thread = threading.Thread(target=restart_second)
+    first_thread.start()
+    assert supervisor.first_started.wait(timeout=1)
+    second_thread.start()
+    second_entered_while_first_blocked = supervisor.second_started.wait(timeout=0.05)
+
+    supervisor.first_release.set()
+    assert first_done.wait(timeout=1)
+    assert second_done.wait(timeout=1)
+    first_thread.join()
+    second_thread.join()
+    submissions_after_failure = semantic.submit_count
+    window_after_failure = last_fast_window_id(runtime)
+    wait_until(
+        lambda: (
+            semantic.submit_count > submissions_after_failure
+            or last_fast_window_id(runtime) >= window_after_failure + 12
+        ),
+        timeout=2.5,
+    )
+    runtime.close()
+
+    assert second_entered_while_first_blocked is False
+    assert first_errors == []
+    assert len(second_errors) == 1
+    assert str(second_errors[0]) == "second restart failed"
+    assert semantic.submit_count == submissions_after_failure
+
+
+def test_close_waits_for_blocked_restart_before_closing_worker_and_sidecar() -> None:
+    lifecycle: list[str] = []
+    semantic = RecordingSemanticWorker(available=True, lifecycle=lifecycle)
+    supervisor = SequencedRestartSupervisor(lifecycle=lifecycle)
+    runtime = DashboardRuntime(
+        camera_factory=ContinuousFakeCamera,
+        semantic_worker=semantic,
+        vlm_supervisor=supervisor,
+    )
+    restart_done = threading.Event()
+    close_called = threading.Event()
+    close_done = threading.Event()
+
+    def restart_vlm() -> None:
+        runtime.restart_vlm()
+        restart_done.set()
+
+    def close_runtime() -> None:
+        close_called.set()
+        runtime.close()
+        close_done.set()
+
+    restart_thread = threading.Thread(target=restart_vlm)
+    close_thread = threading.Thread(target=close_runtime)
+    restart_thread.start()
+    assert supervisor.first_started.wait(timeout=1)
+    close_thread.start()
+    assert close_called.wait(timeout=1)
+    wait_until(lambda: runtime._closing)
+    close_reached_sidecar_while_restart_blocked = supervisor.close_started.wait(
+        timeout=0.05
+    )
+
+    supervisor.first_release.set()
+    assert restart_done.wait(timeout=1)
+    assert close_done.wait(timeout=1)
+    restart_thread.join()
+    close_thread.join()
+
+    assert close_reached_sidecar_while_restart_blocked is False
+    assert supervisor.restart_completed_after_close is False
+    assert lifecycle == [
+        "supervisor.restart",
+        "worker.close",
+        "supervisor.close",
+    ]
+    assert semantic.close_count == 1
+    assert supervisor.close_count == 1
 
 
 def test_close_releases_worker_before_sidecar_and_is_idempotent() -> None:

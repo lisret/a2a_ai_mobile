@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import argparse
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -247,6 +249,184 @@ def test_run_dashboard_without_vlm_keeps_semantic_state_disabled(
     assert recorded_runtime.kwargs["state_store"].snapshot(
         recorded_runtime.kwargs["config_store"].snapshot()
     )["semanticLifecycle"] == {"phase": "disabled", "message": None}
+
+
+class DashboardFailureHarness:
+    def __init__(
+        self,
+        *,
+        failure_point: str | None,
+        cleanup_failures: set[str] | None = None,
+    ) -> None:
+        self.failure_point = failure_point
+        self.cleanup_failures = cleanup_failures or set()
+        self.calls: list[str] = []
+
+    def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from nono_realtime_camera import (
+            dashboard_runtime,
+            dashboard_web,
+            semantic_worker,
+            vlm_client,
+            vlm_sidecar,
+        )
+
+        harness = self
+
+        class Resource:
+            def __init__(self, name: str) -> None:
+                self.name = name
+
+            def close(self) -> None:
+                harness.calls.append(f"{self.name}.close")
+                if f"{self.name}.close" in harness.cleanup_failures:
+                    raise RuntimeError(f"{self.name}.close failed")
+
+        class FakeDetector(Resource):
+            def __init__(self, _path: Path) -> None:
+                super().__init__("detector")
+                harness.calls.append("detector.__init__")
+
+        class FakeSidecar(Resource):
+            def __init__(self, **_kwargs) -> None:
+                super().__init__("sidecar")
+                self.available = False
+                harness.calls.append("sidecar.__init__")
+
+            @property
+            def base_url(self) -> str:
+                return "http://127.0.0.1:8766"
+
+            def start_async(self) -> None:
+                harness.calls.append("sidecar.start_async")
+                harness._raise_if("sidecar.start_async")
+
+        class FakeClient:
+            def __init__(self, **_kwargs) -> None:
+                harness.calls.append("client.__init__")
+
+        class FakeWorker(Resource):
+            def __init__(self, **_kwargs) -> None:
+                super().__init__("worker")
+                harness.calls.append("worker.__init__")
+
+            def start(self) -> None:
+                harness.calls.append("worker.start")
+                harness._raise_if("worker.start")
+
+        class FakeRuntime:
+            def __init__(self, **kwargs) -> None:
+                harness.calls.append("runtime.__init__")
+                harness._raise_if("runtime.__init__")
+                self.detector = kwargs["detector"]
+                self.worker = kwargs["semantic_worker"]
+                self.sidecar = kwargs["vlm_supervisor"]
+
+            def start(self) -> None:
+                harness.calls.append("runtime.start")
+                harness._raise_if("runtime.start")
+
+            def close(self) -> None:
+                harness.calls.append("runtime.close")
+                if self.worker is not None:
+                    self.worker.close()
+                if self.sidecar is not None:
+                    self.sidecar.close()
+                self.detector.close()
+
+        class FakeApp:
+            def run(self, **_kwargs) -> None:
+                harness.calls.append("app.run")
+                harness._raise_if("app.run")
+
+        def create_app(_runtime: FakeRuntime) -> FakeApp:
+            harness.calls.append("app.create")
+            harness._raise_if("app.create")
+            return FakeApp()
+
+        monkeypatch.setattr(cli_module, "MediaPipeObjectDetector", FakeDetector)
+        monkeypatch.setattr(vlm_sidecar, "VlmSidecarSupervisor", FakeSidecar)
+        monkeypatch.setattr(vlm_client, "OpenAICompatibleVlmClient", FakeClient)
+        monkeypatch.setattr(semantic_worker, "SemanticWorker", FakeWorker)
+        monkeypatch.setattr(dashboard_runtime, "DashboardRuntime", FakeRuntime)
+        monkeypatch.setattr(dashboard_web, "create_dashboard_app", create_app)
+
+    def _raise_if(self, point: str) -> None:
+        if self.failure_point == point:
+            raise RuntimeError(f"{point} failed")
+
+    @property
+    def close_calls(self) -> list[str]:
+        return [call for call in self.calls if call.endswith(".close")]
+
+
+def _dashboard_args(tmp_path: Path, *, vlm: bool) -> argparse.Namespace:
+    model_path = tmp_path / "detector.tflite"
+    model_path.write_bytes(b"detector")
+    command = ["dashboard", "--model", str(model_path)]
+    if vlm:
+        command.append("--vlm")
+    return build_parser().parse_args(command)
+
+
+@pytest.mark.parametrize(
+    ("failure_point", "runtime_owns_resources"),
+    [
+        ("worker.start", False),
+        ("sidecar.start_async", False),
+        ("runtime.__init__", False),
+        ("app.create", True),
+        ("runtime.start", True),
+        ("app.run", True),
+        (None, True),
+    ],
+)
+def test_run_dashboard_closes_vlm_resources_at_the_correct_owner_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_point: str | None,
+    runtime_owns_resources: bool,
+) -> None:
+    harness = DashboardFailureHarness(failure_point=failure_point)
+    harness.install(monkeypatch)
+
+    if failure_point is None:
+        assert _run_dashboard(_dashboard_args(tmp_path, vlm=True)) == 0
+    else:
+        with pytest.raises(RuntimeError, match=f"{failure_point} failed"):
+            _run_dashboard(_dashboard_args(tmp_path, vlm=True))
+
+    resource_closes = ["worker.close", "sidecar.close", "detector.close"]
+    expected = (["runtime.close"] if runtime_owns_resources else []) + resource_closes
+    assert harness.close_calls == expected
+
+
+def test_run_dashboard_continues_pre_runtime_cleanup_without_masking_start_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    harness = DashboardFailureHarness(
+        failure_point="worker.start",
+        cleanup_failures={"worker.close", "sidecar.close", "detector.close"},
+    )
+    harness.install(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="worker.start failed"):
+        _run_dashboard(_dashboard_args(tmp_path, vlm=True))
+
+    assert harness.close_calls == ["worker.close", "sidecar.close", "detector.close"]
+
+
+@pytest.mark.parametrize("failure_point", ["runtime.start", "app.run"])
+def test_run_dashboard_fast_only_runtime_owns_detector_on_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure_point: str
+) -> None:
+    harness = DashboardFailureHarness(failure_point=failure_point)
+    harness.install(monkeypatch)
+
+    with pytest.raises(RuntimeError, match=f"{failure_point} failed"):
+        _run_dashboard(_dashboard_args(tmp_path, vlm=False))
+
+    assert harness.close_calls == ["runtime.close", "detector.close"]
 
 
 @pytest.mark.parametrize("port", ["0", "65536"])

@@ -150,6 +150,17 @@ def _valid_vlm_timeout_seconds(value: str) -> int:
     return timeout_seconds
 
 
+def _close_unowned_dashboard_resources(*resources: object | None) -> None:
+    for resource in resources:
+        if resource is None:
+            continue
+        try:
+            resource.close()  # type: ignore[attr-defined]
+        except Exception:
+            # Preserve the startup failure while still attempting every cleanup.
+            continue
+
+
 def _run_dashboard(args: argparse.Namespace) -> int:
     from .dashboard_config import DashboardConfigStore, DashboardConfigV1
     from .dashboard_runtime import DashboardRuntime
@@ -160,59 +171,62 @@ def _run_dashboard(args: argparse.Namespace) -> int:
     if not model_path.is_file():
         raise FileNotFoundError(f"object detector model not found: {model_path}")
     detector = MediaPipeObjectDetector(model_path)
-    config_store = DashboardConfigStore()
-    state_store = DashboardStateStore()
     semantic_worker = None
     vlm_supervisor = None
-    if args.vlm:
-        from .semantic_worker import SemanticWorker
-        from .vlm_client import OpenAICompatibleVlmClient
-        from .vlm_sidecar import VlmSidecarConfig, VlmSidecarSupervisor
-
-        config_store = DashboardConfigStore(
-            DashboardConfigV1(semantic_enabled=True, semantic_cooldown_seconds=5)
-        )
-        vlm_supervisor = VlmSidecarSupervisor(
-            config=VlmSidecarConfig(
-                model_id=args.vlm_model,
-                host=args.vlm_host,
-                port=args.vlm_port,
-                cache_dir=Path(".runtime/huggingface"),
-                auto_start=not args.vlm_no_auto_start,
-            ),
-            state_store=state_store,
-        )
-        client = OpenAICompatibleVlmClient(
-            base_url=vlm_supervisor.base_url,
-            model_id=args.vlm_model,
-            timeout_seconds=args.vlm_timeout_seconds,
-            max_tokens=args.vlm_max_tokens,
-        )
-        semantic_worker = SemanticWorker(
-            client=client,
-            state_store=state_store,
-            available=lambda: vlm_supervisor.available,
-        )
-        semantic_worker.start()
-        vlm_supervisor.start_async()
-    else:
-        state_store.set_semantic_available(False)
-        state_store.set_semantic_lifecycle("disabled")
-    runtime = DashboardRuntime(
-        camera_factory=lambda: OpenCVCameraSource(camera_index=args.camera_index),
-        detector=detector,
-        semantic_worker=semantic_worker,
-        vlm_supervisor=vlm_supervisor,
-        config_store=config_store,
-        state_store=state_store,
-    )
-    app = create_dashboard_app(runtime)
-    url = f"http://{args.host}:{args.port}/"
-    if args.open_browser:
-        threading.Timer(0.6, lambda: webbrowser.open(url)).start()
-    runtime.start()
-    print(f"NoNo camera dashboard: {url}", flush=True)
+    runtime = None
+    runtime_owns_resources = False
     try:
+        config_store = DashboardConfigStore()
+        state_store = DashboardStateStore()
+        if args.vlm:
+            from .semantic_worker import SemanticWorker
+            from .vlm_client import OpenAICompatibleVlmClient
+            from .vlm_sidecar import VlmSidecarConfig, VlmSidecarSupervisor
+
+            config_store = DashboardConfigStore(
+                DashboardConfigV1(semantic_enabled=True, semantic_cooldown_seconds=5)
+            )
+            vlm_supervisor = VlmSidecarSupervisor(
+                config=VlmSidecarConfig(
+                    model_id=args.vlm_model,
+                    host=args.vlm_host,
+                    port=args.vlm_port,
+                    cache_dir=Path(".runtime/huggingface"),
+                    auto_start=not args.vlm_no_auto_start,
+                ),
+                state_store=state_store,
+            )
+            client = OpenAICompatibleVlmClient(
+                base_url=vlm_supervisor.base_url,
+                model_id=args.vlm_model,
+                timeout_seconds=args.vlm_timeout_seconds,
+                max_tokens=args.vlm_max_tokens,
+            )
+            semantic_worker = SemanticWorker(
+                client=client,
+                state_store=state_store,
+                available=lambda: vlm_supervisor.available,
+            )
+            semantic_worker.start()
+            vlm_supervisor.start_async()
+        else:
+            state_store.set_semantic_available(False)
+            state_store.set_semantic_lifecycle("disabled")
+        runtime = DashboardRuntime(
+            camera_factory=lambda: OpenCVCameraSource(camera_index=args.camera_index),
+            detector=detector,
+            semantic_worker=semantic_worker,
+            vlm_supervisor=vlm_supervisor,
+            config_store=config_store,
+            state_store=state_store,
+        )
+        runtime_owns_resources = True
+        app = create_dashboard_app(runtime)
+        url = f"http://{args.host}:{args.port}/"
+        if args.open_browser:
+            threading.Timer(0.6, lambda: webbrowser.open(url)).start()
+        runtime.start()
+        print(f"NoNo camera dashboard: {url}", flush=True)
         app.run(
             host=args.host,
             port=args.port,
@@ -221,7 +235,15 @@ def _run_dashboard(args: argparse.Namespace) -> int:
             use_reloader=False,
         )
     finally:
-        runtime.close()
+        if runtime_owns_resources:
+            assert runtime is not None
+            runtime.close()
+        else:
+            _close_unowned_dashboard_resources(
+                semantic_worker,
+                vlm_supervisor,
+                detector,
+            )
     return 0
 
 

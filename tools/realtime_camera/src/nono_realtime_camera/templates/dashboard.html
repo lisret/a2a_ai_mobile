@@ -54,7 +54,7 @@
           </div>
           <span id="config-revision" class="metric-pill">rev 1</span>
         </div>
-        <p id="config-error" class="inline-error" role="alert"></p>
+        <p id="config-error" class="inline-error" role="alert" aria-live="assertive"></p>
         <div class="toggle-row">
           <label><input id="analysis-enabled" type="checkbox"> 分析</label>
           <label><input id="detector-enabled" type="checkbox"> 对象检测</label>
@@ -98,11 +98,11 @@
             <p class="section-label">REAL VLM</p>
             <h2>语义分析</h2>
           </div>
-          <span id="semantic-lifecycle" class="semantic-lifecycle">已禁用 · disabled</span>
+          <span id="semantic-lifecycle" class="semantic-lifecycle" role="status" aria-live="polite">已禁用 · disabled</span>
         </div>
         <div class="semantic-result">
           <p class="section-label">LATEST DESCRIPTION</p>
-          <strong id="semantic-summary">等待真实 VLM 结果</strong>
+          <strong id="semantic-summary" aria-live="polite">等待真实 VLM 结果</strong>
           <div class="semantic-facts">
             <div><span>模型</span><strong id="semantic-model">—</strong></div>
             <div><span>来源窗口</span><strong id="semantic-window">—</strong></div>
@@ -113,7 +113,7 @@
         <div class="semantic-footer">
           <span>P95 <strong id="semantic-p95-ms">—</strong></span>
           <span>drop <strong id="semantic-dropped-count">0</strong></span>
-          <button id="restart-vlm" class="button" type="button">重启 VLM</button>
+          <button id="restart-vlm" class="button" type="button" disabled>重启 VLM</button>
         </div>
       </section>
 

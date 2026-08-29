@@ -1,8 +1,10 @@
 const $ = (id) => document.getElementById(id);
 let lastSequence = 0;
 let lastConfig = null;
-let configTimer = null;
-const activeInputs = new Set();
+let statePollSequence = 0;
+let semanticAvailable = false;
+let controlInFlight = false;
+const configEdits = new Map();
 const SEMANTIC_PHASE_LABELS = {
   "disabled": "已禁用",
   "loading": "加载中",
@@ -23,8 +25,29 @@ function setConnection(ok) {
 
 function syncControl(id, value, digits = 0) {
   const input = $(id);
-  if (!activeInputs.has(id)) input.value = value;
+  if (configEdits.has(id)) return;
+  input.value = value;
   $(`${id}-value`).textContent = Number(value).toFixed(digits);
+}
+
+function startConfigEdit(input) {
+  if (!configEdits.has(input.id)) configEdits.set(input.id, { dirty: false, generation: 0, timer: null });
+}
+
+function endConfigEdit(input) {
+  const edit = configEdits.get(input.id);
+  if (edit && !edit.dirty) configEdits.delete(input.id);
+}
+
+function settleConfigEdit(id, generation) {
+  const edit = configEdits.get(id);
+  if (edit?.generation === generation) configEdits.delete(id);
+}
+
+function setControlAvailability() {
+  $("semantic-enabled").disabled = !semanticAvailable;
+  $("semantic-enabled-label").classList.toggle("disabled", !semanticAvailable);
+  $("restart-vlm").disabled = !semanticAvailable || controlInFlight;
 }
 
 function renderSemantic(state) {
@@ -34,8 +57,8 @@ function renderSemantic(state) {
   const lifecycleChip = $("semantic-lifecycle");
   lifecycleChip.textContent = `${label} · ${phase}`;
   lifecycleChip.className = `semantic-lifecycle phase-${phase}`;
-  $("semantic-enabled").disabled = !state.semanticAvailable;
-  $("semantic-enabled-label").classList.toggle("disabled", !state.semanticAvailable);
+  semanticAvailable = Boolean(state.semanticAvailable);
+  setControlAvailability();
 
   const metrics = state.metrics || {};
   $("semantic-p95-ms").textContent = numberText(metrics.semanticProcessingP95Ms, 0, " ms");
@@ -83,11 +106,12 @@ function renderState(state) {
 
 function applyConfig(config) {
   if (!config) return;
+  if (lastConfig && config.revision < lastConfig.revision) return;
   lastConfig = config;
   $("config-revision").textContent = `rev ${config.revision}`;
-  if (!activeInputs.has("analysis-enabled")) $("analysis-enabled").checked = config.analysisEnabled;
-  if (!activeInputs.has("detector-enabled")) $("detector-enabled").checked = config.detectorEnabled;
-  if (!activeInputs.has("semantic-enabled")) $("semantic-enabled").checked = config.semanticEnabled;
+  if (!configEdits.has("analysis-enabled")) $("analysis-enabled").checked = config.analysisEnabled;
+  if (!configEdits.has("detector-enabled")) $("detector-enabled").checked = config.detectorEnabled;
+  if (!configEdits.has("semantic-enabled")) $("semantic-enabled").checked = config.semanticEnabled;
   syncControl("sample-fps", config.sampleFps, 0);
   syncControl("preview-fps", config.previewFps, 0);
   syncControl("detection-threshold", config.detectionScoreThreshold, 2);
@@ -97,12 +121,14 @@ function applyConfig(config) {
 }
 
 async function pollState() {
+  const sequence = ++statePollSequence;
   try {
     const response = await fetch("/api/state", { cache: "no-store" });
     if (!response.ok) throw new Error("state request failed");
-    renderState(await response.json());
+    const state = await response.json();
+    if (sequence === statePollSequence) renderState(state);
   } catch (_) {
-    setConnection(false);
+    if (sequence === statePollSequence) setConnection(false);
   }
 }
 
@@ -153,35 +179,55 @@ async function pollEvents() {
   } catch (_) { /* state poll owns disconnect banner */ }
 }
 
-async function patchConfig(patch) {
+async function patchConfig(patch, editedControlId = null, editedGeneration = null) {
+  const controlId = editedControlId || (Object.keys(patch).length === 1
+    ? [...document.querySelectorAll("input[data-config]")].find((input) => input.dataset.config === Object.keys(patch)[0])?.id
+    : null);
+  const generation = editedGeneration ?? (controlId ? configEdits.get(controlId)?.generation : null);
   try {
     const response = await fetch("/api/config", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.message || "参数更新失败");
+    const payload = await responsePayload(response);
+    if (!response.ok) throw new Error(errorMessage(payload, "参数更新失败"));
     $("config-error").textContent = "";
     applyConfig(payload.config);
   } catch (error) {
     $("config-error").textContent = error.message;
-    applyConfig(lastConfig);
+  } finally {
+    if (controlId && generation !== undefined && generation !== null) {
+      settleConfigEdit(controlId, generation);
+    }
   }
 }
 
-function queuePatch(key, value) {
-  window.clearTimeout(configTimer);
-  configTimer = window.setTimeout(() => patchConfig({ [key]: value }), 150);
+function queuePatch(input, value) {
+  startConfigEdit(input);
+  const edit = configEdits.get(input.id);
+  window.clearTimeout(edit.timer);
+  edit.dirty = true;
+  edit.generation += 1;
+  const generation = edit.generation;
+  edit.timer = window.setTimeout(
+    () => patchConfig({ [input.dataset.config]: value }, input.id, generation),
+    150,
+  );
+  return generation;
 }
 
 for (const input of document.querySelectorAll("input[data-config]")) {
-  input.addEventListener("pointerdown", () => activeInputs.add(input.id));
-  input.addEventListener("pointerup", () => activeInputs.delete(input.id));
+  input.addEventListener("pointerdown", () => startConfigEdit(input));
+  input.addEventListener("focus", () => startConfigEdit(input));
+  input.addEventListener("keydown", () => startConfigEdit(input));
+  input.addEventListener("pointerup", () => endConfigEdit(input));
+  input.addEventListener("pointercancel", () => endConfigEdit(input));
+  input.addEventListener("blur", () => endConfigEdit(input));
   input.addEventListener("input", () => {
     const digits = input.step.includes(".") ? input.step.split(".")[1].length : 0;
     $(`${input.id}-value`).textContent = Number(input.value).toFixed(digits);
-    queuePatch(input.dataset.config, Number(input.value));
+    queuePatch(input, Number(input.value));
   });
 }
 
@@ -189,13 +235,32 @@ $("analysis-enabled").addEventListener("change", (event) => patchConfig({ analys
 $("detector-enabled").addEventListener("change", (event) => patchConfig({ detectorEnabled: event.target.checked }));
 $("semantic-enabled").addEventListener("change", (event) => patchConfig({ semanticEnabled: event.target.checked }));
 
+async function responsePayload(response) {
+  const contentType = response.headers?.get("content-type") || "";
+  if (contentType.toLowerCase().includes("application/json")) {
+    try {
+      return await response.json();
+    } catch (_) { /* fall through to a text error */ }
+  }
+  const text = await response.text?.().catch(() => "") || "";
+  return text ? { message: text.slice(0, 500) } : {};
+}
+
+function errorMessage(payload, fallback) {
+  const message = payload.message || payload.error || "";
+  return typeof message === "string" && !/<\/?[a-z!][^>]*>/i.test(message)
+    ? message
+    : fallback;
+}
+
 async function control(action) {
   const buttons = [$("start-button"), $("stop-button"), $("restart-button"), $("restart-vlm")];
+  controlInFlight = true;
   buttons.forEach((button) => { button.disabled = true; });
   try {
     const response = await fetch(`/api/control/${action}`, { method: "POST" });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.message || "控制操作失败");
+    const payload = await responsePayload(response);
+    if (!response.ok) throw new Error(errorMessage(payload, "控制操作失败"));
     $("config-error").textContent = "";
     if (action === "start" || action === "restart-camera") {
       $("camera-stream").src = `/video.mjpg?t=${Date.now()}`;
@@ -204,7 +269,11 @@ async function control(action) {
   } catch (error) {
     $("config-error").textContent = error.message;
   } finally {
-    buttons.forEach((button) => { button.disabled = false; });
+    controlInFlight = false;
+    $("start-button").disabled = false;
+    $("stop-button").disabled = false;
+    $("restart-button").disabled = false;
+    setControlAvailability();
   }
 }
 

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# ruff: noqa: E501
+import subprocess
+import textwrap
 from pathlib import Path
 
 import numpy as np
@@ -55,6 +58,10 @@ def test_dashboard_page_contains_required_controls(client) -> None:
     ):
         assert f'id="{element_id}"' in html
 
+    assert 'id="semantic-lifecycle" class="semantic-lifecycle" role="status" aria-live="polite"' in html
+    assert 'id="semantic-summary" aria-live="polite"' in html
+    assert 'id="config-error" class="inline-error" role="alert" aria-live="assertive"' in html
+
 
 def test_dashboard_contains_semantic_controls_result_and_metrics(client) -> None:
     html = client.get("/").get_data(as_text=True)
@@ -75,26 +82,237 @@ def test_dashboard_contains_semantic_controls_result_and_metrics(client) -> None
         assert f'id="{element_id}"' in html
 
 
-def test_dashboard_script_wires_real_semantic_state_controls_and_events() -> None:
-    script = (
-        Path(__file__).parents[1]
-        / "src/nono_realtime_camera/static/dashboard.js"
-    ).read_text()
+def test_dashboard_script_executes_semantic_interaction_contracts() -> None:
+    script_path = Path(__file__).parents[1] / "src/nono_realtime_camera/static/dashboard.js"
+    harness = r'''
+const fs = require("fs");
+const vm = require("vm");
+const source = fs.readFileSync(process.argv[1], "utf8");
 
-    for fragment in (
-        '"disabled": "已禁用"',
-        '"loading": "加载中"',
-        '"ready": "就绪"',
-        '"running": "分析中"',
-        '"degraded": "降级"',
-        '"stopped": "已停止"',
-        "function renderSemantic(state)",
-        'semantic?.semanticSummary || "等待真实 VLM 结果"',
-        'patchConfig({ semanticEnabled: event.target.checked })',
-        'control("vlm/restart")',
-        'event.source === "semantic_enrichment" ? "VLM" : "Fast"',
-    ):
-        assert fragment in script
+class Element {
+  constructor(id) {
+    this.id = id;
+    this.textContent = "";
+    this.className = "";
+    this._value = "";
+    Object.defineProperty(this, "value", {
+      get: () => this._value,
+      set: (value) => { this._value = String(value); },
+    });
+    this.checked = false;
+    this.disabled = false;
+    this.step = "1";
+    this.dataset = {};
+    this.children = [];
+    this.listeners = new Map();
+    this.classList = {
+      toggle: (name, force) => {
+        const names = new Set(this.className.split(/\s+/).filter(Boolean));
+        if (force) names.add(name); else names.delete(name);
+        this.className = [...names].join(" ");
+      },
+      contains: (name) => this.className.split(/\s+/).includes(name),
+    };
+  }
+  addEventListener(name, listener) {
+    this.listeners.set(name, listener);
+  }
+  dispatch(name) {
+    return this.listeners.get(name)?.({ target: this });
+  }
+  appendChild(child) { this.children.push(child); }
+  prepend(child) { this.children.unshift(child); }
+  removeChild(child) { this.children.splice(this.children.indexOf(child), 1); }
+  querySelector() { return null; }
+  set innerHTML(value) { this.children = []; this._innerHTML = value; }
+  get innerHTML() { return this._innerHTML || ""; }
+}
+
+const ids = [
+  "connection-chip", "lifecycle-chip", "window-id", "current-summary",
+  "object-list", "presence-change", "motion-state", "confidence", "capture-fps",
+  "actual-sample-fps", "actual-preview-fps", "processing-p95", "emit-p95",
+  "stale-pending", "frame-age", "semantic-status", "semantic-lifecycle",
+  "semantic-enabled", "semantic-enabled-label", "semantic-p95-ms",
+  "semantic-dropped-count", "semantic-summary", "semantic-model", "semantic-window",
+  "semantic-input-frame-count", "semantic-processing-ms", "config-revision",
+  "analysis-enabled", "detector-enabled", "sample-fps", "sample-fps-value",
+  "preview-fps", "preview-fps-value", "detection-threshold", "detection-threshold-value",
+  "motion-ratio", "motion-ratio-value", "scene-ratio", "scene-ratio-value",
+  "semantic-cooldown-seconds", "semantic-cooldown-seconds-value", "event-list",
+  "config-error", "start-button", "stop-button", "restart-button", "restart-vlm",
+  "camera-stream",
+];
+const elements = Object.fromEntries(ids.map((id) => [id, new Element(id)]));
+for (const [id, key, step] of [
+  ["sample-fps", "sampleFps", "1"], ["preview-fps", "previewFps", "1"],
+  ["detection-threshold", "detectionScoreThreshold", "0.05"],
+  ["motion-ratio", "motionRatioThreshold", "0.001"],
+  ["scene-ratio", "sceneRatioThreshold", "0.05"],
+  ["semantic-cooldown-seconds", "semanticCooldownSeconds", "1"],
+]) { elements[id].dataset.config = key; elements[id].step = step; }
+const timers = [];
+let fetchHandler = async (url) => {
+  if (url.startsWith("/api/events")) return jsonResponse({ events: [] });
+  if (url === "/api/state") return jsonResponse(state(1));
+  throw new Error(`unexpected ${url}`);
+};
+const document = {
+  getElementById: (id) => elements[id],
+  querySelectorAll: (selector) => selector === "input[data-config]"
+    ? ["sample-fps", "preview-fps", "detection-threshold", "motion-ratio", "scene-ratio", "semantic-cooldown-seconds"].map((id) => elements[id])
+    : [],
+  createElement: () => new Element("row-cell"),
+};
+const context = {
+  document,
+  fetch: (...args) => fetchHandler(...args),
+  window: {
+    clearTimeout: () => {},
+    setTimeout: (fn) => { timers.push(fn); return timers.length; },
+    setInterval: () => 0,
+  },
+  Date, Number, Set, Promise, Error, JSON,
+};
+vm.createContext(context);
+vm.runInContext(source, context);
+
+function jsonResponse(payload, ok = true) {
+  return { ok, headers: { get: () => "application/json" }, json: async () => payload, text: async () => JSON.stringify(payload) };
+}
+function textResponse(text, ok = false) {
+  return { ok, headers: { get: () => "text/plain" }, json: async () => { throw new Error("not json"); }, text: async () => text };
+}
+function state(revision, { available = true, phase = "ready", latest = true, cooldown = 10 } = {}) {
+  return {
+    lifecycle: { phase: "running" },
+    config: { revision, analysisEnabled: true, detectorEnabled: true, semanticEnabled: true,
+      sampleFps: 15, previewFps: 12, detectionScoreThreshold: .45, motionRatioThreshold: .01,
+      sceneRatioThreshold: .35, semanticCooldownSeconds: cooldown },
+    metrics: { captureFps: 1, sampleFps: 1, previewFps: 1, processingP95Ms: 1, endToEmitP95Ms: 1,
+      staleCount: 0, fastPendingDepth: 0, frameAgeMs: 1, semanticProcessingP95Ms: 3200,
+      semanticDroppedCount: 2, semanticInputFrameCount: 3 },
+    semanticAvailable: available,
+    semanticLifecycle: { phase, message: phase === "degraded" ? "offline" : "Qwen ready" },
+    latestSemantic: latest ? { semanticSummary: "一位人士站在室内", modelId: "Qwen", windowId: 7, processingMs: 3200 } : null,
+  };
+}
+function expect(condition, message) { if (!condition) throw new Error(message); }
+function deferred() { let resolve; return { promise: new Promise((done) => { resolve = done; }), resolve }; }
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+(async () => {
+  context.renderState(state(2));
+  expect(elements["semantic-lifecycle"].classList.contains("phase-ready"), "ready lifecycle missing");
+  expect(elements["semantic-summary"].textContent === "一位人士站在室内", "semantic result missing");
+  expect(elements["restart-vlm"].disabled === false, "available restart disabled");
+
+  context.renderState(state(3, { phase: "degraded", latest: false }));
+  expect(elements["semantic-lifecycle"].classList.contains("phase-degraded"), "degraded lifecycle missing");
+  expect(!elements["semantic-lifecycle"].classList.contains("phase-ready"), "ready class not cleared");
+  expect(elements["semantic-summary"].textContent === "等待真实 VLM 结果", "null semantic summary leaked");
+  expect(elements["semantic-model"].textContent === "—", "null semantic model leaked");
+  context.renderState(state(4, { available: false, latest: false }));
+  expect(elements["semantic-enabled"].disabled, "unavailable semantic switch enabled");
+  expect(elements["restart-vlm"].disabled, "unavailable restart enabled");
+
+  context.renderState(state(5, { cooldown: 10 }));
+  const cooldown = elements["semantic-cooldown-seconds"];
+  cooldown.dispatch("pointerdown");
+  cooldown.dispatch("focus");
+  cooldown.dispatch("keydown");
+  cooldown.value = "12";
+  cooldown.dispatch("input");
+  cooldown.dispatch("pointerup");
+  cooldown.dispatch("pointercancel");
+  cooldown.dispatch("blur");
+  context.renderState(state(6, { cooldown: 20 }));
+  expect(cooldown.value === "12" && elements["semantic-cooldown-seconds-value"].textContent === "12", "poll overwrote pending cooldown edit");
+  const firstPatch = deferred();
+  fetchHandler = async (url) => url === "/api/config" ? firstPatch.promise : jsonResponse({ events: [] });
+  timers.shift()();
+  cooldown.value = "13";
+  cooldown.dispatch("input");
+  firstPatch.resolve(jsonResponse({ config: state(7, { cooldown: 12 }).config }));
+  await flush(); await flush();
+  context.renderState(state(8, { cooldown: 20 }));
+  expect(cooldown.value === "13", "older patch released newer cooldown edit");
+  fetchHandler = async (url) => url === "/api/config"
+    ? jsonResponse({ config: state(9, { cooldown: 13 }).config })
+    : jsonResponse({ events: [] });
+  timers.shift()();
+  await flush(); await flush();
+  context.renderState(state(10, { cooldown: 14 }));
+  expect(cooldown.value === "14", `settled cooldown edit did not resync: ${cooldown.value}`);
+
+  context.applyConfig(state(11, { cooldown: 15 }).config);
+  context.applyConfig(state(10, { cooldown: 4 }).config);
+  expect(elements["config-revision"].textContent === "rev 11" && cooldown.value === "15", "older revision rolled back controls");
+  fetchHandler = async (url) => url === "/api/config"
+    ? jsonResponse({ config: state(10, { cooldown: 4 }).config })
+    : jsonResponse({ events: [] });
+  await context.patchConfig({ semanticCooldownSeconds: 4 });
+  expect(elements["config-revision"].textContent === "rev 11" && cooldown.value === "15", "older patch response rolled back controls");
+
+  context.renderEvents([
+    { sequence: 1, source: "semantic_enrichment", windowId: 7, semanticSummary: "语义", modelId: "Qwen", processingMs: 9 },
+    { sequence: 2, source: "fast_path", windowId: 8, summary: "快速", objects: ["person"], motion: "moving", sampledFrameCount: 2, targetFrameCount: 3, processingMs: 4, stale: false },
+  ]);
+  expect(elements["event-list"].children[0].children[7].textContent === "Fast", "fast event source incorrect");
+  expect(elements["event-list"].children[0].children[1].textContent === "快速", "fast event fell back");
+  expect(elements["event-list"].children[1].children[7].textContent === "VLM", "semantic event source incorrect");
+
+  context.renderState(state(12));
+  const busyRestart = deferred();
+  fetchHandler = async (url) => url === "/api/control/vlm/restart"
+    ? busyRestart.promise
+    : jsonResponse({ events: [] });
+  const inFlightControl = context.control("vlm/restart");
+  expect(elements["restart-vlm"].disabled, "restart was not disabled while busy");
+  context.renderState(state(12));
+  expect(elements["restart-vlm"].disabled, "state poll reenabled busy restart");
+  busyRestart.resolve(textResponse("sidecar offline"));
+  await inFlightControl;
+  expect(elements["restart-vlm"].disabled === false, "available restart not restored after busy request");
+  fetchHandler = async (url) => url === "/api/control/vlm/restart" ? textResponse("sidecar offline") : jsonResponse({ events: [] });
+  await context.control("vlm/restart");
+  expect(elements["config-error"].textContent.includes("sidecar offline"), "text restart error hidden");
+  expect(elements["restart-vlm"].disabled === false, "available restart not restored");
+  fetchHandler = async (url) => url === "/api/control/vlm/restart"
+    ? textResponse("<html><title>500</title></html>")
+    : jsonResponse({ events: [] });
+  await context.control("vlm/restart");
+  expect(elements["config-error"].textContent === "控制操作失败", "HTML restart error was not sanitized");
+  context.renderState(state(13, { available: false }));
+  await context.control("vlm/restart");
+  expect(elements["restart-vlm"].disabled, "unavailable restart reenabled by finally");
+
+  const firstState = deferred();
+  const secondState = deferred();
+  let stateCalls = 0;
+  fetchHandler = async (url) => {
+    if (url !== "/api/state") return jsonResponse({ events: [] });
+    return (++stateCalls === 1 ? firstState : secondState).promise;
+  };
+  const oldPoll = context.pollState();
+  const newPoll = context.pollState();
+  secondState.resolve(jsonResponse(state(15, { cooldown: 15 })));
+  await newPoll;
+  firstState.resolve(jsonResponse(state(14, { cooldown: 4 })));
+  await oldPoll;
+  expect(elements["config-revision"].textContent === "rev 15", "superseded state poll rolled back revision");
+  console.log("dashboard.js durable interaction contract: PASS");
+})().catch((error) => { console.error(error.stack); process.exitCode = 1; });
+'''
+    result = subprocess.run(
+        ["node", "-e", textwrap.dedent(harness), str(script_path)],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "dashboard.js durable interaction contract: PASS" in result.stdout
 
 
 def test_state_returns_authoritative_config(client) -> None:

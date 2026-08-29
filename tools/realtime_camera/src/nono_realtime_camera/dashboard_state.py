@@ -122,6 +122,7 @@ class DashboardStateStore:
                 "semanticSuccessCount",
                 "semanticErrorCount",
                 "semanticInputFrameCount",
+                "semanticPendingDepth",
             ):
                 self._metrics[metric] = _DEFAULT_METRICS[metric]
             self._semantic_processing_samples.clear()
@@ -153,12 +154,11 @@ class DashboardStateStore:
     def record_semantic_result(
         self, enrichment: RealtimeSemanticEnrichmentV1, *, input_frames: int
     ) -> None:
-        row = self.record_event(enrichment)
+        payload = enrichment.to_dict()
         with self._lock:
+            self._record_event_locked(enrichment, payload)
             self._semantic_processing_samples.append(enrichment.processing_ms)
-            self._latest_semantic = {
-                key: value for key, value in row.items() if key != "sequence"
-            }
+            self._latest_semantic = dict(payload)
             self._metrics.update(
                 semanticProcessingP50Ms=float(
                     statistics.median(self._semantic_processing_samples)
@@ -191,12 +191,17 @@ class DashboardStateStore:
     def record_event(self, event: SerializableEvent) -> dict[str, Any]:
         payload = event.to_dict()
         with self._lock:
-            self._sequence += 1
-            row: dict[str, Any] = {"sequence": self._sequence, **payload}
-            self._events.append(row)
-            if isinstance(event, RealtimeSecondSummaryV1):
-                self._latest_summary = dict(payload)
-            return dict(row)
+            return self._record_event_locked(event, payload)
+
+    def _record_event_locked(
+        self, event: SerializableEvent, payload: dict[str, object]
+    ) -> dict[str, Any]:
+        self._sequence += 1
+        row: dict[str, Any] = {"sequence": self._sequence, **payload}
+        self._events.append(row)
+        if isinstance(event, RealtimeSecondSummaryV1):
+            self._latest_summary = dict(payload)
+        return dict(row)
 
     def events_after(self, sequence: int) -> list[dict[str, Any]]:
         with self._lock:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 from nono_realtime_camera.contracts import (
     RealtimeSecondSummaryV1,
     RealtimeSemanticEnrichmentV1,
@@ -135,12 +137,95 @@ def test_semantic_result_updates_latest_event_and_rolling_metrics() -> None:
 
 def test_semantic_counters_and_reset_are_bounded_and_session_scoped() -> None:
     state = DashboardStateStore()
+    state.update_metrics(semanticPendingDepth=1, captureFps=20.4, fastPendingDepth=1)
+    state.record_semantic_result(make_enrichment(window_id=7, processing_ms=80), input_frames=3)
     state.record_semantic_drop()
     state.record_semantic_stale()
     state.record_semantic_error("timeout")
     state.reset_semantic_session()
-    metrics = state.snapshot(DashboardConfigStore().snapshot())["metrics"]
+    payload = state.snapshot(DashboardConfigStore().snapshot())
+    metrics = payload["metrics"]
 
     assert metrics["semanticDroppedCount"] == 0
     assert metrics["semanticStaleCount"] == 0
     assert metrics["semanticErrorCount"] == 0
+    assert metrics["semanticPendingDepth"] == 0
+    assert payload["latestSemantic"] is None
+    assert metrics["captureFps"] == 20.4
+    assert metrics["fastPendingDepth"] == 1
+
+
+def test_semantic_error_message_is_bounded_to_500_characters() -> None:
+    state = DashboardStateStore()
+    state.record_semantic_error("x" * 501)
+
+    lifecycle = state.snapshot(DashboardConfigStore().snapshot())["semanticLifecycle"]
+
+    assert lifecycle == {"phase": "degraded", "message": "x" * 500}
+
+
+def test_semantic_metrics_use_a_bounded_rolling_percentile_window() -> None:
+    state = DashboardStateStore(metric_window=4)
+    for window_id, processing_ms in enumerate((10, 20, 30, 40, 50), start=1):
+        state.record_semantic_result(
+            make_enrichment(window_id=window_id, processing_ms=processing_ms),
+            input_frames=1,
+        )
+
+    metrics = state.snapshot(DashboardConfigStore().snapshot())["metrics"]
+
+    assert metrics["semanticProcessingP50Ms"] == 35.0
+    assert metrics["semanticProcessingP95Ms"] == 50.0
+    assert metrics["semanticSuccessCount"] == 5
+    assert metrics["semanticInputFrameCount"] == 5
+
+
+class _PausingLock:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.released = threading.Event()
+        self.observed = threading.Event()
+
+    def __enter__(self) -> _PausingLock:
+        self._lock.acquire()
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self._lock.release()
+        if (
+            threading.current_thread().name == "semantic-recorder"
+            and not self.released.is_set()
+        ):
+            self.released.set()
+            assert self.observed.wait(timeout=1)
+
+
+def test_semantic_result_publishes_event_latest_and_metrics_atomically() -> None:
+    state = DashboardStateStore()
+    pausing_lock = _PausingLock()
+    state._lock = pausing_lock
+    observed_payloads: list[dict[str, object]] = []
+
+    def observe_snapshot() -> None:
+        assert pausing_lock.released.wait(timeout=1)
+        observed_payloads.append(state.snapshot(DashboardConfigStore().snapshot()))
+        pausing_lock.observed.set()
+
+    observer = threading.Thread(target=observe_snapshot)
+    recorder = threading.Thread(
+        target=state.record_semantic_result,
+        kwargs={"enrichment": make_enrichment(window_id=7, processing_ms=3200), "input_frames": 3},
+        name="semantic-recorder",
+    )
+    observer.start()
+    recorder.start()
+    recorder.join(timeout=1)
+    observer.join(timeout=1)
+
+    assert not recorder.is_alive()
+    assert not observer.is_alive()
+    payload = observed_payloads[0]
+    assert payload["lastSequence"] == 1
+    assert payload["latestSemantic"]["windowId"] == 7
+    assert payload["metrics"]["semanticSuccessCount"] == 1
+    assert payload["metrics"]["semanticInputFrameCount"] == 3

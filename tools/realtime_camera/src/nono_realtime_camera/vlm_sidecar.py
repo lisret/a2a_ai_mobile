@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 import os
+import select
 import subprocess
 import sys
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol, TextIO
+from typing import Protocol
 from urllib import error, request
 
 from .dashboard_state import DashboardStateStore
@@ -20,11 +21,11 @@ _STDERR_READ_SIZE = 512
 _STDERR_TAIL_LIMIT = 900
 _MESSAGE_LIMIT = 1_000
 _CONTROL_JOIN_SECONDS = 0.05
-_READER_JOIN_SECONDS = 1.0
+_IO_JOIN_SECONDS = 0.2
 
 
 class _Process(Protocol):
-    stderr: TextIO | None
+    stderr: object | None
 
     def poll(self) -> int | None: ...
 
@@ -67,9 +68,12 @@ class _BoundedTail:
 class _OwnedChild:
     process: _Process
     generation: threading.Event
-    stderr: TextIO | None
-    tail: _BoundedTail
-    reader: threading.Thread | None
+    stderr: object | None = None
+    tail: _BoundedTail = field(default_factory=lambda: _BoundedTail(_STDERR_TAIL_LIMIT))
+    reader: threading.Thread | None = None
+    reader_stop: threading.Event = field(default_factory=threading.Event)
+    close_thread: threading.Thread | None = None
+    close_errors: list[str] = field(default_factory=list)
     retiring: bool = False
     cleanup_lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -97,6 +101,7 @@ class VlmSidecarSupervisor:
         self._monitor_thread: threading.Thread | None = None
         self._monitor_stop: threading.Event | None = None
         self._spawn_generation: threading.Event | None = None
+        self._spawn_attempted_generation: threading.Event | None = None
         self._owned_child: _OwnedChild | None = None
         self._available = False
         self._closed = False
@@ -130,7 +135,17 @@ class VlmSidecarSupervisor:
             self._state_store.set_semantic_lifecycle(
                 "loading", message="Checking local VLM"
             )
+        try:
             monitor.start()
+        except Exception as exc:
+            with self._lock:
+                if self._monitor_stop is stop:
+                    self._monitor_stop = None
+                    self._monitor_thread = None
+                    stop.set()
+            self._publish_current_degraded(
+                _bounded(f"Could not start VLM monitor: {_exception_text(exc)}")
+            )
 
     def restart(self) -> None:
         self._stop_current(close_requested=False)
@@ -207,9 +222,11 @@ class VlmSidecarSupervisor:
                 or self._monitor_stop is not stop
                 or self._owned_child is not None
                 or self._spawn_generation is not None
+                or self._spawn_attempted_generation is stop
             ):
                 return None
             self._spawn_generation = stop
+            self._spawn_attempted_generation = stop
 
         try:
             process = self._process_factory(
@@ -217,8 +234,8 @@ class VlmSidecarSupervisor:
                 env={**os.environ, "HF_HOME": str(self._config.cache_dir)},
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
-                text=True,
-                bufsize=1,
+                text=False,
+                bufsize=0,
             )
         except Exception as exc:
             with self._lock:
@@ -232,27 +249,57 @@ class VlmSidecarSupervisor:
             )
             return None
 
-        child = self._make_child(process, stop)
+        child = _OwnedChild(process, stop)
         with self._lock:
-            if (
-                self._spawn_generation is stop
+            if self._spawn_generation is stop and self._owned_child is None:
+                self._spawn_generation = None
+                self._owned_child = child
+                child.retiring = stop.is_set() or self._monitor_stop is not stop
+
+        if self._owned_snapshot() is not child:
+            child.retiring = True
+            result = self._retire_child(child)
+            if result.diagnostic:
+                self._publish_current_degraded(result.diagnostic)
+            return None
+
+        if child.retiring:
+            result = self._retire_child(child)
+            self._handle_cleanup(child, result)
+            if result.diagnostic:
+                self._publish_current_degraded(result.diagnostic)
+            return None
+
+        setup_error: str | None = None
+        try:
+            with child.cleanup_lock:
+                self._setup_reader(child)
+        except Exception as exc:
+            setup_error = _bounded(
+                f"stderr reader setup failed: {_exception_text(exc)}"
+            )
+
+        with self._lock:
+            still_active = (
+                self._owned_child is child
                 and not stop.is_set()
                 and self._monitor_stop is stop
-                and self._owned_child is None
-            ):
-                self._spawn_generation = None
-                self._owned_child = child
-                return child
+                and not child.retiring
+            )
+            if not still_active or setup_error is not None:
+                child.retiring = True
 
-        child.retiring = True
+        if still_active and setup_error is None:
+            return child
+
         result = self._retire_child(child)
-        with self._lock:
-            if self._spawn_generation is stop:
-                self._spawn_generation = None
-            if not result.released and self._owned_child is None:
-                self._owned_child = child
-        if result.diagnostic:
-            self._publish_current_degraded(result.diagnostic)
+        self._handle_cleanup(child, result)
+        diagnostic = _join_diagnostics(setup_error, result.diagnostic)
+        if diagnostic:
+            if self._is_active(stop):
+                self._publish_if_active(stop, False, "degraded", diagnostic)
+            else:
+                self._publish_current_degraded(diagnostic)
         return None
 
     def _command(self) -> list[str]:
@@ -269,26 +316,33 @@ class VlmSidecarSupervisor:
         ]
 
     @staticmethod
-    def _make_child(process: _Process, generation: threading.Event) -> _OwnedChild:
-        tail = _BoundedTail(_STDERR_TAIL_LIMIT)
-        stderr = process.stderr
-        reader: threading.Thread | None = None
-        if stderr is not None:
+    def _setup_reader(child: _OwnedChild) -> None:
+        stderr = child.process.stderr
+        child.stderr = stderr
+        if stderr is None:
+            return
 
-            def drain() -> None:
-                try:
-                    while chunk := stderr.read(_STDERR_READ_SIZE):
-                        tail.append(chunk)
-                except (OSError, ValueError):
-                    pass
+        try:
+            file_descriptor = stderr.fileno()  # type: ignore[attr-defined]
+            os.set_blocking(file_descriptor, False)
+        except (AttributeError, OSError, ValueError):
+            file_descriptor = None
 
-            reader = threading.Thread(
-                target=drain,
-                name="vlm-sidecar-stderr",
-                daemon=True,
-            )
-            reader.start()
-        return _OwnedChild(process, generation, stderr, tail, reader)
+        def drain() -> None:
+            if file_descriptor is not None:
+                _drain_file_descriptor(
+                    file_descriptor, child.reader_stop, child.tail
+                )
+            else:
+                _drain_stream_adapter(stderr, child.reader_stop, child.tail)
+
+        reader = threading.Thread(
+            target=drain,
+            name="vlm-sidecar-stderr",
+            daemon=True,
+        )
+        reader.start()
+        child.reader = reader
 
     def _stop_current(self, *, close_requested: bool) -> None:
         with self._lock:
@@ -305,7 +359,11 @@ class VlmSidecarSupervisor:
 
         result = self._retire_child(child) if child is not None else _CleanupResult(True)
         self._handle_cleanup(child, result)
-        if monitor is not None and monitor is not threading.current_thread():
+        if (
+            monitor is not None
+            and monitor is not threading.current_thread()
+            and monitor.ident is not None
+        ):
             monitor.join(timeout=_CONTROL_JOIN_SECONDS)
 
         if result.diagnostic:
@@ -331,7 +389,7 @@ class VlmSidecarSupervisor:
                     try:
                         child.process.wait(timeout=1)
                     except (subprocess.TimeoutExpired, TimeoutError):
-                        errors.append("wait after terminate timed out")
+                        pass
                     except Exception as exc:
                         errors.append(f"wait after terminate failed: {_exception_text(exc)}")
                     else:
@@ -375,13 +433,42 @@ class VlmSidecarSupervisor:
         errors: list[str] = []
         if drain_first and child.reader is not None:
             child.reader.join(timeout=0.1)
-        if child.stderr is not None:
-            try:
-                child.stderr.close()
-            except Exception as exc:
-                errors.append(f"stderr close failed: {_exception_text(exc)}")
+        child.reader_stop.set()
         if child.reader is not None:
-            child.reader.join(timeout=_READER_JOIN_SECONDS)
+            child.reader.join(timeout=_IO_JOIN_SECONDS)
+
+        if child.stderr is not None and child.close_thread is None:
+
+            def close_stderr() -> None:
+                try:
+                    child.stderr.close()  # type: ignore[attr-defined]
+                except Exception as exc:
+                    child.close_errors.append(
+                        f"stderr close failed: {_exception_text(exc)}"
+                    )
+
+            close_thread = threading.Thread(
+                target=close_stderr,
+                name="vlm-sidecar-stderr-close",
+                daemon=True,
+            )
+            try:
+                close_thread.start()
+            except Exception as exc:
+                child.close_errors.append(
+                    f"stderr close start failed: {_exception_text(exc)}"
+                )
+            else:
+                child.close_thread = close_thread
+
+        if child.close_thread is not None:
+            child.close_thread.join(timeout=_IO_JOIN_SECONDS)
+            if child.close_thread.is_alive():
+                errors.append("stderr close did not stop")
+        errors.extend(child.close_errors)
+
+        if child.reader is not None:
+            child.reader.join(timeout=_IO_JOIN_SECONDS)
             if child.reader.is_alive():
                 errors.append("stderr reader did not stop")
         return not errors, _bounded("; ".join(errors)) if errors else None
@@ -473,3 +560,46 @@ def _exception_text(exc: Exception) -> str:
 
 def _bounded(message: str) -> str:
     return message[:_MESSAGE_LIMIT]
+
+
+def _join_diagnostics(*messages: str | None) -> str | None:
+    combined = "; ".join(message for message in messages if message)
+    return _bounded(combined) if combined else None
+
+
+def _drain_file_descriptor(
+    file_descriptor: int,
+    stop: threading.Event,
+    tail: _BoundedTail,
+) -> None:
+    while not stop.is_set():
+        try:
+            readable, _, _ = select.select(
+                [file_descriptor], [], [], _CONTROL_JOIN_SECONDS
+            )
+            if not readable:
+                continue
+            chunk = os.read(file_descriptor, _STDERR_READ_SIZE)
+        except (OSError, ValueError):
+            return
+        if not chunk:
+            return
+        tail.append(chunk.decode("utf-8", errors="replace"))
+
+
+def _drain_stream_adapter(
+    stream: object,
+    stop: threading.Event,
+    tail: _BoundedTail,
+) -> None:
+    while not stop.is_set():
+        try:
+            chunk = stream.read(_STDERR_READ_SIZE)  # type: ignore[attr-defined]
+        except (OSError, ValueError):
+            return
+        if not chunk:
+            return
+        if isinstance(chunk, bytes):
+            tail.append(chunk.decode("utf-8", errors="replace"))
+        else:
+            tail.append(str(chunk))

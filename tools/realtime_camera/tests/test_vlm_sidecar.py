@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -79,6 +80,31 @@ class FailureProcess(FakeProcess):
         self.kill_calls += 1
         if self._kill_error is not None:
             raise self._kill_error
+
+
+class StderrAccessFailureProcess:
+    def __init__(self) -> None:
+        self.returncode: int | None = None
+        self.terminate_calls = 0
+
+    @property
+    def stderr(self) -> io.StringIO:
+        raise RuntimeError("stderr access failed")
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+    def terminate(self) -> None:
+        self.terminate_calls += 1
+        self.returncode = 0
+
+    def wait(self, timeout: float | None = None) -> int:
+        del timeout
+        assert self.returncode is not None
+        return self.returncode
+
+    def kill(self) -> None:
+        self.returncode = -9
 
 
 class LongUnbrokenStream:
@@ -452,6 +478,101 @@ def test_close_closes_owned_pipe_and_waits_for_reader_exit() -> None:
     assert stream.reader_exited.is_set()
 
 
+def test_close_with_real_pipe_writer_open_is_time_bounded() -> None:
+    read_fd, write_fd = os.pipe()
+    stream = os.fdopen(read_fd, "rb", buffering=0)
+    process = FakeProcess()
+    process.stderr = stream  # type: ignore[assignment]
+    process_factory = FakeProcessFactory([process])
+    supervisor = VlmSidecarSupervisor(
+        config=make_config(),
+        state_store=DashboardStateStore(),
+        health_probe=lambda _url: False,
+        process_factory=process_factory,
+    )
+
+    try:
+        supervisor.start_async()
+        wait_until(lambda: len(process_factory.calls) == 1)
+        wait_until(
+            lambda: any(
+                thread.name == "vlm-sidecar-stderr"
+                for thread in threading.enumerate()
+            )
+        )
+        started = time.monotonic()
+        supervisor.close()
+        elapsed = time.monotonic() - started
+
+        assert elapsed < 0.75
+        assert stream.closed
+        assert not any(
+            thread.name == "vlm-sidecar-stderr" and thread.is_alive()
+            for thread in threading.enumerate()
+        )
+    finally:
+        os.close(write_fd)
+
+
+def test_stderr_access_failure_reaps_raw_process_and_clears_reservation() -> None:
+    failed_process = StderrAccessFailureProcess()
+    replacement = FakeProcess()
+    process_factory = FakeProcessFactory([failed_process, replacement])
+    state_store = DashboardStateStore()
+    supervisor = VlmSidecarSupervisor(
+        config=make_config(),
+        state_store=state_store,
+        health_probe=lambda _url: False,
+        process_factory=process_factory,
+    )
+
+    supervisor.start_async()
+    wait_until(lambda: semantic_lifecycle(state_store)["phase"] == "degraded")
+    time.sleep(0.6)
+
+    assert failed_process.terminate_calls == 1
+    assert len(process_factory.calls) == 1
+    supervisor.restart()
+    wait_until(lambda: len(process_factory.calls) == 2)
+    supervisor.close()
+
+
+def test_reader_start_failure_reaps_raw_process_and_clears_reservation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failed_process = FakeProcess()
+    replacement = FakeProcess()
+    process_factory = FakeProcessFactory([failed_process, replacement])
+    state_store = DashboardStateStore()
+    original_start = threading.Thread.start
+    failed_once = False
+
+    def fail_reader_start(thread: threading.Thread) -> None:
+        nonlocal failed_once
+        if thread.name == "vlm-sidecar-stderr" and not failed_once:
+            failed_once = True
+            raise RuntimeError("reader start failed")
+        original_start(thread)
+
+    monkeypatch.setattr(threading.Thread, "start", fail_reader_start)
+    supervisor = VlmSidecarSupervisor(
+        config=make_config(),
+        state_store=state_store,
+        health_probe=lambda _url: False,
+        process_factory=process_factory,
+    )
+
+    supervisor.start_async()
+    wait_until(lambda: semantic_lifecycle(state_store)["phase"] == "degraded")
+    time.sleep(0.6)
+
+    assert failed_process.terminate_calls == 1
+    assert len(process_factory.calls) == 1
+    supervisor.restart()
+    wait_until(lambda: len(process_factory.calls) == 2)
+    supervisor.close()
+
+
 def test_close_does_not_block_on_factory_and_reaps_stale_child() -> None:
     factory_entered = threading.Event()
     release_factory = threading.Event()
@@ -619,6 +740,98 @@ def test_second_wait_timeout_is_degraded_and_keeps_process_tracked() -> None:
     assert len(str(lifecycle["message"])) <= 1_000
     assert process.kill_calls >= 1
     assert len(process_factory.calls) == 1
+
+
+def test_first_wait_timeout_then_successful_kill_is_cleanly_stopped() -> None:
+    process = FailureProcess(
+        wait_errors=[subprocess.TimeoutExpired("mlx-vlm", 1)]
+    )
+    process_factory = FakeProcessFactory([process])
+    state_store = DashboardStateStore()
+    supervisor = VlmSidecarSupervisor(
+        config=make_config(),
+        state_store=state_store,
+        health_probe=lambda _url: False,
+        process_factory=process_factory,
+    )
+
+    supervisor.start_async()
+    wait_until(lambda: len(process_factory.calls) == 1)
+    supervisor.close()
+
+    assert process.kill_calls == 1
+    assert semantic_lifecycle(state_store) == {"phase": "stopped", "message": None}
+
+
+def test_factory_failure_attempts_only_once_per_generation() -> None:
+    factory_calls = 0
+    state_store = DashboardStateStore()
+
+    def failing_factory(command: list[str], **kwargs: Any) -> FakeProcess:
+        nonlocal factory_calls
+        del command, kwargs
+        factory_calls += 1
+        raise ModuleNotFoundError("mlx_vlm is not installed")
+
+    supervisor = VlmSidecarSupervisor(
+        config=make_config(),
+        state_store=state_store,
+        health_probe=lambda _url: False,
+        process_factory=failing_factory,
+    )
+
+    supervisor.start_async()
+    wait_until(lambda: semantic_lifecycle(state_store)["phase"] == "degraded")
+    time.sleep(1.1)
+    assert factory_calls == 1
+
+    supervisor.restart()
+    wait_until(lambda: factory_calls == 2)
+    time.sleep(0.6)
+    assert factory_calls == 2
+    supervisor.close()
+
+
+def test_fast_child_exit_attempts_only_once_per_generation() -> None:
+    first_process = FakeProcess(returncode=2)
+    second_process = FakeProcess(returncode=2)
+    process_factory = FakeProcessFactory([first_process, second_process])
+    state_store = DashboardStateStore()
+    supervisor = VlmSidecarSupervisor(
+        config=make_config(),
+        state_store=state_store,
+        health_probe=lambda _url: False,
+        process_factory=process_factory,
+    )
+
+    supervisor.start_async()
+    wait_until(lambda: semantic_lifecycle(state_store)["phase"] == "degraded")
+    time.sleep(1.1)
+    assert len(process_factory.calls) == 1
+
+    supervisor.restart()
+    wait_until(lambda: len(process_factory.calls) == 2)
+    time.sleep(0.6)
+    assert len(process_factory.calls) == 2
+    supervisor.close()
+
+
+def test_auto_start_disabled_never_spawns_across_multiple_cycles() -> None:
+    process_factory = FakeProcessFactory()
+    supervisor = VlmSidecarSupervisor(
+        config=make_config(auto_start=False),
+        state_store=DashboardStateStore(),
+        health_probe=lambda _url: False,
+        process_factory=process_factory,
+    )
+
+    supervisor.start_async()
+    time.sleep(1.1)
+    supervisor.restart()
+    time.sleep(0.6)
+    supervisor.close()
+
+    assert process_factory.calls == []
 
 
 def test_restart_terminates_only_owned_child_and_starts_a_new_monitor() -> None:

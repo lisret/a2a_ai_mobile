@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>NoNo 实时视觉调试台</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">LOCAL VISION LAB</p>
+        <h1>NoNo 实时视觉调试台</h1>
+      </div>
+      <div class="topbar-actions">
+        <span id="connection-chip" class="chip neutral">正在连接</span>
+        <span id="lifecycle-chip" class="chip neutral">idle</span>
+        <button id="start-button" class="button primary" type="button">开始</button>
+        <button id="stop-button" class="button" type="button">停止</button>
+        <button id="restart-button" class="button" type="button">重启摄像头</button>
+      </div>
+    </header>
+
+    <main class="dashboard-grid">
+      <section class="panel video-panel" aria-label="实时摄像头">
+        <div class="panel-heading">
+          <div>
+            <p class="section-label">CAMERA 0</p>
+            <h2>实时画面</h2>
+          </div>
+          <span id="frame-age" class="metric-pill">frame age —</span>
+        </div>
+        <div class="video-stage">
+          <img id="camera-stream" src="/video.mjpg" alt="本机摄像头实时分析画面">
+          <div class="video-vignette"></div>
+          <div class="video-caption">
+            <span id="window-id">等待第一个窗口</span>
+            <strong id="current-summary">正在等待摄像头...</strong>
+          </div>
+        </div>
+        <div class="facts-row">
+          <div><span>对象</span><strong id="object-list">—</strong></div>
+          <div><span>进入/离开</span><strong id="presence-change">—</strong></div>
+          <div><span>运动</span><strong id="motion-state">—</strong></div>
+          <div><span>置信度</span><strong id="confidence">—</strong></div>
+        </div>
+      </section>
+
+      <aside class="panel controls-panel" aria-label="实时参数">
+        <div class="panel-heading">
+          <div>
+            <p class="section-label">LIVE PARAMETERS</p>
+            <h2>在线调参</h2>
+          </div>
+          <span id="config-revision" class="metric-pill">rev 1</span>
+        </div>
+        <p id="config-error" class="inline-error" role="alert"></p>
+        <div class="toggle-row">
+          <label><input id="analysis-enabled" type="checkbox"> 分析</label>
+          <label><input id="detector-enabled" type="checkbox"> 对象检测</label>
+          <label class="disabled"><input id="semantic-enabled" type="checkbox" disabled> VLM</label>
+        </div>
+        <div class="control-list">
+          <label class="control" for="sample-fps">
+            <span><b>采样 FPS</b><output id="sample-fps-value">15</output></span>
+            <input id="sample-fps" data-config="sampleFps" type="range" min="2" max="24" step="1">
+          </label>
+          <label class="control" for="preview-fps">
+            <span><b>预览 FPS</b><output id="preview-fps-value">12</output></span>
+            <input id="preview-fps" data-config="previewFps" type="range" min="2" max="20" step="1">
+          </label>
+          <label class="control" for="detection-threshold">
+            <span><b>检测阈值</b><output id="detection-threshold-value">0.45</output></span>
+            <input id="detection-threshold" data-config="detectionScoreThreshold" type="range" min="0.15" max="0.90" step="0.05">
+          </label>
+          <label class="control" for="motion-ratio">
+            <span><b>运动比例阈值</b><output id="motion-ratio-value">0.010</output></span>
+            <input id="motion-ratio" data-config="motionRatioThreshold" type="range" min="0.001" max="0.20" step="0.001">
+          </label>
+          <label class="control" for="scene-ratio">
+            <span><b>场景变化阈值</b><output id="scene-ratio-value">0.35</output></span>
+            <input id="scene-ratio" data-config="sceneRatioThreshold" type="range" min="0.05" max="0.95" step="0.05">
+          </label>
+        </div>
+        <div class="semantic-status">
+          <span>语义通道</span>
+          <strong id="semantic-status">未配置真实 VLM</strong>
+        </div>
+      </aside>
+
+      <section class="metrics-grid" aria-label="实时性能指标">
+        <article class="metric-card"><span>采集 FPS</span><strong id="capture-fps">—</strong></article>
+        <article class="metric-card"><span>实际采样</span><strong id="actual-sample-fps">—</strong></article>
+        <article class="metric-card"><span>预览 FPS</span><strong id="actual-preview-fps">—</strong></article>
+        <article class="metric-card"><span>处理 P95</span><strong id="processing-p95">—</strong></article>
+        <article class="metric-card"><span>输出延迟 P95</span><strong id="emit-p95">—</strong></article>
+        <article class="metric-card"><span>stale / pending</span><strong id="stale-pending">0 / 0</strong></article>
+      </section>
+
+      <section class="panel events-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="section-label">WINDOW TIMELINE</p>
+            <h2>最近分析结果</h2>
+          </div>
+          <span class="metric-pill">最多 60 条</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>窗口</th><th>摘要</th><th>对象</th><th>运动</th><th>帧数</th><th>处理</th><th>状态</th></tr></thead>
+            <tbody id="event-list"><tr><td colspan="7" class="empty">等待分析结果</td></tr></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+    <script src="{{ url_for('static', filename='dashboard.js') }}" defer></script>
+  </body>
+</html>

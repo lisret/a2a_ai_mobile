@@ -15,6 +15,9 @@ import pytest
 
 from nono_realtime_camera.dashboard_config import DashboardConfigStore
 from nono_realtime_camera.dashboard_state import DashboardStateStore
+from nono_realtime_camera.frames import FramePacket
+from nono_realtime_camera.semantic_worker import SemanticWorker
+from nono_realtime_camera.vlm_client import VlmRequestError, VlmResult
 from nono_realtime_camera.vlm_sidecar import VlmSidecarConfig, VlmSidecarSupervisor
 
 MODEL_ID = "mlx-community/Qwen3-VL-2B-Instruct-4bit"
@@ -240,6 +243,26 @@ def sequence_probe(results: Iterable[bool], *, fallback: bool = False) -> Callab
     return probe
 
 
+def semantic_frames() -> tuple[FramePacket, ...]:
+    return (FramePacket(frame_id=1, captured_at_ms=1_000, image=object()),)
+
+
+class BlockingSemanticClient:
+    def __init__(self) -> None:
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def describe(self, _frames: tuple[FramePacket, ...]) -> VlmResult:
+        self.started.set()
+        assert self.release.wait(timeout=2)
+        return VlmResult(model_id="Qwen", summary="ready", processing_ms=25)
+
+
+class FailingSemanticClient:
+    def describe(self, _frames: tuple[FramePacket, ...]) -> VlmResult:
+        raise VlmRequestError("inference failed")
+
+
 @pytest.mark.parametrize("host", ["0.0.0.0", "::1", "192.168.1.10", "LOCALHOST"])
 def test_config_rejects_non_loopback_or_noncanonical_hosts(host: str) -> None:
     with pytest.raises(ValueError, match="127.0.0.1 or localhost"):
@@ -357,6 +380,86 @@ def test_monitor_waits_500ms_between_health_probes() -> None:
     supervisor.close()
 
     assert probe_times[1] - probe_times[0] >= 0.45
+
+
+def test_healthy_poll_preserves_running_worker_lifecycle() -> None:
+    probe_count = 0
+
+    def healthy(_url: str) -> bool:
+        nonlocal probe_count
+        probe_count += 1
+        return True
+
+    state_store = DashboardStateStore()
+    supervisor = VlmSidecarSupervisor(
+        config=make_config(),
+        state_store=state_store,
+        health_probe=healthy,
+        process_factory=FakeProcessFactory(),
+    )
+    client = BlockingSemanticClient()
+    worker = SemanticWorker(
+        client=client,
+        state_store=state_store,
+        available=lambda: supervisor.available,
+    )
+    supervisor.start_async()
+    worker.start()
+    try:
+        wait_until(lambda: supervisor.available)
+        worker.submit(window_id=7, frames=semantic_frames(), submitted_at_ms=1_000)
+        assert client.started.wait(timeout=1)
+        probes_before = probe_count
+
+        wait_until(lambda: probe_count > probes_before)
+
+        assert semantic_lifecycle(state_store) == {
+            "phase": "running",
+            "message": "Analyzing window 7",
+        }
+    finally:
+        client.release.set()
+        worker.close()
+        supervisor.close()
+
+
+def test_healthy_poll_preserves_degraded_worker_lifecycle() -> None:
+    probe_count = 0
+
+    def healthy(_url: str) -> bool:
+        nonlocal probe_count
+        probe_count += 1
+        return True
+
+    state_store = DashboardStateStore()
+    supervisor = VlmSidecarSupervisor(
+        config=make_config(),
+        state_store=state_store,
+        health_probe=healthy,
+        process_factory=FakeProcessFactory(),
+    )
+    worker = SemanticWorker(
+        client=FailingSemanticClient(),
+        state_store=state_store,
+        available=lambda: supervisor.available,
+    )
+    supervisor.start_async()
+    worker.start()
+    try:
+        wait_until(lambda: supervisor.available)
+        worker.submit(window_id=8, frames=semantic_frames(), submitted_at_ms=2_000)
+        wait_until(lambda: semantic_lifecycle(state_store)["phase"] == "degraded")
+        probes_before = probe_count
+
+        wait_until(lambda: probe_count > probes_before)
+
+        assert semantic_lifecycle(state_store) == {
+            "phase": "degraded",
+            "message": "inference failed",
+        }
+    finally:
+        worker.close()
+        supervisor.close()
 
 
 def test_auto_start_disabled_keeps_probing_and_reuses_later_service() -> None:

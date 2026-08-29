@@ -64,6 +64,32 @@ class BlockingVlmClient:
         )
 
 
+class BlockingFailingVlmClient:
+    def __init__(self) -> None:
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def describe(self, _frames: tuple[FramePacket, ...]) -> VlmResult:
+        self.started.set()
+        assert self.release.wait(timeout=1)
+        raise VlmRequestError("old session failed")
+
+
+class BlockingFirstFailureVlmClient:
+    def __init__(self) -> None:
+        self.started = threading.Event()
+        self.release = threading.Event()
+        self.call_count = 0
+
+    def describe(self, _frames: tuple[FramePacket, ...]) -> VlmResult:
+        self.call_count += 1
+        if self.call_count == 1:
+            self.started.set()
+            assert self.release.wait(timeout=1)
+            raise VlmRequestError("superseded task failed")
+        return VlmResult(model_id="Qwen", summary="new task", processing_ms=25)
+
+
 class ScriptedVlmClient:
     def __init__(self, responses: tuple[VlmResult | Exception, ...]) -> None:
         self._responses = deque(responses)
@@ -193,6 +219,57 @@ def test_clear_pending_rejects_inflight_result_from_old_camera_session() -> None
 
     assert payload["latestSemantic"] is None
     assert payload["metrics"]["semanticSuccessCount"] == 0
+    assert payload["semanticLifecycle"] == {"phase": "ready", "message": "Qwen ready"}
+
+
+def test_clear_pending_rejects_inflight_failure_from_old_camera_session() -> None:
+    client = BlockingFailingVlmClient()
+    state = DashboardStateStore()
+    worker = SemanticWorker(client=client, state_store=state)
+    worker.start()
+    worker.submit(window_id=7, frames=make_frames(1), submitted_at_ms=1_000)
+    try:
+        assert client.started.wait(timeout=1)
+
+        worker.clear_pending()
+        client.release.set()
+        wait_until(
+            lambda: (
+                snapshot(state)["metrics"]["semanticStaleCount"]
+                + snapshot(state)["metrics"]["semanticErrorCount"]
+            )
+            == 1
+        )
+        payload = snapshot(state)
+    finally:
+        client.release.set()
+        worker.close()
+
+    assert payload["metrics"]["semanticErrorCount"] == 0
+    assert payload["metrics"]["semanticStaleCount"] == 1
+    assert payload["semanticLifecycle"]["phase"] != "degraded"
+
+
+def test_newer_task_supersedes_inflight_failure_in_same_session() -> None:
+    client = BlockingFirstFailureVlmClient()
+    state = DashboardStateStore()
+    worker = SemanticWorker(client=client, state_store=state)
+    worker.start()
+    worker.submit(window_id=1, frames=make_frames(1), submitted_at_ms=1_000)
+    try:
+        assert client.started.wait(timeout=1)
+        worker.submit(window_id=2, frames=make_frames(1), submitted_at_ms=2_000)
+
+        client.release.set()
+        wait_until(lambda: snapshot(state)["metrics"]["semanticSuccessCount"] == 1)
+        payload = snapshot(state)
+    finally:
+        client.release.set()
+        worker.close()
+
+    assert payload["latestSemantic"]["windowId"] == 2
+    assert payload["metrics"]["semanticErrorCount"] == 0
+    assert payload["metrics"]["semanticStaleCount"] == 1
     assert payload["semanticLifecycle"] == {"phase": "ready", "message": "Qwen ready"}
 
 

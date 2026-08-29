@@ -133,9 +133,10 @@ class VlmSidecarSupervisor:
             self._monitor_stop = stop
             self._monitor_thread = monitor
             self._available = False
-            self._state_store.set_semantic_available(False)
-            self._state_store.set_semantic_lifecycle(
-                "loading", message="Checking local VLM"
+            self._state_store.set_semantic_supervisor_status(
+                available=False,
+                phase="loading",
+                message="Checking local VLM",
             )
         try:
             monitor.start()
@@ -571,8 +572,11 @@ class VlmSidecarSupervisor:
             if stop.is_set() or self._monitor_stop is not stop:
                 return
             self._available = available
-        self._state_store.set_semantic_available(available)
-        self._state_store.set_semantic_lifecycle(phase, message=message)
+        self._state_store.set_semantic_supervisor_status(
+            available=available,
+            phase=phase,
+            message=message,
+        )
 
     def _publish_current_degraded(self, message: str) -> None:
         self._publish(False, "degraded", _bounded(message))
@@ -580,8 +584,11 @@ class VlmSidecarSupervisor:
     def _publish(self, available: bool, phase: str, message: str | None) -> None:
         with self._lock:
             self._available = available
-        self._state_store.set_semantic_available(available)
-        self._state_store.set_semantic_lifecycle(phase, message=message)
+        self._state_store.set_semantic_supervisor_status(
+            available=available,
+            phase=phase,
+            message=message,
+        )
 
 
 def _exception_text(exc: Exception) -> str:

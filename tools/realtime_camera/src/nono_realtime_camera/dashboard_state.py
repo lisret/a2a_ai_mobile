@@ -70,11 +70,15 @@ class DashboardStateStore:
         }
         self._metrics = dict(_DEFAULT_METRICS)
         self._latest_summary: dict[str, object] | None = None
+        self._semantic_configured = False
         self._semantic_available = False
-        self._semantic_lifecycle: dict[str, object | None] = {
+        self._semantic_supervisor_active = False
+        self._semantic_supervisor_lifecycle: dict[str, object | None] = {
             "phase": "disabled",
             "message": None,
         }
+        self._semantic_worker_lifecycle: dict[str, object | None] | None = None
+        self._semantic_lifecycle = dict(self._semantic_supervisor_lifecycle)
         self._latest_semantic: dict[str, object] | None = None
         self._processing_samples: deque[int] = deque(maxlen=metric_window)
         self._end_to_emit_samples: deque[int] = deque(maxlen=metric_window)
@@ -92,13 +96,53 @@ class DashboardStateStore:
         with self._lock:
             self._lifecycle = {"phase": phase, "code": code, "message": message}
 
-    def set_semantic_available(self, available: bool) -> None:
+    def set_semantic_supervisor_status(
+        self,
+        *,
+        available: bool,
+        phase: str,
+        message: str | None = None,
+    ) -> None:
         with self._lock:
+            self._semantic_configured = True
+            self._semantic_supervisor_active = True
+            if self._semantic_available and not available:
+                self._semantic_worker_lifecycle = None
             self._semantic_available = available
+            self._semantic_supervisor_lifecycle = {
+                "phase": phase,
+                "message": message,
+            }
+            self._compose_semantic_lifecycle_locked()
 
-    def set_semantic_lifecycle(self, phase: str, *, message: str | None = None) -> None:
+    def set_semantic_configured(self, configured: bool) -> None:
         with self._lock:
-            self._semantic_lifecycle = {"phase": phase, "message": message}
+            self._semantic_configured = configured
+            if not configured:
+                self._semantic_available = False
+                self._semantic_supervisor_active = False
+                self._semantic_worker_lifecycle = None
+                self._semantic_supervisor_lifecycle = {
+                    "phase": "disabled",
+                    "message": None,
+                }
+            self._compose_semantic_lifecycle_locked()
+
+    def set_semantic_worker_lifecycle(
+        self, phase: str, *, message: str | None = None
+    ) -> None:
+        with self._lock:
+            self._semantic_worker_lifecycle = {"phase": phase, "message": message}
+            self._compose_semantic_lifecycle_locked()
+
+    def _compose_semantic_lifecycle_locked(self) -> None:
+        worker_owns_lifecycle = (
+            not self._semantic_supervisor_active or self._semantic_available
+        )
+        if worker_owns_lifecycle and self._semantic_worker_lifecycle is not None:
+            self._semantic_lifecycle = dict(self._semantic_worker_lifecycle)
+        else:
+            self._semantic_lifecycle = dict(self._semantic_supervisor_lifecycle)
 
     def update_metrics(self, **metrics: int | float) -> None:
         with self._lock:
@@ -127,6 +171,8 @@ class DashboardStateStore:
                 self._metrics[metric] = _DEFAULT_METRICS[metric]
             self._semantic_processing_samples.clear()
             self._latest_semantic = None
+            self._semantic_worker_lifecycle = None
+            self._compose_semantic_lifecycle_locked()
 
     def record_analysis_metrics(
         self,
@@ -158,7 +204,10 @@ class DashboardStateStore:
         with self._lock:
             self._record_event_locked(enrichment, payload)
             self._semantic_processing_samples.append(enrichment.processing_ms)
-            self._latest_semantic = dict(payload)
+            self._latest_semantic = {
+                **payload,
+                "inputFrameCount": input_frames,
+            }
             self._metrics.update(
                 semanticProcessingP50Ms=float(
                     statistics.median(self._semantic_processing_samples)
@@ -183,10 +232,11 @@ class DashboardStateStore:
     def record_semantic_error(self, message: str) -> None:
         with self._lock:
             self._metrics["semanticErrorCount"] += 1
-            self._semantic_lifecycle = {
+            self._semantic_worker_lifecycle = {
                 "phase": "degraded",
                 "message": message[:_SEMANTIC_MESSAGE_LIMIT],
             }
+            self._compose_semantic_lifecycle_locked()
 
     def record_event(self, event: SerializableEvent) -> dict[str, Any]:
         payload = event.to_dict()
@@ -217,6 +267,7 @@ class DashboardStateStore:
                 ),
                 "config": config.to_dict(),
                 "lastSequence": self._sequence,
+                "semanticConfigured": self._semantic_configured,
                 "semanticAvailable": self._semantic_available,
                 "semanticLifecycle": dict(self._semantic_lifecycle),
                 "latestSemantic": (

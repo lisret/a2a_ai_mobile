@@ -187,6 +187,7 @@ def _run_dashboard(args: argparse.Namespace) -> int:
             config_store = DashboardConfigStore(
                 DashboardConfigV1(semantic_enabled=True, semantic_cooldown_seconds=5)
             )
+            state_store.set_semantic_configured(True)
             vlm_supervisor = VlmSidecarSupervisor(
                 config=VlmSidecarConfig(
                     model_id=args.vlm_model,
@@ -211,8 +212,7 @@ def _run_dashboard(args: argparse.Namespace) -> int:
             semantic_worker.start()
             vlm_supervisor.start_async()
         else:
-            state_store.set_semantic_available(False)
-            state_store.set_semantic_lifecycle("disabled")
+            state_store.set_semantic_configured(False)
         runtime = DashboardRuntime(
             camera_factory=lambda: OpenCVCameraSource(camera_index=args.camera_index),
             detector=detector,

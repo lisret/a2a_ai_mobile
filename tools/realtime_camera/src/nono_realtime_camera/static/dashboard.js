@@ -2,6 +2,7 @@ const $ = (id) => document.getElementById(id);
 let lastSequence = 0;
 let lastConfig = null;
 let statePollInFlight = false;
+let semanticConfigured = false;
 let semanticAvailable = false;
 let controlInFlight = false;
 const configEdits = new Map();
@@ -57,7 +58,7 @@ function beginConfigMutation(input) {
 function setControlAvailability() {
   $("semantic-enabled").disabled = !semanticAvailable;
   $("semantic-enabled-label").classList.toggle("disabled", !semanticAvailable);
-  $("restart-vlm").disabled = !semanticAvailable || controlInFlight;
+  $("restart-vlm").disabled = !semanticConfigured || controlInFlight;
 }
 
 function renderSemantic(state) {
@@ -67,6 +68,7 @@ function renderSemantic(state) {
   const lifecycleChip = $("semantic-lifecycle");
   lifecycleChip.textContent = `${label} · ${phase}`;
   lifecycleChip.className = `semantic-lifecycle phase-${phase}`;
+  semanticConfigured = Boolean(state.semanticConfigured);
   semanticAvailable = Boolean(state.semanticAvailable);
   setControlAvailability();
 
@@ -78,13 +80,19 @@ function renderSemantic(state) {
   $("semantic-model").textContent = semantic?.modelId || "—";
   $("semantic-window").textContent = semantic ? `#${semantic.windowId}` : "—";
   $("semantic-input-frame-count").textContent = semantic
-    ? String(metrics.semanticInputFrameCount || 0)
+    ? String(semantic.inputFrameCount || 0)
     : "—";
   $("semantic-processing-ms").textContent = semantic
     ? `${semantic.processingMs} ms`
     : "—";
-  const availability = state.semanticAvailable ? "真实 worker 已连接" : "未配置真实 VLM";
-  $("semantic-status").textContent = lifecycle.message || availability;
+  const availability = !semanticConfigured
+    ? "未配置真实 VLM"
+    : semanticAvailable
+      ? "真实 worker 已连接"
+      : "真实 VLM 暂不可用";
+  $("semantic-status").textContent = lifecycle.message
+    ? `${availability} · ${lifecycle.message}`
+    : availability;
 }
 
 function renderState(state) {

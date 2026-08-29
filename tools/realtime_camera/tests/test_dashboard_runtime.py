@@ -14,7 +14,7 @@ from nono_realtime_camera.dashboard_state import DashboardStateStore
 from nono_realtime_camera.frames import FramePacket
 from nono_realtime_camera.mediapipe_detector import DetectedObject
 from nono_realtime_camera.semantic_worker import SemanticWorker
-from nono_realtime_camera.vlm_client import VlmResult
+from nono_realtime_camera.vlm_client import VlmRequestError, VlmResult
 
 
 class ContinuousFakeCamera:
@@ -215,6 +215,17 @@ class BlockingVlmClient:
         self.started.set()
         assert self.release.wait(timeout=2)
         return VlmResult(model_id="Qwen", summary="ready", processing_ms=25)
+
+
+class BlockingFailingVlmClient:
+    def __init__(self) -> None:
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def describe(self, _frames: tuple[FramePacket, ...]) -> VlmResult:
+        self.started.set()
+        assert self.release.wait(timeout=2)
+        raise VlmRequestError("pre-restart request failed")
 
 
 class RecordingVlmSupervisor:
@@ -1008,6 +1019,50 @@ def test_restart_vlm_clears_semantic_work_without_restarting_camera() -> None:
     assert semantic.close_count == 1
     assert supervisor.restart_count == 1
     assert factory_count == 1
+
+
+def test_restart_vlm_rejects_failure_from_inflight_previous_session() -> None:
+    state_store = DashboardStateStore()
+    client = BlockingFailingVlmClient()
+    semantic = SemanticWorker(client=client, state_store=state_store)
+    semantic.start()
+    supervisor = RecordingVlmSupervisor()
+    runtime = DashboardRuntime(
+        camera_factory=ContinuousFakeCamera,
+        semantic_worker=semantic,
+        vlm_supervisor=supervisor,
+        state_store=state_store,
+    )
+    semantic.submit(
+        window_id=7,
+        frames=(FramePacket(frame_id=1, captured_at_ms=1_000, image=object()),),
+        submitted_at_ms=1_000,
+    )
+    try:
+        assert client.started.wait(timeout=1)
+
+        runtime.restart_vlm()
+        client.release.set()
+        wait_until(
+            lambda: (
+                state_store.snapshot(runtime.config_store.snapshot())["metrics"][
+                    "semanticStaleCount"
+                ]
+                + state_store.snapshot(runtime.config_store.snapshot())["metrics"][
+                    "semanticErrorCount"
+                ]
+            )
+            == 1
+        )
+        payload = state_store.snapshot(runtime.config_store.snapshot())
+    finally:
+        client.release.set()
+        runtime.close()
+
+    assert supervisor.restart_count == 1
+    assert payload["metrics"]["semanticErrorCount"] == 0
+    assert payload["metrics"]["semanticStaleCount"] == 1
+    assert payload["semanticLifecycle"]["phase"] != "degraded"
 
 
 def test_restart_vlm_failure_keeps_semantic_admission_paused() -> None:

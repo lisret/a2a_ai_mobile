@@ -80,6 +80,7 @@ def test_dashboard_contains_semantic_controls_result_and_metrics(client) -> None
         "restart-vlm",
     ):
         assert f'id="{element_id}"' in html
+    assert "本次输入帧数" in html
 
 
 def test_dashboard_script_executes_semantic_interaction_contracts() -> None:
@@ -184,7 +185,7 @@ function jsonResponse(payload, ok = true) {
 function textResponse(text, ok = false) {
   return { ok, headers: { get: () => "text/plain" }, json: async () => { throw new Error("not json"); }, text: async () => text };
 }
-function state(revision, { available = true, phase = "ready", latest = true, cooldown = 10 } = {}) {
+function state(revision, { configured = true, available = true, phase = "ready", latest = true, cooldown = 10 } = {}) {
   return {
     lifecycle: { phase: "running" },
     config: { revision, analysisEnabled: true, detectorEnabled: true, semanticEnabled: true,
@@ -192,10 +193,11 @@ function state(revision, { available = true, phase = "ready", latest = true, coo
       sceneRatioThreshold: .35, semanticCooldownSeconds: cooldown },
     metrics: { captureFps: 1, sampleFps: 1, previewFps: 1, processingP95Ms: 1, endToEmitP95Ms: 1,
       staleCount: 0, fastPendingDepth: 0, frameAgeMs: 1, semanticProcessingP95Ms: 3200,
-      semanticDroppedCount: 2, semanticInputFrameCount: 3 },
+      semanticDroppedCount: 2, semanticInputFrameCount: 9 },
+    semanticConfigured: configured,
     semanticAvailable: available,
     semanticLifecycle: { phase, message: phase === "degraded" ? "offline" : "Qwen ready" },
-    latestSemantic: latest ? { semanticSummary: "一位人士站在室内", modelId: "Qwen", windowId: 7, processingMs: 3200 } : null,
+    latestSemantic: latest ? { semanticSummary: "一位人士站在室内", modelId: "Qwen", windowId: 7, inputFrameCount: 3, processingMs: 3200 } : null,
   };
 }
 function expect(condition, message) { if (!condition) throw new Error(message); }
@@ -206,6 +208,7 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
   context.renderState(state(2));
   expect(elements["semantic-lifecycle"].classList.contains("phase-ready"), "ready lifecycle missing");
   expect(elements["semantic-summary"].textContent === "一位人士站在室内", "semantic result missing");
+  expect(elements["semantic-input-frame-count"].textContent === "3", "latest input frame count missing");
   expect(elements["restart-vlm"].disabled === false, "available restart disabled");
 
   context.renderState(state(3, { phase: "degraded", latest: false }));
@@ -215,7 +218,11 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
   expect(elements["semantic-model"].textContent === "—", "null semantic model leaked");
   context.renderState(state(4, { available: false, latest: false }));
   expect(elements["semantic-enabled"].disabled, "unavailable semantic switch enabled");
-  expect(elements["restart-vlm"].disabled, "unavailable restart enabled");
+  expect(elements["restart-vlm"].disabled === false, "configured unavailable restart disabled");
+  expect(elements["semantic-status"].textContent.includes("暂不可用"), "configured unavailable status hidden");
+  context.renderState(state(4, { configured: false, available: false, latest: false }));
+  expect(elements["restart-vlm"].disabled, "unconfigured restart enabled");
+  expect(elements["semantic-status"].textContent.includes("未配置"), "unconfigured status hidden");
 
   context.renderState(state(5, { cooldown: 10 }));
   const cooldown = elements["semantic-cooldown-seconds"];
@@ -315,8 +322,17 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
   await elements["restart-vlm"].dispatch("click");
   expect(elements["config-error"].textContent === "控制操作失败", "HTML restart error was not sanitized");
   context.renderState(state(18, { available: false }));
-  await elements["restart-vlm"].dispatch("click");
-  expect(elements["restart-vlm"].disabled, "unavailable restart reenabled by finally");
+  const unavailableRestart = deferred();
+  fetchHandler = async (url) => url === "/api/control/vlm/restart"
+    ? unavailableRestart.promise
+    : jsonResponse({ events: [] });
+  const unavailableControl = elements["restart-vlm"].dispatch("click");
+  expect(elements["restart-vlm"].disabled, "unavailable restart stayed enabled while busy");
+  context.renderState(state(18, { available: false }));
+  expect(elements["restart-vlm"].disabled, "state poll reenabled unavailable busy restart");
+  unavailableRestart.resolve(textResponse("sidecar offline"));
+  await unavailableControl;
+  expect(elements["restart-vlm"].disabled === false, "configured unavailable restart not restored");
 
   const delayedState = deferred();
   let stateCalls = 0;

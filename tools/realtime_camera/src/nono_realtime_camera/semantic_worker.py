@@ -123,7 +123,7 @@ class SemanticWorker:
                 self._pending = None
                 self.state_store.update_metrics(semanticPendingDepth=0)
                 assert task is not None
-                self.state_store.set_semantic_lifecycle(
+                self.state_store.set_semantic_worker_lifecycle(
                     "running",
                     message=f"Analyzing window {task.window_id}",
                 )
@@ -132,7 +132,10 @@ class SemanticWorker:
                 result = self.client.describe(task.frames)
             except (VlmRequestError, VlmProtocolError) as exc:
                 with self._condition:
-                    self.state_store.record_semantic_error(str(exc))
+                    if self._is_current_task_locked(task):
+                        self.state_store.record_semantic_error(str(exc))
+                    else:
+                        self.state_store.record_semantic_stale()
                 continue
 
             enrichment = RealtimeSemanticEnrichmentV1(
@@ -142,17 +145,20 @@ class SemanticWorker:
                 processing_ms=result.processing_ms,
             )
             with self._condition:
-                if (
-                    task.session_id != self._session_id
-                    or task.task_id != self._latest_task_id
-                ):
+                if not self._is_current_task_locked(task):
                     self.state_store.record_semantic_stale()
                 else:
                     self.state_store.record_semantic_result(
                         enrichment,
                         input_frames=len(task.frames),
                     )
-                self.state_store.set_semantic_lifecycle(
+                self.state_store.set_semantic_worker_lifecycle(
                     "ready",
                     message=f"{result.model_id} ready",
                 )
+
+    def _is_current_task_locked(self, task: SemanticTask) -> bool:
+        return (
+            task.session_id == self._session_id
+            and task.task_id == self._latest_task_id
+        )

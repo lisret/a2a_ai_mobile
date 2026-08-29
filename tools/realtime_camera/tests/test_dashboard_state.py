@@ -124,7 +124,7 @@ def test_session_metric_reset_drops_pre_restart_latency_history() -> None:
 
 def test_semantic_result_updates_latest_event_and_rolling_metrics() -> None:
     state = DashboardStateStore(metric_window=4)
-    state.set_semantic_lifecycle("ready", message="Qwen ready")
+    state.set_semantic_worker_lifecycle("ready", message="Qwen ready")
     state.record_semantic_result(make_enrichment(window_id=7, processing_ms=3200), input_frames=3)
     payload = state.snapshot(DashboardConfigStore().snapshot())
 
@@ -133,6 +133,39 @@ def test_semantic_result_updates_latest_event_and_rolling_metrics() -> None:
     assert payload["metrics"]["semanticProcessingP95Ms"] == 3200.0
     assert payload["metrics"]["semanticInputFrameCount"] == 3
     assert payload["metrics"]["semanticSuccessCount"] == 1
+
+
+def test_semantic_configuration_is_distinct_from_current_availability() -> None:
+    state = DashboardStateStore()
+
+    disabled = state.snapshot(DashboardConfigStore().snapshot())
+    state.set_semantic_configured(True)
+    state.set_semantic_supervisor_status(
+        available=False,
+        phase="degraded",
+        message="temporarily unavailable",
+    )
+    configured = state.snapshot(DashboardConfigStore().snapshot())
+
+    assert disabled["semanticConfigured"] is False
+    assert disabled["semanticAvailable"] is False
+    assert configured["semanticConfigured"] is True
+    assert configured["semanticAvailable"] is False
+
+
+def test_latest_semantic_records_this_results_input_frame_count() -> None:
+    state = DashboardStateStore()
+    state.record_semantic_result(
+        make_enrichment(window_id=1, processing_ms=80), input_frames=1
+    )
+    state.record_semantic_result(
+        make_enrichment(window_id=2, processing_ms=90), input_frames=3
+    )
+
+    payload = state.snapshot(DashboardConfigStore().snapshot())
+
+    assert payload["latestSemantic"]["inputFrameCount"] == 3
+    assert payload["metrics"]["semanticInputFrameCount"] == 4
 
 
 def test_semantic_counters_and_reset_are_bounded_and_session_scoped() -> None:

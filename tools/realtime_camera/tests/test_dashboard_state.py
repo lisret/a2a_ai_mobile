@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from nono_realtime_camera.contracts import RealtimeSecondSummaryV1
+from nono_realtime_camera.contracts import (
+    RealtimeSecondSummaryV1,
+    RealtimeSemanticEnrichmentV1,
+)
 from nono_realtime_camera.dashboard_config import DashboardConfigStore
 from nono_realtime_camera.dashboard_state import DashboardStateStore
 
@@ -25,6 +28,17 @@ def make_summary(window_id: int) -> RealtimeSecondSummaryV1:
         stale=False,
         source="fast_path",
         processing_ms=80,
+    )
+
+
+def make_enrichment(
+    window_id: int, processing_ms: int
+) -> RealtimeSemanticEnrichmentV1:
+    return RealtimeSemanticEnrichmentV1(
+        window_id=window_id,
+        semantic_summary="一位人士站在室内",
+        model_id="Qwen",
+        processing_ms=processing_ms,
     )
 
 
@@ -104,3 +118,29 @@ def test_session_metric_reset_drops_pre_restart_latency_history() -> None:
     assert metrics["processingP95Ms"] == 100.0
     assert metrics["endToEmitP95Ms"] == 150.0
     assert metrics["emitIntervalP95Ms"] == 0.0
+
+
+def test_semantic_result_updates_latest_event_and_rolling_metrics() -> None:
+    state = DashboardStateStore(metric_window=4)
+    state.set_semantic_lifecycle("ready", message="Qwen ready")
+    state.record_semantic_result(make_enrichment(window_id=7, processing_ms=3200), input_frames=3)
+    payload = state.snapshot(DashboardConfigStore().snapshot())
+
+    assert payload["semanticLifecycle"] == {"phase": "ready", "message": "Qwen ready"}
+    assert payload["latestSemantic"]["windowId"] == 7
+    assert payload["metrics"]["semanticProcessingP95Ms"] == 3200.0
+    assert payload["metrics"]["semanticInputFrameCount"] == 3
+    assert payload["metrics"]["semanticSuccessCount"] == 1
+
+
+def test_semantic_counters_and_reset_are_bounded_and_session_scoped() -> None:
+    state = DashboardStateStore()
+    state.record_semantic_drop()
+    state.record_semantic_stale()
+    state.record_semantic_error("timeout")
+    state.reset_semantic_session()
+    metrics = state.snapshot(DashboardConfigStore().snapshot())["metrics"]
+
+    assert metrics["semanticDroppedCount"] == 0
+    assert metrics["semanticStaleCount"] == 0
+    assert metrics["semanticErrorCount"] == 0

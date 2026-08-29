@@ -6,7 +6,12 @@ import threading
 from collections import deque
 from typing import Any, Protocol
 
-from .contracts import AnalysisCode, AnalysisPhase, RealtimeSecondSummaryV1
+from .contracts import (
+    AnalysisCode,
+    AnalysisPhase,
+    RealtimeSecondSummaryV1,
+    RealtimeSemanticEnrichmentV1,
+)
 from .dashboard_config import DashboardConfigV1
 
 
@@ -29,7 +34,16 @@ _DEFAULT_METRICS: dict[str, int | float] = {
     "fastPendingDepth": 0,
     "semanticPendingDepth": 0,
     "frameAgeMs": 0,
+    "semanticProcessingP50Ms": 0.0,
+    "semanticProcessingP95Ms": 0.0,
+    "semanticDroppedCount": 0,
+    "semanticStaleCount": 0,
+    "semanticSuccessCount": 0,
+    "semanticErrorCount": 0,
+    "semanticInputFrameCount": 0,
 }
+
+_SEMANTIC_MESSAGE_LIMIT = 500
 
 
 def _nearest_rank_percentile(values: deque[int], percentile: float) -> float:
@@ -57,9 +71,15 @@ class DashboardStateStore:
         self._metrics = dict(_DEFAULT_METRICS)
         self._latest_summary: dict[str, object] | None = None
         self._semantic_available = False
+        self._semantic_lifecycle: dict[str, object | None] = {
+            "phase": "disabled",
+            "message": None,
+        }
+        self._latest_semantic: dict[str, object] | None = None
         self._processing_samples: deque[int] = deque(maxlen=metric_window)
         self._end_to_emit_samples: deque[int] = deque(maxlen=metric_window)
         self._emit_interval_samples: deque[int] = deque(maxlen=metric_window)
+        self._semantic_processing_samples: deque[int] = deque(maxlen=metric_window)
         self._last_emitted_at_ms: int | None = None
 
     def set_lifecycle(
@@ -76,6 +96,10 @@ class DashboardStateStore:
         with self._lock:
             self._semantic_available = available
 
+    def set_semantic_lifecycle(self, phase: str, *, message: str | None = None) -> None:
+        with self._lock:
+            self._semantic_lifecycle = {"phase": phase, "message": message}
+
     def update_metrics(self, **metrics: int | float) -> None:
         with self._lock:
             self._metrics.update(metrics)
@@ -87,6 +111,21 @@ class DashboardStateStore:
             self._end_to_emit_samples.clear()
             self._emit_interval_samples.clear()
             self._last_emitted_at_ms = None
+
+    def reset_semantic_session(self) -> None:
+        with self._lock:
+            for metric in (
+                "semanticProcessingP50Ms",
+                "semanticProcessingP95Ms",
+                "semanticDroppedCount",
+                "semanticStaleCount",
+                "semanticSuccessCount",
+                "semanticErrorCount",
+                "semanticInputFrameCount",
+            ):
+                self._metrics[metric] = _DEFAULT_METRICS[metric]
+            self._semantic_processing_samples.clear()
+            self._latest_semantic = None
 
     def record_analysis_metrics(
         self,
@@ -110,6 +149,44 @@ class DashboardStateStore:
                     self._emit_interval_samples, 0.95
                 ),
             )
+
+    def record_semantic_result(
+        self, enrichment: RealtimeSemanticEnrichmentV1, *, input_frames: int
+    ) -> None:
+        row = self.record_event(enrichment)
+        with self._lock:
+            self._semantic_processing_samples.append(enrichment.processing_ms)
+            self._latest_semantic = {
+                key: value for key, value in row.items() if key != "sequence"
+            }
+            self._metrics.update(
+                semanticProcessingP50Ms=float(
+                    statistics.median(self._semantic_processing_samples)
+                ),
+                semanticProcessingP95Ms=_nearest_rank_percentile(
+                    self._semantic_processing_samples, 0.95
+                ),
+                semanticSuccessCount=self._metrics["semanticSuccessCount"] + 1,
+                semanticInputFrameCount=(
+                    self._metrics["semanticInputFrameCount"] + input_frames
+                ),
+            )
+
+    def record_semantic_drop(self) -> None:
+        with self._lock:
+            self._metrics["semanticDroppedCount"] += 1
+
+    def record_semantic_stale(self) -> None:
+        with self._lock:
+            self._metrics["semanticStaleCount"] += 1
+
+    def record_semantic_error(self, message: str) -> None:
+        with self._lock:
+            self._metrics["semanticErrorCount"] += 1
+            self._semantic_lifecycle = {
+                "phase": "degraded",
+                "message": message[:_SEMANTIC_MESSAGE_LIMIT],
+            }
 
     def record_event(self, event: SerializableEvent) -> dict[str, Any]:
         payload = event.to_dict()
@@ -136,4 +213,10 @@ class DashboardStateStore:
                 "config": config.to_dict(),
                 "lastSequence": self._sequence,
                 "semanticAvailable": self._semantic_available,
+                "semanticLifecycle": dict(self._semantic_lifecycle),
+                "latestSemantic": (
+                    dict(self._latest_semantic)
+                    if self._latest_semantic is not None
+                    else None
+                ),
             }

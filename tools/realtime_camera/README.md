@@ -25,6 +25,19 @@ Path: .runtime/models/efficientdet_lite0.tflite
 
 ## 运行
 
+网页调试台（推荐）：
+
+```bash
+MPLCONFIGDIR=.runtime/matplotlib .venv/bin/nono-camera dashboard \
+  --camera-index 0 \
+  --model .runtime/models/efficientdet_lite0.tflite \
+  --open
+```
+
+服务只监听 `127.0.0.1:8765`。页面包含实时视频、检测框、逐秒摘要、采集/采样/预览 FPS、处理延迟、事件历史，以及采样 FPS、预览 FPS、检测阈值、运动阈值和场景变化阈值。滑块参数在下一窗口热生效；停止会释放摄像头，开始可重新打开。原始画面和 MJPEG 不写磁盘。
+
+语义区只有连接真实 VLM worker 后才会显示可用；当前未配置时明确显示“未配置真实 VLM”，不会生成占位结果。
+
 摄像头预检：
 
 ```bash

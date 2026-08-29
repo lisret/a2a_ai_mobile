@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import threading
+import webbrowser
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -60,6 +62,17 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--sample-fps", type=int, default=8)
     run.add_argument("--duration", type=int, default=30, help="seconds; 0 runs until stopped")
     run.add_argument("--model", help="MediaPipe Object Detector .tflite model")
+
+    dashboard = subparsers.add_parser("dashboard", help="open the local camera tuning dashboard")
+    dashboard.add_argument("--camera-index", type=int, default=0)
+    dashboard.add_argument(
+        "--model",
+        default=".runtime/models/efficientdet_lite0.tflite",
+        help="MediaPipe Object Detector .tflite model",
+    )
+    dashboard.add_argument("--host", choices=("127.0.0.1", "localhost"), default="127.0.0.1")
+    dashboard.add_argument("--port", type=_valid_port, default=8765)
+    dashboard.add_argument("--open", action="store_true", dest="open_browser")
     return parser
 
 
@@ -71,6 +84,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             report = preflight_camera(camera, frame_count=args.frames)
             print(json.dumps(report, separators=(",", ":")))
             return 0
+
+        if args.command == "dashboard":
+            return _run_dashboard(args)
 
         detector = MediaPipeObjectDetector(Path(args.model)) if args.model else None
         runtime = RealtimeCameraRuntime(
@@ -93,6 +109,44 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     except KeyboardInterrupt:
         return 130
+
+
+def _valid_port(value: str) -> int:
+    port = int(value)
+    if not 1 <= port <= 65_535:
+        raise argparse.ArgumentTypeError("port must be between 1 and 65535")
+    return port
+
+
+def _run_dashboard(args: argparse.Namespace) -> int:
+    from .dashboard_runtime import DashboardRuntime
+    from .dashboard_web import create_dashboard_app
+
+    model_path = Path(args.model)
+    if not model_path.is_file():
+        raise FileNotFoundError(f"object detector model not found: {model_path}")
+    detector = MediaPipeObjectDetector(model_path)
+    runtime = DashboardRuntime(
+        camera_factory=lambda: OpenCVCameraSource(camera_index=args.camera_index),
+        detector=detector,
+    )
+    app = create_dashboard_app(runtime)
+    url = f"http://{args.host}:{args.port}/"
+    if args.open_browser:
+        threading.Timer(0.6, lambda: webbrowser.open(url)).start()
+    runtime.start()
+    print(f"NoNo camera dashboard: {url}", flush=True)
+    try:
+        app.run(
+            host=args.host,
+            port=args.port,
+            threaded=True,
+            debug=False,
+            use_reloader=False,
+        )
+    finally:
+        runtime.close()
+    return 0
 
 
 if __name__ == "__main__":

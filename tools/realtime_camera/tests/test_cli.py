@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 import numpy as np
+import pytest
 
 from nono_realtime_camera.cli import build_parser, event_to_json, preflight_camera
 from nono_realtime_camera.contracts import RealtimeAnalysisStatusV1
@@ -60,3 +61,18 @@ def test_run_parser_accepts_object_detector_model() -> None:
     )
 
     assert args.model == ".runtime/models/detector.tflite"
+
+
+def test_dashboard_defaults_are_loopback_and_single_process() -> None:
+    args = build_parser().parse_args(["dashboard"])
+
+    assert args.host == "127.0.0.1"
+    assert args.port == 8765
+    assert args.open_browser is False
+    assert args.model == ".runtime/models/efficientdet_lite0.tflite"
+
+
+@pytest.mark.parametrize("port", ["0", "65536"])
+def test_dashboard_rejects_invalid_port(port: str) -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["dashboard", "--port", port])

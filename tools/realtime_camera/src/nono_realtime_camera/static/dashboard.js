@@ -1,7 +1,7 @@
 const $ = (id) => document.getElementById(id);
 let lastSequence = 0;
 let lastConfig = null;
-let statePollSequence = 0;
+let statePollInFlight = false;
 let semanticAvailable = false;
 let controlInFlight = false;
 const configEdits = new Map();
@@ -41,7 +41,17 @@ function endConfigEdit(input) {
 
 function settleConfigEdit(id, generation) {
   const edit = configEdits.get(id);
-  if (edit?.generation === generation) configEdits.delete(id);
+  if (edit?.generation !== generation) return false;
+  configEdits.delete(id);
+  return true;
+}
+
+function beginConfigMutation(input) {
+  startConfigEdit(input);
+  const edit = configEdits.get(input.id);
+  edit.dirty = true;
+  edit.generation += 1;
+  return { edit, generation: edit.generation };
 }
 
 function setControlAvailability() {
@@ -121,14 +131,17 @@ function applyConfig(config) {
 }
 
 async function pollState() {
-  const sequence = ++statePollSequence;
+  if (statePollInFlight) return;
+  statePollInFlight = true;
   try {
     const response = await fetch("/api/state", { cache: "no-store" });
     if (!response.ok) throw new Error("state request failed");
     const state = await response.json();
-    if (sequence === statePollSequence) renderState(state);
+    renderState(state);
   } catch (_) {
-    if (sequence === statePollSequence) setConnection(false);
+    setConnection(false);
+  } finally {
+    statePollInFlight = false;
   }
 }
 
@@ -195,21 +208,19 @@ async function patchConfig(patch, editedControlId = null, editedGeneration = nul
     $("config-error").textContent = "";
     applyConfig(payload.config);
   } catch (error) {
-    $("config-error").textContent = error.message;
+    $("config-error").textContent = errorMessage({ message: error?.message }, "参数更新失败");
   } finally {
+    let settled = false;
     if (controlId && generation !== undefined && generation !== null) {
-      settleConfigEdit(controlId, generation);
+      settled = settleConfigEdit(controlId, generation);
     }
+    if (settled && $("config-error").textContent) applyConfig(lastConfig);
   }
 }
 
 function queuePatch(input, value) {
-  startConfigEdit(input);
-  const edit = configEdits.get(input.id);
+  const { edit, generation } = beginConfigMutation(input);
   window.clearTimeout(edit.timer);
-  edit.dirty = true;
-  edit.generation += 1;
-  const generation = edit.generation;
   edit.timer = window.setTimeout(
     () => patchConfig({ [input.dataset.config]: value }, input.id, generation),
     150,
@@ -233,7 +244,10 @@ for (const input of document.querySelectorAll("input[data-config]")) {
 
 $("analysis-enabled").addEventListener("change", (event) => patchConfig({ analysisEnabled: event.target.checked }));
 $("detector-enabled").addEventListener("change", (event) => patchConfig({ detectorEnabled: event.target.checked }));
-$("semantic-enabled").addEventListener("change", (event) => patchConfig({ semanticEnabled: event.target.checked }));
+$("semantic-enabled").addEventListener("change", (event) => {
+  const { generation } = beginConfigMutation(event.target);
+  return patchConfig({ semanticEnabled: event.target.checked }, event.target.id, generation);
+});
 
 async function responsePayload(response) {
   const contentType = response.headers?.get("content-type") || "";
@@ -242,14 +256,15 @@ async function responsePayload(response) {
       return await response.json();
     } catch (_) { /* fall through to a text error */ }
   }
-  const text = await response.text?.().catch(() => "") || "";
+  const text = typeof response.text === "function" ? await response.text().catch(() => "") : "";
   return text ? { message: text.slice(0, 500) } : {};
 }
 
 function errorMessage(payload, fallback) {
-  const message = payload.message || payload.error || "";
-  return typeof message === "string" && !/<\/?[a-z!][^>]*>/i.test(message)
-    ? message
+  const message = payload && typeof payload === "object" ? payload.message ?? payload.error : "";
+  const safeMessage = typeof message === "string" ? message.trim().slice(0, 500) : "";
+  return safeMessage && !/<\/?[a-z!][^>]*>/i.test(safeMessage)
+    ? safeMessage
     : fallback;
 }
 
@@ -267,7 +282,7 @@ async function control(action) {
     }
     await pollState();
   } catch (error) {
-    $("config-error").textContent = error.message;
+    $("config-error").textContent = errorMessage({ message: error?.message }, "控制操作失败");
   } finally {
     controlInFlight = false;
     $("start-button").disabled = false;

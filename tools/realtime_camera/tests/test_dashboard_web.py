@@ -152,6 +152,7 @@ for (const [id, key, step] of [
   ["semantic-cooldown-seconds", "semanticCooldownSeconds", "1"],
 ]) { elements[id].dataset.config = key; elements[id].step = step; }
 const timers = [];
+const fetchCalls = [];
 let fetchHandler = async (url) => {
   if (url.startsWith("/api/events")) return jsonResponse({ events: [] });
   if (url === "/api/state") return jsonResponse(state(1));
@@ -166,7 +167,7 @@ const document = {
 };
 const context = {
   document,
-  fetch: (...args) => fetchHandler(...args),
+  fetch: (...args) => { fetchCalls.push(args); return fetchHandler(...args); },
   window: {
     clearTimeout: () => {},
     setTimeout: (fn) => { timers.push(fn); return timers.length; },
@@ -263,44 +264,89 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
   expect(elements["event-list"].children[1].children[7].textContent === "VLM", "semantic event source incorrect");
 
   context.renderState(state(12));
+  const firstToggle = deferred();
+  const secondToggle = deferred();
+  let toggleCalls = 0;
+  fetchHandler = async (url) => {
+    if (url !== "/api/config") return jsonResponse({ events: [] });
+    return (++toggleCalls === 1 ? firstToggle : secondToggle).promise;
+  };
+  elements["semantic-enabled"].checked = false;
+  const firstToggleRequest = elements["semantic-enabled"].dispatch("change");
+  expect(fetchCalls.at(-1)[0] === "/api/config" && fetchCalls.at(-1)[1].method === "PATCH", "semantic toggle listener did not PATCH");
+  context.renderState(state(13));
+  expect(elements["semantic-enabled"].checked === false, "state poll reverted pending semantic toggle");
+  elements["semantic-enabled"].checked = true;
+  const secondToggleRequest = elements["semantic-enabled"].dispatch("change");
+  firstToggle.resolve(jsonResponse({ config: state(14, { latest: false }).config }));
+  await firstToggleRequest;
+  context.renderState(state(15));
+  expect(elements["semantic-enabled"].checked, "older toggle completion cleared newer edit");
+  secondToggle.resolve(jsonResponse({ config: state(16).config }));
+  await secondToggleRequest;
+  elements["semantic-enabled"].checked = false;
+  fetchHandler = async (url) => url === "/api/config"
+    ? jsonResponse({ message: "toggle rejected" }, false)
+    : jsonResponse({ events: [] });
+  await elements["semantic-enabled"].dispatch("change");
+  expect(elements["semantic-enabled"].checked, "failed semantic toggle did not roll back trusted config");
+  expect(elements["config-error"].textContent === "toggle rejected", "toggle failure message hidden");
+
+  context.renderState(state(17));
   const busyRestart = deferred();
   fetchHandler = async (url) => url === "/api/control/vlm/restart"
     ? busyRestart.promise
     : jsonResponse({ events: [] });
-  const inFlightControl = context.control("vlm/restart");
+  const inFlightControl = elements["restart-vlm"].dispatch("click");
+  expect(fetchCalls.at(-1)[0] === "/api/control/vlm/restart" && fetchCalls.at(-1)[1].method === "POST", "restart listener did not POST");
   expect(elements["restart-vlm"].disabled, "restart was not disabled while busy");
-  context.renderState(state(12));
+  context.renderState(state(17));
   expect(elements["restart-vlm"].disabled, "state poll reenabled busy restart");
   busyRestart.resolve(textResponse("sidecar offline"));
   await inFlightControl;
   expect(elements["restart-vlm"].disabled === false, "available restart not restored after busy request");
   fetchHandler = async (url) => url === "/api/control/vlm/restart" ? textResponse("sidecar offline") : jsonResponse({ events: [] });
-  await context.control("vlm/restart");
+  await elements["restart-vlm"].dispatch("click");
   expect(elements["config-error"].textContent.includes("sidecar offline"), "text restart error hidden");
   expect(elements["restart-vlm"].disabled === false, "available restart not restored");
   fetchHandler = async (url) => url === "/api/control/vlm/restart"
     ? textResponse("<html><title>500</title></html>")
     : jsonResponse({ events: [] });
-  await context.control("vlm/restart");
+  await elements["restart-vlm"].dispatch("click");
   expect(elements["config-error"].textContent === "控制操作失败", "HTML restart error was not sanitized");
-  context.renderState(state(13, { available: false }));
-  await context.control("vlm/restart");
+  context.renderState(state(18, { available: false }));
+  await elements["restart-vlm"].dispatch("click");
   expect(elements["restart-vlm"].disabled, "unavailable restart reenabled by finally");
 
-  const firstState = deferred();
-  const secondState = deferred();
+  const delayedState = deferred();
   let stateCalls = 0;
   fetchHandler = async (url) => {
     if (url !== "/api/state") return jsonResponse({ events: [] });
-    return (++stateCalls === 1 ? firstState : secondState).promise;
+    stateCalls += 1;
+    return stateCalls === 1 ? delayedState.promise : jsonResponse(state(21, { cooldown: 15 }));
   };
-  const oldPoll = context.pollState();
-  const newPoll = context.pollState();
-  secondState.resolve(jsonResponse(state(15, { cooldown: 15 })));
-  await newPoll;
-  firstState.resolve(jsonResponse(state(14, { cooldown: 4 })));
-  await oldPoll;
-  expect(elements["config-revision"].textContent === "rev 15", "superseded state poll rolled back revision");
+  const delayedPoll = context.pollState();
+  context.pollState(); context.pollState();
+  expect(stateCalls === 1, "overlapping state polls were sent");
+  delayedState.resolve(jsonResponse(state(20, { cooldown: 15 })));
+  await delayedPoll;
+  expect(elements["config-revision"].textContent === "rev 20", "completed state poll did not render");
+  await context.pollState();
+  expect(stateCalls === 2 && elements["config-revision"].textContent === "rev 21", "next state poll was blocked");
+  context.renderState(state(20, { cooldown: 4 }));
+  expect(elements["config-revision"].textContent === "rev 21", "old state revision rolled back controls");
+
+  const longMessage = "x".repeat(1200);
+  context.renderState(state(22));
+  fetchHandler = async (url) => url === "/api/control/vlm/restart"
+    ? jsonResponse({ message: longMessage }, false)
+    : jsonResponse({ events: [] });
+  await elements["restart-vlm"].dispatch("click");
+  expect(elements["config-error"].textContent.length === 500, "restart JSON message was not bounded");
+  expect(context.errorMessage({ message: longMessage }, "fallback").length === 500, "JSON message was not bounded");
+  expect(context.errorMessage({ error: longMessage }, "fallback").length === 500, "JSON error was not bounded");
+  expect(context.errorMessage(null, "fallback") === "fallback", "null payload was not safe");
+  expect(context.errorMessage({ message: 42 }, "fallback") === "fallback", "non-string payload was not safe");
   console.log("dashboard.js durable interaction contract: PASS");
 })().catch((error) => { console.error(error.stack); process.exitCode = 1; });
 '''

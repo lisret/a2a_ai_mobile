@@ -196,7 +196,16 @@ sidecar 加载和首次模型下载都不得阻塞 Flask、摄像头或快速分
 - `semanticLifecycle.phase`: `disabled | loading | ready | running | degraded | stopped`
 - `semanticLifecycle.message`: 最近错误或加载说明
 - `latestSemantic`: 最近被接受的真实语义结果
+- `semanticConfigured`: 本次进程是否以 `--vlm` 组装了可重启的本地 VLM 通道
 - `semanticAvailable`: sidecar 已就绪且协议探测通过
+
+组合约束：
+
+- 未配置时 `semanticConfigured = false`、`semanticAvailable = false`，生命周期为 `disabled`，不能请求 VLM 重启。
+- 已配置但正在加载、降级或停止时 `semanticConfigured = true`、`semanticAvailable = false`；语义开关不可用，但 VLM 重启仍可用。
+- sidecar 可用时，worker 的 `running`、`degraded` 或当前任务成功后的 `ready` 优先于重复的健康轮询；sidecar 转为不可用时，supervisor 状态优先。
+- 只有当前 session/task 的完成结果可以更新 `latestSemantic` 和 worker `ready`；过期完成只增加 `semanticStaleCount`。
+- close/restart 使 monitor generation 失效后，该 monitor 尚未完成的状态提交不得覆盖新 generation 的 `stopped`、`loading`、`ready` 或 `degraded`。
 
 指标新增或落实：
 

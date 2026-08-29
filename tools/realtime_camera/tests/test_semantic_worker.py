@@ -199,6 +199,11 @@ def test_worker_overwrites_pending_task_without_blocking_submitter() -> None:
 def test_clear_pending_rejects_inflight_result_from_old_camera_session() -> None:
     client = BlockingVlmClient()
     state = DashboardStateStore()
+    state.set_semantic_supervisor_status(
+        available=True,
+        phase="ready",
+        message="Old model ready",
+    )
     worker = SemanticWorker(client=client, state_store=state)
     worker.start()
     worker.submit(window_id=7, frames=make_frames(1), submitted_at_ms=1_000)
@@ -210,8 +215,18 @@ def test_clear_pending_rejects_inflight_result_from_old_camera_session() -> None
         assert "7" in active_lifecycle["message"]
 
         worker.clear_pending()
+        state.set_semantic_supervisor_status(
+            available=False,
+            phase="loading",
+            message="Loading new model",
+        )
         client.release.set()
         wait_until(lambda: snapshot(state)["metrics"]["semanticStaleCount"] == 1)
+        state.set_semantic_supervisor_status(
+            available=True,
+            phase="ready",
+            message="New model ready",
+        )
         payload = snapshot(state)
     finally:
         client.release.set()
@@ -219,7 +234,10 @@ def test_clear_pending_rejects_inflight_result_from_old_camera_session() -> None
 
     assert payload["latestSemantic"] is None
     assert payload["metrics"]["semanticSuccessCount"] == 0
-    assert payload["semanticLifecycle"] == {"phase": "ready", "message": "Qwen ready"}
+    assert payload["semanticLifecycle"] == {
+        "phase": "ready",
+        "message": "New model ready",
+    }
 
 
 def test_clear_pending_rejects_inflight_failure_from_old_camera_session() -> None:

@@ -152,10 +152,10 @@ class SemanticWorker:
                         enrichment,
                         input_frames=len(task.frames),
                     )
-                self.state_store.set_semantic_worker_lifecycle(
-                    "ready",
-                    message=f"{result.model_id} ready",
-                )
+                    self.state_store.set_semantic_worker_lifecycle(
+                        "ready",
+                        message=f"{result.model_id} ready",
+                    )
 
     def _is_current_task_locked(self, task: SemanticTask) -> bool:
         return (

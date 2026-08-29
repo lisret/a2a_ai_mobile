@@ -186,6 +186,7 @@ def test_run_dashboard_assembles_vlm_stack_without_waiting_for_readiness(
     sidecar = runtime.kwargs["vlm_supervisor"]
     worker = runtime.kwargs["semantic_worker"]
     config = runtime.kwargs["config_store"].snapshot()
+    semantic_state = runtime.kwargs["state_store"].snapshot(config)
     assert sidecar.config.auto_start is False
     assert sidecar.config.cache_dir.name == "huggingface"
     assert worker.kwargs["client"].kwargs == {
@@ -197,6 +198,8 @@ def test_run_dashboard_assembles_vlm_stack_without_waiting_for_readiness(
     assert worker.kwargs["available"]() is False
     assert config.semantic_enabled is True
     assert config.semantic_cooldown_seconds == 5
+    assert semantic_state["semanticConfigured"] is True
+    assert semantic_state["semanticAvailable"] is False
     assert calls == [
         "worker.start",
         "sidecar.start_async",
@@ -246,9 +249,15 @@ def test_run_dashboard_without_vlm_keeps_semantic_state_disabled(
     assert recorded_runtime.kwargs["semantic_worker"] is None
     assert recorded_runtime.kwargs["vlm_supervisor"] is None
     assert recorded_runtime.kwargs["config_store"].snapshot().semantic_enabled is False
-    assert recorded_runtime.kwargs["state_store"].snapshot(
+    semantic_state = recorded_runtime.kwargs["state_store"].snapshot(
         recorded_runtime.kwargs["config_store"].snapshot()
-    )["semanticLifecycle"] == {"phase": "disabled", "message": None}
+    )
+    assert semantic_state["semanticConfigured"] is False
+    assert semantic_state["semanticAvailable"] is False
+    assert semantic_state["semanticLifecycle"] == {
+        "phase": "disabled",
+        "message": None,
+    }
 
 
 class DashboardFailureHarness:

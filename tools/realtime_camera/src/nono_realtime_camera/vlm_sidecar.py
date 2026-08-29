@@ -100,6 +100,7 @@ class VlmSidecarSupervisor:
         self._health_probe = health_probe or self._probe_configured_model
         self._process_factory = process_factory
         self._lock = threading.Lock()
+        self._status_commit_lock = threading.Lock()
         self._monitor_thread: threading.Thread | None = None
         self._monitor_stop: threading.Event | None = None
         self._spawn_generation: threading.Event | None = None
@@ -133,22 +134,22 @@ class VlmSidecarSupervisor:
             self._monitor_stop = stop
             self._monitor_thread = monitor
             self._available = False
-            self._state_store.set_semantic_supervisor_status(
-                available=False,
-                phase="loading",
-                message="Checking local VLM",
-            )
+        self._publish_if_active(stop, False, "loading", "Checking local VLM")
         try:
             monitor.start()
         except Exception as exc:
+            self._publish_if_active(
+                stop,
+                False,
+                "degraded",
+                _bounded(f"Could not start VLM monitor: {_exception_text(exc)}"),
+            )
             with self._lock:
                 if self._monitor_stop is stop:
                     self._monitor_stop = None
                     self._monitor_thread = None
+                    self._available = False
                     stop.set()
-            self._publish_current_degraded(
-                _bounded(f"Could not start VLM monitor: {_exception_text(exc)}")
-            )
 
     def restart(self) -> None:
         self._stop_current(close_requested=False)
@@ -568,27 +569,29 @@ class VlmSidecarSupervisor:
         phase: str,
         message: str | None,
     ) -> None:
-        with self._lock:
-            if stop.is_set() or self._monitor_stop is not stop:
-                return
-            self._available = available
-        self._state_store.set_semantic_supervisor_status(
-            available=available,
-            phase=phase,
-            message=message,
-        )
+        with self._status_commit_lock:
+            with self._lock:
+                if stop.is_set() or self._monitor_stop is not stop:
+                    return
+                self._available = available
+            self._state_store.set_semantic_supervisor_status(
+                available=available,
+                phase=phase,
+                message=message,
+            )
 
     def _publish_current_degraded(self, message: str) -> None:
         self._publish(False, "degraded", _bounded(message))
 
     def _publish(self, available: bool, phase: str, message: str | None) -> None:
-        with self._lock:
-            self._available = available
-        self._state_store.set_semantic_supervisor_status(
-            available=available,
-            phase=phase,
-            message=message,
-        )
+        with self._status_commit_lock:
+            with self._lock:
+                self._available = available
+            self._state_store.set_semantic_supervisor_status(
+                available=available,
+                phase=phase,
+                message=message,
+            )
 
 
 def _exception_text(exc: Exception) -> str:

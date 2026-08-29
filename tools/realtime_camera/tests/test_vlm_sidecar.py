@@ -232,6 +232,21 @@ def semantic_lifecycle(state_store: DashboardStateStore) -> dict[str, object]:
     return payload["semanticLifecycle"]  # type: ignore[return-value]
 
 
+class PausingSupervisorStateStore(DashboardStateStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.ready_commit_started = threading.Event()
+        self.release_ready_commit = threading.Event()
+        self._pause_next_ready = True
+
+    def set_semantic_supervisor_status(self, **status: object) -> None:
+        if status["phase"] == "ready" and self._pause_next_ready:
+            self._pause_next_ready = False
+            self.ready_commit_started.set()
+            assert self.release_ready_commit.wait(timeout=2)
+        super().set_semantic_supervisor_status(**status)  # type: ignore[arg-type]
+
+
 def sequence_probe(results: Iterable[bool], *, fallback: bool = False) -> Callable[[str], bool]:
     remaining = iter(results)
     lock = threading.Lock()
@@ -380,6 +395,85 @@ def test_monitor_waits_500ms_between_health_probes() -> None:
     supervisor.close()
 
     assert probe_times[1] - probe_times[0] >= 0.45
+
+
+def test_close_rejects_ready_commit_from_invalidated_monitor_generation() -> None:
+    state_store = PausingSupervisorStateStore()
+    supervisor = VlmSidecarSupervisor(
+        config=make_config(),
+        state_store=state_store,
+        health_probe=lambda _url: True,
+        process_factory=FakeProcessFactory(),
+    )
+    supervisor.start_async()
+    try:
+        assert state_store.ready_commit_started.wait(timeout=1)
+        old_monitor = supervisor._monitor_thread
+        assert old_monitor is not None
+        close_finished = threading.Event()
+
+        def close_supervisor() -> None:
+            supervisor.close()
+            close_finished.set()
+
+        close_thread = threading.Thread(target=close_supervisor)
+        close_thread.start()
+        wait_until(lambda: not supervisor.available)
+        assert not close_finished.is_set()
+        state_store.release_ready_commit.set()
+        assert close_finished.wait(timeout=1)
+        close_thread.join(timeout=1)
+        old_monitor.join(timeout=1)
+        assert not close_thread.is_alive()
+        assert not old_monitor.is_alive()
+
+        assert semantic_lifecycle(state_store) == {
+            "phase": "stopped",
+            "message": None,
+        }
+    finally:
+        state_store.release_ready_commit.set()
+        supervisor.close()
+
+
+def test_restart_rejects_ready_commit_from_previous_monitor_generation() -> None:
+    state_store = PausingSupervisorStateStore()
+    supervisor = VlmSidecarSupervisor(
+        config=make_config(auto_start=False),
+        state_store=state_store,
+        health_probe=sequence_probe([True, False]),
+        process_factory=FakeProcessFactory(),
+    )
+    supervisor.start_async()
+    try:
+        assert state_store.ready_commit_started.wait(timeout=1)
+        old_monitor = supervisor._monitor_thread
+        assert old_monitor is not None
+        restart_finished = threading.Event()
+
+        def restart_supervisor() -> None:
+            supervisor.restart()
+            restart_finished.set()
+
+        restart_thread = threading.Thread(target=restart_supervisor)
+        restart_thread.start()
+        wait_until(lambda: not supervisor.available)
+        assert not restart_finished.is_set()
+        state_store.release_ready_commit.set()
+        assert restart_finished.wait(timeout=1)
+        restart_thread.join(timeout=1)
+        old_monitor.join(timeout=1)
+        assert not restart_thread.is_alive()
+        assert not old_monitor.is_alive()
+        wait_until(lambda: semantic_lifecycle(state_store)["phase"] == "degraded")
+
+        assert semantic_lifecycle(state_store) == {
+            "phase": "degraded",
+            "message": "Waiting for a compatible existing local VLM service",
+        }
+    finally:
+        state_store.release_ready_commit.set()
+        supervisor.close()
 
 
 def test_healthy_poll_preserves_running_worker_lifecycle() -> None:

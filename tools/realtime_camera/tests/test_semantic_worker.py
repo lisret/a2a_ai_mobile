@@ -81,6 +81,7 @@ def test_worker_overwrites_pending_task_without_blocking_submitter() -> None:
     worker = SemanticWorker(client=client, state_store=state)
     worker.start()
     first_submit_done = threading.Event()
+    followup_submit_done = threading.Event()
 
     def submit_first() -> None:
         worker.submit(
@@ -90,11 +91,7 @@ def test_worker_overwrites_pending_task_without_blocking_submitter() -> None:
         )
         first_submit_done.set()
 
-    submitter = threading.Thread(target=submit_first, daemon=True)
-    submitter.start()
-    try:
-        assert first_submit_done.wait(timeout=1)
-        assert client.started.wait(timeout=1)
+    def submit_followups() -> None:
         worker.submit(
             window_id=2,
             frames=make_frames(1, first_frame_id=2),
@@ -105,6 +102,18 @@ def test_worker_overwrites_pending_task_without_blocking_submitter() -> None:
             frames=make_frames(3, first_frame_id=3),
             submitted_at_ms=3_000,
         )
+        followup_submit_done.set()
+
+    submitter = threading.Thread(target=submit_first, daemon=True)
+    followup_submitter = threading.Thread(target=submit_followups, daemon=True)
+    submitter.start()
+    followup_started = False
+    try:
+        assert first_submit_done.wait(timeout=1)
+        assert client.started.wait(timeout=1)
+        followup_submitter.start()
+        followup_started = True
+        assert followup_submit_done.wait(timeout=1)
 
         assert worker.pending_depth == 1
         assert snapshot(state)["metrics"]["semanticDroppedCount"] == 1
@@ -114,8 +123,10 @@ def test_worker_overwrites_pending_task_without_blocking_submitter() -> None:
         )
     finally:
         client.release.set()
-        worker.close()
         submitter.join(timeout=1)
+        if followup_started:
+            followup_submitter.join(timeout=1)
+        worker.close()
 
     payload = snapshot(state)
     assert client.first_frame_ids == [1, 3]
@@ -217,3 +228,43 @@ def test_close_discards_pending_and_rejects_inflight_result() -> None:
     with pytest.raises(RuntimeError, match="closed"):
         worker.submit(window_id=3, frames=make_frames(1), submitted_at_ms=3_000)
     worker.close()
+
+
+def test_concurrent_close_callers_wait_for_worker_thread_to_exit() -> None:
+    client = BlockingVlmClient()
+    worker = SemanticWorker(client=client, state_store=DashboardStateStore())
+    worker.start()
+    worker.submit(window_id=1, frames=make_frames(1), submitted_at_ms=1_000)
+    assert client.started.wait(timeout=1)
+    worker_thread = worker._thread
+    assert worker_thread is not None
+
+    first_closed = threading.Event()
+    second_started = threading.Event()
+    second_closed = threading.Event()
+
+    def close_first() -> None:
+        worker.close()
+        first_closed.set()
+
+    def close_second() -> None:
+        second_started.set()
+        worker.close()
+        second_closed.set()
+
+    first_closer = threading.Thread(target=close_first)
+    second_closer = threading.Thread(target=close_second)
+    first_closer.start()
+    wait_until(lambda: not worker.is_running)
+    second_closer.start()
+    assert second_started.wait(timeout=1)
+    second_returned_while_vlm_blocked = second_closed.wait(timeout=0.05)
+
+    client.release.set()
+    assert first_closed.wait(timeout=1)
+    assert second_closed.wait(timeout=1)
+    first_closer.join(timeout=1)
+    second_closer.join(timeout=1)
+
+    assert second_returned_while_vlm_blocked is False
+    assert worker_thread.is_alive() is False

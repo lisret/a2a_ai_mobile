@@ -90,14 +90,13 @@ class SemanticWorker:
 
     def close(self) -> None:
         with self._condition:
-            if self._closed:
-                return
-            self._closed = True
-            self._running = False
-            self._session_id += 1
-            self._pending = None
-            self.state_store.update_metrics(semanticPendingDepth=0)
-            self._condition.notify_all()
+            if not self._closed:
+                self._closed = True
+                self._running = False
+                self._session_id += 1
+                self._pending = None
+                self.state_store.update_metrics(semanticPendingDepth=0)
+                self._condition.notify_all()
             thread = self._thread
         if thread is not None and thread is not threading.current_thread():
             thread.join()

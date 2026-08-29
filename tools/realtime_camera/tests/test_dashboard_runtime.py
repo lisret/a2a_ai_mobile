@@ -6,6 +6,7 @@ from collections.abc import Callable
 
 import numpy as np
 
+from nono_realtime_camera.camera import CameraInterruptedError
 from nono_realtime_camera.dashboard_config import DashboardConfigStore
 from nono_realtime_camera.dashboard_runtime import DashboardRuntime
 from nono_realtime_camera.frames import FramePacket
@@ -48,6 +49,11 @@ class BlockingDetector:
 
     def close(self) -> None:
         self.closed = True
+
+
+class InterruptedCamera(ContinuousFakeCamera):
+    def read(self) -> FramePacket:
+        raise CameraInterruptedError("camera index 0 failed to read a frame")
 
 
 def wait_until(predicate: Callable[[], bool], *, timeout: float = 2.0) -> None:
@@ -141,3 +147,24 @@ def test_runtime_produces_latest_jpeg_preview() -> None:
 
     assert jpeg is not None
     assert jpeg.startswith(b"\xff\xd8")
+
+
+def test_camera_failure_keeps_actionable_error_message() -> None:
+    camera = InterruptedCamera()
+    runtime = DashboardRuntime(camera_factory=lambda: camera, window_ms=100)
+
+    runtime.start()
+    wait_until(
+        lambda: runtime.state_store.snapshot(runtime.config_store.snapshot())["lifecycle"][
+            "phase"
+        ]
+        == "failed"
+    )
+    lifecycle = runtime.state_store.snapshot(runtime.config_store.snapshot())["lifecycle"]
+    runtime.close()
+
+    assert lifecycle == {
+        "phase": "failed",
+        "code": "camera_interrupted",
+        "message": "camera index 0 failed to read a frame",
+    }

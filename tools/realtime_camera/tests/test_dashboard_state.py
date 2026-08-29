@@ -60,3 +60,26 @@ def test_state_json_never_contains_frame_payload() -> None:
 
     for forbidden in ("jpeg", "pixels", "image", "framepayload"):
         assert forbidden not in payload_text
+
+
+def test_analysis_metrics_report_rolling_percentiles_and_emit_interval() -> None:
+    state = DashboardStateStore(metric_window=4)
+    for processing_ms, end_to_emit_ms, emitted_at_ms in (
+        (10, 20, 1_000),
+        (20, 30, 2_020),
+        (30, 40, 3_010),
+        (40, 50, 4_030),
+    ):
+        state.record_analysis_metrics(
+            processing_ms=processing_ms,
+            end_to_emit_ms=end_to_emit_ms,
+            emitted_at_ms=emitted_at_ms,
+        )
+
+    metrics = state.snapshot(DashboardConfigStore().snapshot())["metrics"]
+
+    assert metrics["processingP50Ms"] == 25.0
+    assert metrics["processingP95Ms"] == 40.0
+    assert metrics["endToEmitP50Ms"] == 35.0
+    assert metrics["endToEmitP95Ms"] == 50.0
+    assert metrics["emitIntervalP95Ms"] == 1_020.0

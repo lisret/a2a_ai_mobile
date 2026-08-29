@@ -164,12 +164,16 @@ class DashboardRuntime:
                         (len(timestamps) - 1) * 1_000 / elapsed_ms if elapsed_ms > 0 else 0.0
                     )
                     self.state_store.update_metrics(captureFps=round(capture_fps, 2))
-        except CameraInterruptedError:
+        except CameraInterruptedError as exc:
             if not self._stop_event.is_set():
-                self.state_store.set_lifecycle("failed", code="camera_interrupted")
-        except Exception:
+                self.state_store.set_lifecycle(
+                    "failed", code="camera_interrupted", message=str(exc)
+                )
+        except Exception as exc:
             if not self._stop_event.is_set():
-                self.state_store.set_lifecycle("failed", code="camera_unavailable")
+                self.state_store.set_lifecycle(
+                    "failed", code="camera_unavailable", message=str(exc)
+                )
         finally:
             camera.close()
 
@@ -242,13 +246,15 @@ class DashboardRuntime:
             presence_change=presence_change,
         )
         self.state_store.record_event(summary)
+        end_to_emit_ms = emitted_at_ms - window.ended_at_ms
+        self.state_store.record_analysis_metrics(
+            processing_ms=processing_ms,
+            end_to_emit_ms=end_to_emit_ms,
+            emitted_at_ms=emitted_at_ms,
+        )
         self.state_store.update_metrics(
             sampleFps=window.sampled_frame_count * 1_000 / self._window_ms,
             sampledFrameCount=window.sampled_frame_count,
-            processingP50Ms=float(processing_ms),
-            processingP95Ms=float(processing_ms),
-            endToEmitP50Ms=float(emitted_at_ms - window.ended_at_ms),
-            endToEmitP95Ms=float(emitted_at_ms - window.ended_at_ms),
             fastPendingDepth=0,
         )
         self.latest_overlay_store.put(

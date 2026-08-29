@@ -122,6 +122,9 @@ class PreviewEncoder:
                 continue
             self.jpeg_store.put(encoded.tobytes())
             encoded_at_ms.append(now_ms)
+            self._state_store.update_metrics(
+                frameAgeMs=max(0, now_ms - packet.captured_at_ms)
+            )
             if len(encoded_at_ms) >= 2:
                 elapsed_ms = encoded_at_ms[-1] - encoded_at_ms[0]
                 preview_fps = (

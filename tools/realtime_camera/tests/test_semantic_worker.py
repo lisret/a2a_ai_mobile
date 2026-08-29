@@ -75,6 +75,41 @@ class ScriptedVlmClient:
         return response
 
 
+def test_worker_is_available_by_default() -> None:
+    worker = SemanticWorker(
+        client=ScriptedVlmClient(()),
+        state_store=DashboardStateStore(),
+    )
+
+    assert worker.available is True
+
+
+def test_worker_availability_reflects_callback_state() -> None:
+    available = False
+    worker = SemanticWorker(
+        client=ScriptedVlmClient(()),
+        state_store=DashboardStateStore(),
+        available=lambda: available,
+    )
+
+    assert worker.available is False
+    available = True
+    assert worker.available is True
+
+
+def test_worker_availability_callback_failure_is_safely_unavailable() -> None:
+    def unavailable() -> bool:
+        raise RuntimeError("sidecar state failed")
+
+    worker = SemanticWorker(
+        client=ScriptedVlmClient(()),
+        state_store=DashboardStateStore(),
+        available=unavailable,
+    )
+
+    assert worker.available is False
+
+
 def test_worker_overwrites_pending_task_without_blocking_submitter() -> None:
     client = BlockingVlmClient()
     state = DashboardStateStore()

@@ -5,12 +5,16 @@ import time
 from collections.abc import Callable
 
 import numpy as np
+import pytest
 
 from nono_realtime_camera.camera import CameraInterruptedError
 from nono_realtime_camera.dashboard_config import DashboardConfigStore, DashboardConfigV1
 from nono_realtime_camera.dashboard_runtime import DashboardRuntime
+from nono_realtime_camera.dashboard_state import DashboardStateStore
 from nono_realtime_camera.frames import FramePacket
 from nono_realtime_camera.mediapipe_detector import DetectedObject
+from nono_realtime_camera.semantic_worker import SemanticWorker
+from nono_realtime_camera.vlm_client import VlmResult
 
 
 class ContinuousFakeCamera:
@@ -51,6 +55,35 @@ class BlockingDetector:
         self.closed = True
 
 
+class ArmableDetector:
+    def __init__(self) -> None:
+        self.started = threading.Event()
+        self.release = threading.Event()
+        self._lock = threading.Lock()
+        self._armed = False
+        self._detect_count = 0
+
+    def arm(self) -> None:
+        with self._lock:
+            self.started.clear()
+            self.release.clear()
+            self._armed = True
+
+    def detect(self, _image: np.ndarray) -> tuple[DetectedObject, ...]:
+        with self._lock:
+            should_block = self._armed
+            self._armed = False
+            self._detect_count += 1
+            category = "person" if self._detect_count % 2 else "bottle"
+        if should_block:
+            self.started.set()
+            assert self.release.wait(timeout=2)
+        return (DetectedObject(category, 0.9, (1, 1, 10, 10)),)
+
+    def close(self) -> None:
+        self.release.set()
+
+
 class InterruptedCamera(ContinuousFakeCamera):
     def read(self) -> FramePacket:
         raise CameraInterruptedError("camera index 0 failed to read a frame")
@@ -61,6 +94,27 @@ class DynamicFakeCamera(ContinuousFakeCamera):
         packet = super().read()
         packet.image.fill((packet.frame_id % 7) * 40)
         return packet
+
+
+class PausableDynamicCamera(DynamicFakeCamera):
+    def __init__(self) -> None:
+        super().__init__()
+        self._pause_reads = threading.Event()
+        self._resume_reads = threading.Event()
+        self._resume_reads.set()
+
+    def pause(self) -> None:
+        self._resume_reads.clear()
+        self._pause_reads.set()
+
+    def read(self) -> FramePacket:
+        if self._pause_reads.is_set():
+            assert self._resume_reads.wait(timeout=2)
+        return super().read()
+
+    def close(self) -> None:
+        self._resume_reads.set()
+        super().close()
 
 
 class RecordingSemanticWorker:
@@ -124,41 +178,49 @@ class RecordingSemanticWorker:
             self._condition.notify_all()
 
 
-class BlockingFakeSemanticWorker(RecordingSemanticWorker):
-    def __init__(self, *, available: bool) -> None:
-        super().__init__(available=available)
+class BlockingCloseSemanticWorker(RecordingSemanticWorker):
+    def __init__(self, *, lifecycle: list[str]) -> None:
+        super().__init__(available=True, lifecycle=lifecycle)
+        self.close_started = threading.Event()
+        self.close_release = threading.Event()
+
+    def close(self) -> None:
+        with self._condition:
+            self.close_count += 1
+            self._condition.notify_all()
+        self.close_started.set()
+        assert self.close_release.wait(timeout=2)
+        if self._lifecycle is not None:
+            self._lifecycle.append("worker.close")
+
+
+class BlockingVlmClient:
+    def __init__(self) -> None:
         self.started = threading.Event()
         self.release = threading.Event()
 
-    def submit(
-        self,
-        *,
-        window_id: int,
-        frames: tuple[FramePacket, ...],
-        submitted_at_ms: int,
-    ) -> int:
-        task_id = super().submit(
-            window_id=window_id,
-            frames=frames,
-            submitted_at_ms=submitted_at_ms,
-        )
+    def describe(self, _frames: tuple[FramePacket, ...]) -> VlmResult:
         self.started.set()
-        self.release.wait(timeout=2)
-        return task_id
-
-    def close(self) -> None:
-        self.release.set()
-        super().close()
+        assert self.release.wait(timeout=2)
+        return VlmResult(model_id="Qwen", summary="ready", processing_ms=25)
 
 
 class RecordingVlmSupervisor:
-    def __init__(self, *, lifecycle: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        lifecycle: list[str] | None = None,
+        restart_error: Exception | None = None,
+    ) -> None:
         self.restart_count = 0
         self.close_count = 0
         self._lifecycle = lifecycle
+        self._restart_error = restart_error
 
     def restart(self) -> None:
         self.restart_count += 1
+        if self._restart_error is not None:
+            raise self._restart_error
 
     def close(self) -> None:
         self.close_count += 1
@@ -349,12 +411,16 @@ def test_fast_state_is_fully_published_before_semantic_submit() -> None:
     assert observations[0][3] > 0
 
 
-def test_blocking_semantic_worker_does_not_delay_fast_events_or_capture() -> None:
+def test_blocking_vlm_inference_does_not_delay_fast_events_or_capture() -> None:
     camera = ContinuousFakeCamera()
-    semantic = BlockingFakeSemanticWorker(available=True)
+    client = BlockingVlmClient()
+    state = DashboardStateStore()
+    semantic = SemanticWorker(client=client, state_store=state)
+    semantic.start()
     runtime = DashboardRuntime(
         camera_factory=lambda: camera,
         semantic_worker=semantic,
+        state_store=state,
         config_store=DashboardConfigStore(
             DashboardConfigV1(
                 semantic_enabled=True,
@@ -365,7 +431,7 @@ def test_blocking_semantic_worker_does_not_delay_fast_events_or_capture() -> Non
     )
     runtime.start()
     try:
-        assert semantic.started.wait(timeout=1)
+        assert client.started.wait(timeout=1)
         reads = camera.read_count
         fast_events = len(
             [
@@ -391,7 +457,36 @@ def test_blocking_semantic_worker_does_not_delay_fast_events_or_capture() -> Non
         )
         assert runtime.latest_jpeg_store.get()[0] > jpeg_generation
     finally:
-        semantic.release.set()
+        client.release.set()
+        runtime.close()
+
+
+def test_runtime_uses_real_worker_availability_contract() -> None:
+    available = False
+    client = BlockingVlmClient()
+    state = DashboardStateStore()
+    semantic = SemanticWorker(
+        client=client,
+        state_store=state,
+        available=lambda: available,
+    )
+    semantic.start()
+    runtime = DashboardRuntime(
+        camera_factory=ContinuousFakeCamera,
+        semantic_worker=semantic,
+        state_store=state,
+        config_store=DashboardConfigStore(DashboardConfigV1(semantic_enabled=True)),
+        window_ms=100,
+    )
+    runtime.start()
+    try:
+        wait_until(lambda: last_fast_window_id(runtime) >= 2)
+        assert client.started.is_set() is False
+
+        available = True
+        assert client.started.wait(timeout=1)
+    finally:
+        client.release.set()
         runtime.close()
 
 
@@ -470,6 +565,70 @@ def test_hot_cooldown_update_preserves_last_submission_time() -> None:
     assert second_submitted_at_ms - first_submitted_at_ms >= 1_000
 
 
+def test_semantic_disable_during_fast_processing_blocks_admission() -> None:
+    detector = BlockingDetector()
+    semantic = RecordingSemanticWorker(available=True)
+    config = DashboardConfigStore(DashboardConfigV1(semantic_enabled=True))
+    runtime = DashboardRuntime(
+        camera_factory=ContinuousFakeCamera,
+        detector=detector,
+        semantic_worker=semantic,
+        config_store=config,
+        window_ms=100,
+    )
+    runtime.start()
+    assert detector.started.wait(timeout=1)
+
+    config.update({"semanticEnabled": False})
+    detector.release.set()
+    wait_until(
+        lambda: semantic.submit_count > 0 or last_fast_window_id(runtime) >= 2
+    )
+    runtime.close()
+
+    assert semantic.submit_count == 0
+
+
+def test_cooldown_increase_during_fast_processing_uses_current_value() -> None:
+    camera = PausableDynamicCamera()
+    detector = ArmableDetector()
+    semantic = RecordingSemanticWorker(available=True)
+    config = DashboardConfigStore(
+        DashboardConfigV1(
+            semantic_enabled=True,
+            semantic_cooldown_seconds=1,
+        )
+    )
+    runtime = DashboardRuntime(
+        camera_factory=lambda: camera,
+        detector=detector,
+        semantic_worker=semantic,
+        config_store=config,
+        window_ms=100,
+    )
+    runtime.start()
+    semantic.wait_for_submissions(1)
+    first_submitted_at_ms = int(semantic.submissions[0]["submitted_at_ms"])
+    detector.arm()
+    assert detector.started.wait(timeout=1)
+    camera.pause()
+    remaining_seconds = max(
+        0.0,
+        (first_submitted_at_ms + 1_050 - time.monotonic_ns() // 1_000_000)
+        / 1_000,
+    )
+    threading.Event().wait(remaining_seconds)
+
+    config.update({"semanticCooldownSeconds": 10})
+    blocked_window_id = last_fast_window_id(runtime) + 1
+    detector.release.set()
+    wait_until(lambda: last_fast_window_id(runtime) >= blocked_window_id)
+    threading.Event().wait(0.05)
+    runtime.close()
+
+    assert semantic.submit_count == 1
+
+
 def test_stop_clears_semantic_work_and_restart_keeps_window_ids_monotonic() -> None:
     semantic = RecordingSemanticWorker(available=True)
     runtime = DashboardRuntime(
@@ -517,14 +676,43 @@ def test_window_finishing_during_stop_cannot_requeue_stale_semantic_work() -> No
     detector.release.set()
     assert stopped.wait(timeout=1)
     stop_thread.join()
-    time.sleep(0.05)
     runtime.close()
 
     assert semantic.submit_count == 0
 
 
+def test_stop_marks_inflight_real_worker_result_stale() -> None:
+    client = BlockingVlmClient()
+    state = DashboardStateStore()
+    semantic = SemanticWorker(client=client, state_store=state)
+    semantic.start()
+    runtime = DashboardRuntime(
+        camera_factory=ContinuousFakeCamera,
+        semantic_worker=semantic,
+        state_store=state,
+        config_store=DashboardConfigStore(DashboardConfigV1(semantic_enabled=True)),
+        window_ms=100,
+    )
+    runtime.start()
+    assert client.started.wait(timeout=1)
+
+    runtime.stop()
+    client.release.set()
+    wait_until(
+        lambda: state.snapshot(runtime.config_store.snapshot())["metrics"][
+            "semanticStaleCount"
+        ]
+        == 1
+    )
+    payload = state.snapshot(runtime.config_store.snapshot())
+    runtime.close()
+
+    assert payload["latestSemantic"] is None
+    assert payload["metrics"]["semanticSuccessCount"] == 0
+
+
 def test_restart_vlm_clears_semantic_work_without_restarting_camera() -> None:
-    camera = ContinuousFakeCamera()
+    camera = DynamicFakeCamera()
     factory_count = 0
 
     def camera_factory() -> ContinuousFakeCamera:
@@ -538,7 +726,12 @@ def test_restart_vlm_clears_semantic_work_without_restarting_camera() -> None:
         camera_factory=camera_factory,
         semantic_worker=semantic,
         vlm_supervisor=supervisor,
-        config_store=DashboardConfigStore(DashboardConfigV1(semantic_enabled=True)),
+        config_store=DashboardConfigStore(
+            DashboardConfigV1(
+                semantic_enabled=True,
+                semantic_cooldown_seconds=1,
+            )
+        ),
         window_ms=100,
     )
     runtime.start()
@@ -549,11 +742,47 @@ def test_restart_vlm_clears_semantic_work_without_restarting_camera() -> None:
     runtime.restart_vlm()
     assert semantic.clear_count == clear_count + 1
     wait_until(lambda: camera.read_count > reads)
+    semantic.wait_for_submissions(2)
     runtime.close()
 
     assert semantic.close_count == 1
     assert supervisor.restart_count == 1
     assert factory_count == 1
+
+
+def test_restart_vlm_failure_keeps_semantic_admission_paused() -> None:
+    semantic = RecordingSemanticWorker(available=True)
+    supervisor = RecordingVlmSupervisor(restart_error=RuntimeError("restart failed"))
+    runtime = DashboardRuntime(
+        camera_factory=DynamicFakeCamera,
+        semantic_worker=semantic,
+        vlm_supervisor=supervisor,
+        config_store=DashboardConfigStore(
+            DashboardConfigV1(
+                semantic_enabled=True,
+                semantic_cooldown_seconds=1,
+            )
+        ),
+        window_ms=100,
+    )
+    runtime.start()
+    semantic.wait_for_submissions(1)
+    submitted_before_restart = semantic.submit_count
+    window_before_restart = last_fast_window_id(runtime)
+
+    with pytest.raises(RuntimeError, match="restart failed"):
+        runtime.restart_vlm()
+    wait_until(
+        lambda: (
+            semantic.submit_count > submitted_before_restart
+            or last_fast_window_id(runtime) >= window_before_restart + 12
+        ),
+        timeout=2.5,
+    )
+    runtime.close()
+
+    assert semantic.submit_count == submitted_before_restart
+    assert supervisor.restart_count == 1
 
 
 def test_close_releases_worker_before_sidecar_and_is_idempotent() -> None:
@@ -574,32 +803,43 @@ def test_close_releases_worker_before_sidecar_and_is_idempotent() -> None:
     assert supervisor.close_count == 1
 
 
-def test_close_uses_worker_shutdown_to_release_blocked_submit() -> None:
-    semantic = BlockingFakeSemanticWorker(available=True)
-    supervisor = RecordingVlmSupervisor()
+def test_concurrent_close_callers_wait_for_worker_then_sidecar_release() -> None:
+    lifecycle: list[str] = []
+    semantic = BlockingCloseSemanticWorker(lifecycle=lifecycle)
+    supervisor = RecordingVlmSupervisor(lifecycle=lifecycle)
     runtime = DashboardRuntime(
         camera_factory=ContinuousFakeCamera,
         semantic_worker=semantic,
         vlm_supervisor=supervisor,
-        config_store=DashboardConfigStore(DashboardConfigV1(semantic_enabled=True)),
-        window_ms=100,
     )
-    runtime.start()
-    assert semantic.started.wait(timeout=1)
-    closed = threading.Event()
+    first_closed = threading.Event()
+    second_started = threading.Event()
+    second_closed = threading.Event()
 
-    def close_runtime() -> None:
+    def close_first() -> None:
         runtime.close()
-        closed.set()
+        first_closed.set()
 
-    close_thread = threading.Thread(target=close_runtime)
-    close_thread.start()
-    try:
-        assert closed.wait(timeout=0.5)
-    finally:
-        semantic.release.set()
-        assert closed.wait(timeout=1)
-        close_thread.join()
+    def close_second() -> None:
+        second_started.set()
+        runtime.close()
+        second_closed.set()
 
+    first_closer = threading.Thread(target=close_first)
+    second_closer = threading.Thread(target=close_second)
+    first_closer.start()
+    assert semantic.close_started.wait(timeout=1)
+    second_closer.start()
+    assert second_started.wait(timeout=1)
+    second_returned_while_worker_blocked = second_closed.wait(timeout=0.05)
+
+    semantic.close_release.set()
+    assert first_closed.wait(timeout=1)
+    assert second_closed.wait(timeout=1)
+    first_closer.join()
+    second_closer.join()
+
+    assert second_returned_while_worker_blocked is False
+    assert lifecycle == ["worker.close", "supervisor.close"]
     assert semantic.close_count == 1
     assert supervisor.close_count == 1

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from collections.abc import Callable
 
 from .contracts import RealtimeSemanticEnrichmentV1
 from .dashboard_state import DashboardStateStore
@@ -15,9 +16,11 @@ class SemanticWorker:
         *,
         client: VlmClient,
         state_store: DashboardStateStore,
+        available: Callable[[], bool] | None = None,
     ) -> None:
         self.client = client
         self.state_store = state_store
+        self._available = available if available is not None else (lambda: True)
         self._condition = threading.Condition()
         self._pending: SemanticTask | None = None
         self._session_id = 0
@@ -31,6 +34,13 @@ class SemanticWorker:
     def is_running(self) -> bool:
         with self._condition:
             return self._running
+
+    @property
+    def available(self) -> bool:
+        try:
+            return bool(self._available())
+        except Exception:
+            return False
 
     @property
     def pending_depth(self) -> int:

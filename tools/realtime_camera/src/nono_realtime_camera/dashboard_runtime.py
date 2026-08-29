@@ -70,15 +70,6 @@ class FastOverlay:
     summary: str
 
 
-@dataclass(frozen=True, slots=True)
-class _SemanticCandidate:
-    session_id: int
-    window: FrameWindow
-    summary: RealtimeSecondSummaryV1
-    submitted_at_ms: int
-    cooldown_ms: int
-
-
 class DashboardRuntime:
     def __init__(
         self,
@@ -115,12 +106,13 @@ class DashboardRuntime:
         )
         self._monotonic_ns = monotonic_ns
         self._window_ms = window_ms
-        self._lifecycle_lock = threading.Lock()
+        self._lifecycle_condition = threading.Condition()
         self._stop_event = threading.Event()
         self._camera: CameraSource | None = None
         self._capture_thread: threading.Thread | None = None
         self._analysis_thread: threading.Thread | None = None
         self._running = False
+        self._closing = False
         self._closed = False
         self._tracker = ObjectStateTracker()
         self._window_id = 0
@@ -131,20 +123,17 @@ class DashboardRuntime:
             cooldown_ms=initial_cooldown_ms,
             static_heartbeat_ms=_STATIC_HEARTBEAT_MS,
         )
-        self._semantic_condition = threading.Condition()
-        self._semantic_pending: _SemanticCandidate | None = None
-        self._semantic_session_id = 0
-        self._semantic_dispatch_thread: threading.Thread | None = None
-        self._semantic_dispatch_closed = False
+        self._semantic_admission_lock = threading.Lock()
+        self._semantic_accepting = False
 
     @property
     def is_running(self) -> bool:
-        with self._lifecycle_lock:
+        with self._lifecycle_condition:
             return self._running
 
     def start(self) -> None:
-        with self._lifecycle_lock:
-            if self._closed:
+        with self._lifecycle_condition:
+            if self._closing or self._closed:
                 raise RuntimeError("dashboard runtime is closed")
             if self._running:
                 return
@@ -164,13 +153,14 @@ class DashboardRuntime:
                 name="camera-analysis",
                 daemon=True,
             )
-            self._start_semantic_dispatcher()
+            with self._semantic_admission_lock:
+                self._semantic_accepting = True
             self._capture_thread.start()
             self._analysis_thread.start()
             self._preview_encoder.start()
 
     def stop(self) -> None:
-        with self._lifecycle_lock:
+        with self._lifecycle_condition:
             if not self._running:
                 return
             self._running = False
@@ -178,7 +168,10 @@ class DashboardRuntime:
             camera = self._camera
             capture_thread = self._capture_thread
             analysis_thread = self._analysis_thread
-        self._clear_semantic_work()
+        with self._semantic_admission_lock:
+            self._semantic_accepting = False
+            if self._semantic_worker is not None:
+                self._semantic_worker.clear_pending()
         self._preview_encoder.stop()
         if camera is not None:
             camera.close()
@@ -192,32 +185,41 @@ class DashboardRuntime:
         self.start()
 
     def restart_vlm(self) -> None:
-        self._clear_semantic_work()
+        with self._semantic_admission_lock:
+            self._semantic_accepting = False
+            if self._semantic_worker is not None:
+                self._semantic_worker.clear_pending()
         if self._vlm_supervisor is not None:
             self._vlm_supervisor.restart()
+        with self._lifecycle_condition:
+            if self._running and not self._closing and not self._closed:
+                with self._semantic_admission_lock:
+                    self._semantic_accepting = True
 
     def close(self) -> None:
-        with self._lifecycle_lock:
+        with self._lifecycle_condition:
             if self._closed:
                 return
-        self.stop()
-        with self._lifecycle_lock:
-            self._closed = True
-        semantic_dispatch_thread = self._stop_semantic_dispatcher()
-        if self._semantic_worker is not None:
-            self._semantic_worker.close()
-        if (
-            semantic_dispatch_thread is not None
-            and semantic_dispatch_thread is not threading.current_thread()
-        ):
-            semantic_dispatch_thread.join()
-        if self._vlm_supervisor is not None:
-            self._vlm_supervisor.close()
-        if self._detector is not None:
-            self._detector.close()
-        self.latest_frame_store.close()
-        self.latest_overlay_store.close()
-        self.latest_jpeg_store.close()
+            if self._closing:
+                self._lifecycle_condition.wait_for(lambda: self._closed)
+                return
+            self._closing = True
+        try:
+            self.stop()
+            if self._semantic_worker is not None:
+                self._semantic_worker.close()
+            if self._vlm_supervisor is not None:
+                self._vlm_supervisor.close()
+            if self._detector is not None:
+                self._detector.close()
+            self.latest_frame_store.close()
+            self.latest_overlay_store.close()
+            self.latest_jpeg_store.close()
+        finally:
+            with self._lifecycle_condition:
+                self._closed = True
+                self._closing = False
+                self._lifecycle_condition.notify_all()
 
     def _capture_loop(self) -> None:
         camera = self._camera
@@ -334,96 +336,37 @@ class DashboardRuntime:
                 summary=summary.summary,
             )
         )
-        self._queue_semantic_candidate(window, summary, config, emitted_at_ms)
+        self._admit_semantic(window, summary, emitted_at_ms)
 
-    def _start_semantic_dispatcher(self) -> None:
-        if self._semantic_worker is None:
-            return
-        with self._semantic_condition:
-            thread = self._semantic_dispatch_thread
-            if thread is not None and thread.is_alive():
-                return
-            thread = threading.Thread(
-                target=self._semantic_dispatch_loop,
-                name="semantic-dispatch",
-                daemon=True,
-            )
-            self._semantic_dispatch_thread = thread
-            thread.start()
-
-    def _queue_semantic_candidate(
+    def _admit_semantic(
         self,
         window: FrameWindow,
         summary: RealtimeSecondSummaryV1,
-        config: DashboardConfigV1,
         submitted_at_ms: int,
     ) -> None:
-        if self._semantic_worker is None or not config.semantic_enabled:
-            return
-        with self._semantic_condition:
-            if self._semantic_dispatch_closed or self._stop_event.is_set():
-                return
-            self._semantic_pending = _SemanticCandidate(
-                session_id=self._semantic_session_id,
-                window=window,
-                summary=summary,
-                submitted_at_ms=submitted_at_ms,
-                cooldown_ms=config.semantic_cooldown_seconds * 1_000,
-            )
-            self._semantic_condition.notify_all()
-
-    def _semantic_dispatch_loop(self) -> None:
         worker = self._semantic_worker
-        assert worker is not None
-        while True:
-            with self._semantic_condition:
-                self._semantic_condition.wait_for(
-                    lambda: (
-                        self._semantic_pending is not None
-                        or self._semantic_dispatch_closed
-                    )
-                )
-                if self._semantic_dispatch_closed:
-                    return
-                candidate = self._semantic_pending
-                self._semantic_pending = None
-            assert candidate is not None
-
-            if not worker.available:
-                continue
-            self._semantic_policy.cooldown_ms = candidate.cooldown_ms
-            if not self._semantic_policy.should_submit(
-                candidate.summary,
-                now_ms=candidate.submitted_at_ms,
-            ):
-                continue
-            frames = select_semantic_frames(candidate.window, candidate.summary)
-            if not frames:
-                continue
-            with self._semantic_condition:
-                if candidate.session_id != self._semantic_session_id:
-                    continue
-            worker.submit(
-                window_id=candidate.window.window_id,
-                frames=frames,
-                submitted_at_ms=candidate.submitted_at_ms,
-            )
-            with self._semantic_condition:
-                if candidate.session_id == self._semantic_session_id:
-                    self._semantic_policy.mark_submitted(candidate.submitted_at_ms)
-
-    def _clear_semantic_work(self) -> None:
-        if self._semantic_worker is None:
+        if worker is None:
             return
-        with self._semantic_condition:
-            self._semantic_session_id += 1
-            self._semantic_pending = None
-            self._semantic_condition.notify_all()
-        self._semantic_worker.clear_pending()
-
-    def _stop_semantic_dispatcher(self) -> threading.Thread | None:
-        with self._semantic_condition:
-            self._semantic_dispatch_closed = True
-            self._semantic_pending = None
-            self._semantic_condition.notify_all()
-            return self._semantic_dispatch_thread
+        with self._semantic_admission_lock:
+            if not self._semantic_accepting:
+                return
+            config = self.config_store.snapshot()
+            if not config.semantic_enabled or not worker.available:
+                return
+            self._semantic_policy.cooldown_ms = (
+                config.semantic_cooldown_seconds * 1_000
+            )
+            if not self._semantic_policy.should_submit(
+                summary,
+                now_ms=submitted_at_ms,
+            ):
+                return
+            frames = select_semantic_frames(window, summary)
+            if not frames:
+                return
+            worker.submit(
+                window_id=window.window_id,
+                frames=frames,
+                submitted_at_ms=submitted_at_ms,
+            )
+            self._semantic_policy.mark_submitted(submitted_at_ms)

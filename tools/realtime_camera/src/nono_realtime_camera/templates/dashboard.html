@@ -58,7 +58,7 @@
         <div class="toggle-row">
           <label><input id="analysis-enabled" type="checkbox"> 分析</label>
           <label><input id="detector-enabled" type="checkbox"> 对象检测</label>
-          <label class="disabled"><input id="semantic-enabled" type="checkbox" disabled> VLM</label>
+          <label id="semantic-enabled-label" class="disabled"><input id="semantic-enabled" type="checkbox" disabled> VLM</label>
         </div>
         <div class="control-list">
           <label class="control" for="sample-fps">
@@ -81,12 +81,41 @@
             <span><b>场景变化阈值</b><output id="scene-ratio-value">0.35</output></span>
             <input id="scene-ratio" data-config="sceneRatioThreshold" type="range" min="0.05" max="0.95" step="0.05">
           </label>
+          <label class="control" for="semantic-cooldown-seconds">
+            <span><b>VLM 冷却时间</b><output id="semantic-cooldown-seconds-value">10</output></span>
+            <input id="semantic-cooldown-seconds" data-config="semanticCooldownSeconds" type="range" min="1" max="60" step="1">
+          </label>
         </div>
         <div class="semantic-status">
           <span>语义通道</span>
           <strong id="semantic-status">未配置真实 VLM</strong>
         </div>
       </aside>
+
+      <section class="panel semantic-panel" aria-label="真实 VLM 分析">
+        <div class="panel-heading">
+          <div>
+            <p class="section-label">REAL VLM</p>
+            <h2>语义分析</h2>
+          </div>
+          <span id="semantic-lifecycle" class="semantic-lifecycle">已禁用 · disabled</span>
+        </div>
+        <div class="semantic-result">
+          <p class="section-label">LATEST DESCRIPTION</p>
+          <strong id="semantic-summary">等待真实 VLM 结果</strong>
+          <div class="semantic-facts">
+            <div><span>模型</span><strong id="semantic-model">—</strong></div>
+            <div><span>来源窗口</span><strong id="semantic-window">—</strong></div>
+            <div><span>输入帧数</span><strong id="semantic-input-frame-count">—</strong></div>
+            <div><span>本次处理</span><strong id="semantic-processing-ms">—</strong></div>
+          </div>
+        </div>
+        <div class="semantic-footer">
+          <span>P95 <strong id="semantic-p95-ms">—</strong></span>
+          <span>drop <strong id="semantic-dropped-count">0</strong></span>
+          <button id="restart-vlm" class="button" type="button">重启 VLM</button>
+        </div>
+      </section>
 
       <section class="metrics-grid" aria-label="实时性能指标">
         <article class="metric-card"><span>采集 FPS</span><strong id="capture-fps">—</strong></article>
@@ -107,8 +136,8 @@
         </div>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>窗口</th><th>摘要</th><th>对象</th><th>运动</th><th>帧数</th><th>处理</th><th>状态</th></tr></thead>
-            <tbody id="event-list"><tr><td colspan="7" class="empty">等待分析结果</td></tr></tbody>
+            <thead><tr><th>窗口</th><th>摘要</th><th>对象 / 模型</th><th>运动</th><th>帧数</th><th>处理</th><th>状态</th><th>来源</th></tr></thead>
+            <tbody id="event-list"><tr><td colspan="8" class="empty">等待分析结果</td></tr></tbody>
           </table>
         </div>
       </section>

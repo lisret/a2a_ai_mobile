@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -52,6 +54,47 @@ def test_dashboard_page_contains_required_controls(client) -> None:
         "restart-button",
     ):
         assert f'id="{element_id}"' in html
+
+
+def test_dashboard_contains_semantic_controls_result_and_metrics(client) -> None:
+    html = client.get("/").get_data(as_text=True)
+
+    for element_id in (
+        "semantic-enabled",
+        "semantic-cooldown-seconds",
+        "semantic-lifecycle",
+        "semantic-summary",
+        "semantic-model",
+        "semantic-window",
+        "semantic-input-frame-count",
+        "semantic-processing-ms",
+        "semantic-p95-ms",
+        "semantic-dropped-count",
+        "restart-vlm",
+    ):
+        assert f'id="{element_id}"' in html
+
+
+def test_dashboard_script_wires_real_semantic_state_controls_and_events() -> None:
+    script = (
+        Path(__file__).parents[1]
+        / "src/nono_realtime_camera/static/dashboard.js"
+    ).read_text()
+
+    for fragment in (
+        '"disabled": "已禁用"',
+        '"loading": "加载中"',
+        '"ready": "就绪"',
+        '"running": "分析中"',
+        '"degraded": "降级"',
+        '"stopped": "已停止"',
+        "function renderSemantic(state)",
+        'semantic?.semanticSummary || "等待真实 VLM 结果"',
+        'patchConfig({ semanticEnabled: event.target.checked })',
+        'control("vlm/restart")',
+        'event.source === "semantic_enrichment" ? "VLM" : "Fast"',
+    ):
+        assert fragment in script
 
 
 def test_state_returns_authoritative_config(client) -> None:

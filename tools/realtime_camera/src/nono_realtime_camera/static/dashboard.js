@@ -3,6 +3,14 @@ let lastSequence = 0;
 let lastConfig = null;
 let configTimer = null;
 const activeInputs = new Set();
+const SEMANTIC_PHASE_LABELS = {
+  "disabled": "已禁用",
+  "loading": "加载中",
+  "ready": "就绪",
+  "running": "分析中",
+  "degraded": "降级",
+  "stopped": "已停止",
+};
 
 const numberText = (value, digits = 1, suffix = "") =>
   Number.isFinite(Number(value)) ? `${Number(value).toFixed(digits)}${suffix}` : "—";
@@ -17,6 +25,33 @@ function syncControl(id, value, digits = 0) {
   const input = $(id);
   if (!activeInputs.has(id)) input.value = value;
   $(`${id}-value`).textContent = Number(value).toFixed(digits);
+}
+
+function renderSemantic(state) {
+  const lifecycle = state.semanticLifecycle || { phase: "disabled", message: null };
+  const phase = lifecycle.phase || "disabled";
+  const label = SEMANTIC_PHASE_LABELS[phase] || phase;
+  const lifecycleChip = $("semantic-lifecycle");
+  lifecycleChip.textContent = `${label} · ${phase}`;
+  lifecycleChip.className = `semantic-lifecycle phase-${phase}`;
+  $("semantic-enabled").disabled = !state.semanticAvailable;
+  $("semantic-enabled-label").classList.toggle("disabled", !state.semanticAvailable);
+
+  const metrics = state.metrics || {};
+  $("semantic-p95-ms").textContent = numberText(metrics.semanticProcessingP95Ms, 0, " ms");
+  $("semantic-dropped-count").textContent = String(metrics.semanticDroppedCount || 0);
+  const semantic = state.latestSemantic;
+  $("semantic-summary").textContent = semantic?.semanticSummary || "等待真实 VLM 结果";
+  $("semantic-model").textContent = semantic?.modelId || "—";
+  $("semantic-window").textContent = semantic ? `#${semantic.windowId}` : "—";
+  $("semantic-input-frame-count").textContent = semantic
+    ? String(metrics.semanticInputFrameCount || 0)
+    : "—";
+  $("semantic-processing-ms").textContent = semantic
+    ? `${semantic.processingMs} ms`
+    : "—";
+  const availability = state.semanticAvailable ? "真实 worker 已连接" : "未配置真实 VLM";
+  $("semantic-status").textContent = lifecycle.message || availability;
 }
 
 function renderState(state) {
@@ -42,8 +77,8 @@ function renderState(state) {
   $("emit-p95").textContent = numberText(metrics.endToEmitP95Ms, 0, " ms");
   $("stale-pending").textContent = `${metrics.staleCount || 0} / ${metrics.fastPendingDepth || 0}`;
   $("frame-age").textContent = `frame age ${numberText(metrics.frameAgeMs, 0, "ms")}`;
-  $("semantic-status").textContent = state.semanticAvailable ? "真实 worker 已连接" : "未配置真实 VLM";
   applyConfig(state.config);
+  renderSemantic(state);
 }
 
 function applyConfig(config) {
@@ -52,11 +87,13 @@ function applyConfig(config) {
   $("config-revision").textContent = `rev ${config.revision}`;
   if (!activeInputs.has("analysis-enabled")) $("analysis-enabled").checked = config.analysisEnabled;
   if (!activeInputs.has("detector-enabled")) $("detector-enabled").checked = config.detectorEnabled;
+  if (!activeInputs.has("semantic-enabled")) $("semantic-enabled").checked = config.semanticEnabled;
   syncControl("sample-fps", config.sampleFps, 0);
   syncControl("preview-fps", config.previewFps, 0);
   syncControl("detection-threshold", config.detectionScoreThreshold, 2);
   syncControl("motion-ratio", config.motionRatioThreshold, 3);
   syncControl("scene-ratio", config.sceneRatioThreshold, 2);
+  syncControl("semantic-cooldown-seconds", config.semanticCooldownSeconds, 0);
 }
 
 async function pollState() {
@@ -75,15 +112,29 @@ function renderEvents(events) {
   for (const event of events) {
     lastSequence = Math.max(lastSequence, event.sequence);
     const row = document.createElement("tr");
-    const values = [
-      `#${event.windowId}`,
-      event.summary,
-      (event.objects || []).join(", ") || "—",
-      event.motion,
-      `${event.sampledFrameCount}/${event.targetFrameCount}`,
-      `${event.processingMs} ms`,
-      event.stale ? "stale" : "fresh",
-    ];
+    const isSemantic = event.source === "semantic_enrichment";
+    const sourceLabel = event.source === "semantic_enrichment" ? "VLM" : "Fast";
+    const values = isSemantic
+      ? [
+          `#${event.windowId}`,
+          event.semanticSummary,
+          event.modelId,
+          "—",
+          "—",
+          `${event.processingMs} ms`,
+          "fresh",
+          sourceLabel,
+        ]
+      : [
+          `#${event.windowId}`,
+          event.summary,
+          (event.objects || []).join(", ") || "—",
+          event.motion,
+          `${event.sampledFrameCount}/${event.targetFrameCount}`,
+          `${event.processingMs} ms`,
+          event.stale ? "stale" : "fresh",
+          sourceLabel,
+        ];
     values.forEach((value, index) => {
       const cell = document.createElement("td");
       cell.textContent = value;
@@ -136,16 +187,22 @@ for (const input of document.querySelectorAll("input[data-config]")) {
 
 $("analysis-enabled").addEventListener("change", (event) => patchConfig({ analysisEnabled: event.target.checked }));
 $("detector-enabled").addEventListener("change", (event) => patchConfig({ detectorEnabled: event.target.checked }));
+$("semantic-enabled").addEventListener("change", (event) => patchConfig({ semanticEnabled: event.target.checked }));
 
 async function control(action) {
-  const buttons = [$("start-button"), $("stop-button"), $("restart-button")];
+  const buttons = [$("start-button"), $("stop-button"), $("restart-button"), $("restart-vlm")];
   buttons.forEach((button) => { button.disabled = true; });
   try {
-    await fetch(`/api/control/${action}`, { method: "POST" });
+    const response = await fetch(`/api/control/${action}`, { method: "POST" });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.message || "控制操作失败");
+    $("config-error").textContent = "";
     if (action === "start" || action === "restart-camera") {
       $("camera-stream").src = `/video.mjpg?t=${Date.now()}`;
     }
     await pollState();
+  } catch (error) {
+    $("config-error").textContent = error.message;
   } finally {
     buttons.forEach((button) => { button.disabled = false; });
   }
@@ -154,6 +211,7 @@ async function control(action) {
 $("start-button").addEventListener("click", () => control("start"));
 $("stop-button").addEventListener("click", () => control("stop"));
 $("restart-button").addEventListener("click", () => control("restart-camera"));
+$("restart-vlm").addEventListener("click", () => control("vlm/restart"));
 
 pollState();
 pollEvents();

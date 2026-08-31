@@ -51,6 +51,16 @@ def test_moving_window_selects_first_middle_and_last() -> None:
     assert [frame.frame_id for frame in selected] == [1, 3, 5]
 
 
+def test_latest_mode_selects_only_last_frame_even_when_moving() -> None:
+    window = make_window(frame_ids=(1, 2, 3, 4, 5))
+    selected = select_semantic_frames(
+        window,
+        make_summary(motion="moving"),
+        input_mode="latest",
+    )
+    assert [frame.frame_id for frame in selected] == [5]
+
+
 def test_dynamic_selection_deduplicates_frame_ids() -> None:
     window = make_window(frame_ids=(1, 2, 1))
     selected = select_semantic_frames(window, make_summary(changed=True))
@@ -63,3 +73,15 @@ def test_trigger_policy_obeys_change_cooldown_and_static_heartbeat() -> None:
     policy.mark_submitted(1_000)
     assert policy.should_submit(make_summary(changed=True), now_ms=4_000) is False
     assert policy.should_submit(make_summary(changed=False), now_ms=11_000) is True
+
+
+def test_latest_trigger_mode_uses_cooldown_for_stationary_windows() -> None:
+    policy = SemanticTriggerPolicy(
+        cooldown_ms=1_000,
+        static_heartbeat_ms=10_000,
+        input_mode="latest",
+    )
+    assert policy.should_submit(make_summary(changed=False), now_ms=1_000) is True
+    policy.mark_submitted(1_000)
+    assert policy.should_submit(make_summary(changed=False), now_ms=1_999) is False
+    assert policy.should_submit(make_summary(changed=False), now_ms=2_000) is True

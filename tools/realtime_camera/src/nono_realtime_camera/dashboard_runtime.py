@@ -16,7 +16,11 @@ from .frames import FramePacket, FrameWindow
 from .latest_value import LatestValueStore
 from .mediapipe_detector import DetectedObject
 from .motion import MotionAnalyzer
-from .semantic_scheduler import SemanticTriggerPolicy, select_semantic_frames
+from .semantic_scheduler import (
+    SemanticInputMode,
+    SemanticTriggerPolicy,
+    select_semantic_frames,
+)
 from .tracking import ObjectStateTracker
 from .windowing import OneSecondRingBuffer
 
@@ -80,6 +84,7 @@ class DashboardRuntime:
         vlm_supervisor: VlmSupervisorPort | None = None,
         config_store: DashboardConfigStore | None = None,
         state_store: DashboardStateStore | None = None,
+        semantic_input_mode: SemanticInputMode = "adaptive",
         monotonic_ns: Callable[[], int] = time.monotonic_ns,
         window_ms: int = 1_000,
     ) -> None:
@@ -123,7 +128,9 @@ class DashboardRuntime:
         self._semantic_policy = SemanticTriggerPolicy(
             cooldown_ms=initial_cooldown_ms,
             static_heartbeat_ms=_STATIC_HEARTBEAT_MS,
+            input_mode=semantic_input_mode,
         )
+        self._semantic_input_mode = semantic_input_mode
         self._semantic_admission_lock = threading.Lock()
         self._semantic_accepting = False
         self._restart_lock = threading.Lock()
@@ -402,7 +409,11 @@ class DashboardRuntime:
                 now_ms=submitted_at_ms,
             ):
                 return
-            frames = select_semantic_frames(window, summary)
+            frames = select_semantic_frames(
+                window,
+                summary,
+                input_mode=self._semantic_input_mode,
+            )
             if not frames:
                 return
             worker.submit(

@@ -627,6 +627,31 @@ def test_stationary_window_submits_only_latest_frame() -> None:
     assert len(semantic.submissions[0]["frames"]) == 1  # type: ignore[arg-type]
 
 
+def test_latest_mode_submits_stationary_windows_each_cooldown() -> None:
+    semantic = RecordingSemanticWorker(available=True)
+    runtime = DashboardRuntime(
+        camera_factory=ContinuousFakeCamera,
+        semantic_worker=semantic,
+        config_store=DashboardConfigStore(
+            DashboardConfigV1(
+                semantic_enabled=True,
+                semantic_cooldown_seconds=1,
+            )
+        ),
+        semantic_input_mode="latest",
+        window_ms=100,
+    )
+
+    runtime.start()
+    semantic.wait_for_submissions(2)
+    runtime.close()
+
+    first, second = semantic.submissions[:2]
+    assert int(second["submitted_at_ms"]) - int(first["submitted_at_ms"]) >= 1_000
+    assert len(first["frames"]) == 1  # type: ignore[arg-type]
+    assert len(second["frames"]) == 1  # type: ignore[arg-type]
+
+
 def test_dynamic_window_submits_first_middle_and_last_frames() -> None:
     semantic = RecordingSemanticWorker(available=True)
     runtime = DashboardRuntime(

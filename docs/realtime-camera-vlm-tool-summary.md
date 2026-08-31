@@ -78,6 +78,7 @@ VLM 运行在独立 MLX-VLM sidecar 进程中，通过本机 OpenAI-compatible H
 当前默认策略：
 
 - 每个满足 1 秒冷却时间的窗口，只提交最后一帧。
+- 调试台可把变化场景输入帧数热调整为 1～4；静止场景仍只提交最后一帧。
 - 图片最长边缩到 448 像素，不放大小图。
 - 最多生成 16 tokens。
 - 使用确定性中文短提示，`temperature = 0`。
@@ -101,6 +102,7 @@ VLM 运行在独立 MLX-VLM sidecar 进程中，通过本机 OpenAI-compatible H
 | --- | --- | --- |
 | VLM | `mlx-community/Qwen3.5-0.8B-MLX-4bit` | 小模型快速语义层 |
 | 输入模式 | `latest` | 每个语义任务只取最新一帧 |
+| 变化输入帧数 | 1 | 页面可在 1～4 间热调整；静止仍为 1 |
 | 图片最长边 | 448px | 范围 64～2048 |
 | 最大输出 | 16 tokens | 优先降低完整响应时间 |
 | VLM 冷却 | 1 秒 | 页面可在 1～60 秒间热调整 |
@@ -223,6 +225,19 @@ VLM 运行在独立 MLX-VLM sidecar 进程中，通过本机 OpenAI-compatible H
 
 ## 8. 安装与运行
 
+一键启动完整流程（推荐）：
+
+```bash
+cd tools/realtime_camera
+./run_vlm_camera.sh
+```
+
+脚本会自动同步锁定依赖、下载并校验缺失的对象检测模型，然后启动摄像头、快速分析、VLM sidecar 和网页调试台。首次运行仍需等待 VLM 权重下载与 Metal 编译；后续会复用 `.runtime/` 缓存。按 `Ctrl-C` 停止完整流程。
+
+可通过 `NONO_CAMERA_INDEX`、`NONO_DASHBOARD_PORT`、`NONO_VLM_PORT` 和 `NONO_OPEN_BROWSER=0` 覆盖常用启动项，也可在脚本末尾追加 dashboard 命令行参数。
+
+手动安装与运行：
+
 进入工具目录：
 
 ```bash
@@ -309,6 +324,7 @@ http://127.0.0.1:8765/
 - 运动比例阈值。
 - 场景变化阈值。
 - VLM 冷却时间。
+- 变化场景输入帧数（1～4，静止始终一帧）。
 
 页面还提供：
 
@@ -337,7 +353,7 @@ http://127.0.0.1:8765/
 
 ## 12. 测试与交付状态
 
-- 自动化测试：210 项通过。
+- 自动化测试：224 项通过。
 - Ruff：通过。
 - 工作分支：`codex/vlm-integration`。
 - 实现基线已推送至远端提交 `8b5c187`。

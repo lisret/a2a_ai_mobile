@@ -81,12 +81,18 @@ def make_frames(count: int) -> tuple[FramePacket, ...]:
     )
 
 
-def make_client(server: _FakeVlmServer, *, timeout_seconds: float = 2) -> OpenAICompatibleVlmClient:
+def make_client(
+    server: _FakeVlmServer,
+    *,
+    timeout_seconds: float = 2,
+    image_max_edge: int = 448,
+) -> OpenAICompatibleVlmClient:
     return OpenAICompatibleVlmClient(
         base_url=server.base_url,
         model_id="mlx-community/Qwen3-VL-2B-Instruct-4bit",
         timeout_seconds=timeout_seconds,
         max_tokens=48,
+        image_max_edge=image_max_edge,
     )
 
 
@@ -114,10 +120,10 @@ def test_client_sends_in_memory_multi_image_request_and_parses_result() -> None:
     assert all("base64," in part["image_url"]["url"] for part in image_parts)
     assert content[-1]["type"] == "text"
     prompt = content[-1]["text"]
-    assert "仅描述画面中可见内容" in prompt
-    assert "简短中文 1–2 句" in prompt
-    assert "主要物体、人与对象关系、简单动作或显著变化" in prompt
-    assert "不要猜测身份、意图或画外信息" in prompt
+    assert "仅根据当前图片" in prompt
+    assert "一句简短中文" in prompt
+    assert "主要对象和正在发生的动作" in prompt
+    assert "不解释、不推测、不输出前缀" in prompt
 
     decoded_means = []
     for part in image_parts:
@@ -127,6 +133,66 @@ def test_client_sends_in_memory_multi_image_request_and_parses_result() -> None:
         assert decoded_image is not None
         decoded_means.append(float(decoded_image.mean()))
     assert decoded_means == pytest.approx([20, 120, 220], abs=2)
+
+
+@pytest.mark.parametrize(
+    ("height", "width", "expected_height", "expected_width"),
+    [
+        (900, 1_600, 252, 448),
+        (1_600, 900, 448, 252),
+        (700, 700, 448, 448),
+        (32, 48, 32, 48),
+    ],
+)
+def test_client_limits_image_longest_edge_without_upscaling(
+    height: int,
+    width: int,
+    expected_height: int,
+    expected_width: int,
+) -> None:
+    frame = FramePacket(
+        frame_id=1,
+        captured_at_ms=0,
+        image=np.full((height, width, 3), 80, dtype=np.uint8),
+    )
+    with fake_vlm_server(
+        response={"choices": [{"message": {"content": "桌面。"}}]}
+    ) as server:
+        make_client(server).describe((frame,))
+        assert server.last_json is not None
+        image_url = server.last_json["messages"][0]["content"][0]["image_url"]["url"]
+
+    encoded_image = image_url.split(",", maxsplit=1)[1]
+    jpeg = np.frombuffer(base64.b64decode(encoded_image), dtype=np.uint8)
+    decoded_image = cv2.imdecode(jpeg, cv2.IMREAD_COLOR)
+    assert decoded_image is not None
+    assert decoded_image.shape[:2] == (expected_height, expected_width)
+
+
+def test_client_starts_processing_timer_before_image_preprocessing() -> None:
+    with fake_vlm_server(
+        response={"choices": [{"message": {"content": "桌面。"}}]}
+    ) as server:
+        client = make_client(server)
+        timeline: list[str] = []
+        original_image_part = client._image_part
+
+        def tracked_image_part(frame: FramePacket) -> dict[str, object]:
+            timeline.append("preprocess")
+            return original_image_part(frame)
+
+        clock_values = iter((1_000_000, 4_000_000))
+
+        def tracked_clock() -> int:
+            timeline.append("clock")
+            return next(clock_values)
+
+        client._image_part = tracked_image_part  # type: ignore[method-assign]
+        client._monotonic_ns = tracked_clock  # type: ignore[method-assign]
+        result = client.describe(make_frames(1))
+
+    assert timeline[:2] == ["clock", "preprocess"]
+    assert result.processing_ms == 3
 
 
 @pytest.mark.parametrize(
@@ -211,6 +277,7 @@ def test_client_maps_connection_failure_to_request_error() -> None:
         model_id="test-model",
         timeout_seconds=0.1,
         max_tokens=48,
+        image_max_edge=448,
     )
 
     with pytest.raises(VlmRequestError, match="connection failed"):

@@ -13,9 +13,8 @@ import cv2
 from .frames import FramePacket
 
 _SEMANTIC_PROMPT = (
-    "仅描述画面中可见内容。请用简短中文 1–2 句，优先说明主要物体、人与对象关系、"
-    "简单动作或显著变化。"
-    "不要猜测身份、意图或画外信息。"
+    "仅根据当前图片，用一句简短中文描述主要对象和正在发生的动作；"
+    "无明显动作时描述当前场景。不解释、不推测、不输出前缀。"
 )
 _MAX_SUMMARY_CHARACTERS = 500
 
@@ -47,16 +46,21 @@ class OpenAICompatibleVlmClient:
         model_id: str,
         timeout_seconds: float,
         max_tokens: int,
+        image_max_edge: int,
     ) -> None:
+        if not 64 <= image_max_edge <= 2_048:
+            raise ValueError("image_max_edge must be between 64 and 2048")
         self.base_url = base_url.rstrip("/")
         self.model_id = model_id
         self.timeout_seconds = timeout_seconds
         self.max_tokens = max_tokens
+        self.image_max_edge = image_max_edge
 
     def describe(self, frames: tuple[FramePacket, ...]) -> VlmResult:
         if not frames:
             raise ValueError("at least one frame is required")
 
+        started_ns = self._monotonic_ns()
         content = [self._image_part(frame) for frame in frames]
         content.append({"type": "text", "text": _SEMANTIC_PROMPT})
         payload = {
@@ -65,7 +69,6 @@ class OpenAICompatibleVlmClient:
             "max_tokens": self.max_tokens,
             "temperature": 0,
         }
-        started_ns = self._monotonic_ns()
         response = self._post_json("/v1/chat/completions", payload)
         summary = _completion_text(response).strip()[:_MAX_SUMMARY_CHARACTERS]
         if not summary:
@@ -75,10 +78,22 @@ class OpenAICompatibleVlmClient:
 
     def _image_part(self, frame: FramePacket) -> dict[str, object]:
         try:
+            image = frame.image
+            height, width = image.shape[:2]
+            longest_edge = max(height, width)
+            if longest_edge <= 0:
+                raise ValueError("image dimensions must be positive")
+            if longest_edge > self.image_max_edge:
+                scale = self.image_max_edge / longest_edge
+                image = cv2.resize(
+                    image,
+                    (round(width * scale), round(height * scale)),
+                    interpolation=cv2.INTER_AREA,
+                )
             encoded, jpeg = cv2.imencode(
-                ".jpg", frame.image, [cv2.IMWRITE_JPEG_QUALITY, 80]
+                ".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 80]
             )
-        except cv2.error as exc:
+        except (AttributeError, TypeError, ValueError, cv2.error) as exc:
             raise VlmRequestError("VLM image encoding failed") from exc
         if not encoded:
             raise VlmRequestError("VLM image encoding failed")

@@ -79,11 +79,13 @@ def test_dashboard_vlm_flags_have_local_safe_defaults() -> None:
     args = build_parser().parse_args(["dashboard", "--vlm"])
 
     assert args.vlm is True
-    assert args.vlm_model == "mlx-community/Qwen3-VL-2B-Instruct-4bit"
+    assert args.vlm_model == "mlx-community/Qwen3.5-0.8B-MLX-4bit"
+    assert args.vlm_input_mode == "latest"
+    assert args.vlm_image_max_edge == 448
     assert args.vlm_host == "127.0.0.1"
     assert args.vlm_port == 8766
     assert args.vlm_timeout_seconds == 15
-    assert args.vlm_max_tokens == 48
+    assert args.vlm_max_tokens == 16
 
 
 @pytest.mark.parametrize(
@@ -92,6 +94,8 @@ def test_dashboard_vlm_flags_have_local_safe_defaults() -> None:
         ("--vlm-timeout-seconds", "0"),
         ("--vlm-timeout-seconds", "16"),
         ("--vlm-max-tokens", "0"),
+        ("--vlm-image-max-edge", "63"),
+        ("--vlm-image-max-edge", "2049"),
     ],
 )
 def test_dashboard_rejects_invalid_vlm_limits(option: str, value: str) -> None:
@@ -191,13 +195,15 @@ def test_run_dashboard_assembles_vlm_stack_without_waiting_for_readiness(
     assert sidecar.config.cache_dir.name == "huggingface"
     assert worker.kwargs["client"].kwargs == {
         "base_url": "http://127.0.0.1:8766",
-        "model_id": "mlx-community/Qwen3-VL-2B-Instruct-4bit",
+        "model_id": "mlx-community/Qwen3.5-0.8B-MLX-4bit",
         "timeout_seconds": 15,
-        "max_tokens": 48,
+        "max_tokens": 16,
+        "image_max_edge": 448,
     }
+    assert runtime.kwargs["semantic_input_mode"] == "latest"
     assert worker.kwargs["available"]() is False
     assert config.semantic_enabled is True
-    assert config.semantic_cooldown_seconds == 5
+    assert config.semantic_cooldown_seconds == 1
     assert semantic_state["semanticConfigured"] is True
     assert semantic_state["semanticAvailable"] is False
     assert calls == [

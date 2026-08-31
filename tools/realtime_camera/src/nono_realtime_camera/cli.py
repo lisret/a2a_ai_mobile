@@ -76,7 +76,17 @@ def build_parser() -> argparse.ArgumentParser:
     dashboard.add_argument("--vlm", action="store_true")
     dashboard.add_argument(
         "--vlm-model",
-        default="mlx-community/Qwen3-VL-2B-Instruct-4bit",
+        default="mlx-community/Qwen3.5-0.8B-MLX-4bit",
+    )
+    dashboard.add_argument(
+        "--vlm-input-mode",
+        choices=("latest", "adaptive"),
+        default="latest",
+    )
+    dashboard.add_argument(
+        "--vlm-image-max-edge",
+        type=_valid_vlm_image_max_edge,
+        default=448,
     )
     dashboard.add_argument(
         "--vlm-host",
@@ -89,7 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=_valid_vlm_timeout_seconds,
         default=15,
     )
-    dashboard.add_argument("--vlm-max-tokens", type=_positive_int, default=48)
+    dashboard.add_argument("--vlm-max-tokens", type=_positive_int, default=16)
     dashboard.add_argument("--vlm-no-auto-start", action="store_true")
     return parser
 
@@ -150,6 +160,15 @@ def _valid_vlm_timeout_seconds(value: str) -> int:
     return timeout_seconds
 
 
+def _valid_vlm_image_max_edge(value: str) -> int:
+    max_edge = int(value)
+    if not 64 <= max_edge <= 2_048:
+        raise argparse.ArgumentTypeError(
+            "VLM image max edge must be between 64 and 2048 pixels"
+        )
+    return max_edge
+
+
 def _close_unowned_dashboard_resources(*resources: object | None) -> None:
     for resource in resources:
         if resource is None:
@@ -185,7 +204,7 @@ def _run_dashboard(args: argparse.Namespace) -> int:
             from .vlm_sidecar import VlmSidecarConfig, VlmSidecarSupervisor
 
             config_store = DashboardConfigStore(
-                DashboardConfigV1(semantic_enabled=True, semantic_cooldown_seconds=5)
+                DashboardConfigV1(semantic_enabled=True, semantic_cooldown_seconds=1)
             )
             state_store.set_semantic_configured(True)
             vlm_supervisor = VlmSidecarSupervisor(
@@ -203,6 +222,7 @@ def _run_dashboard(args: argparse.Namespace) -> int:
                 model_id=args.vlm_model,
                 timeout_seconds=args.vlm_timeout_seconds,
                 max_tokens=args.vlm_max_tokens,
+                image_max_edge=args.vlm_image_max_edge,
             )
             semantic_worker = SemanticWorker(
                 client=client,
@@ -220,6 +240,7 @@ def _run_dashboard(args: argparse.Namespace) -> int:
             vlm_supervisor=vlm_supervisor,
             config_store=config_store,
             state_store=state_store,
+            semantic_input_mode=args.vlm_input_mode,
         )
         runtime_owns_resources = True
         app = create_dashboard_app(runtime)

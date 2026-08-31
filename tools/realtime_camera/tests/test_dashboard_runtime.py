@@ -8,10 +8,11 @@ import numpy as np
 import pytest
 
 from nono_realtime_camera.camera import CameraInterruptedError
+from nono_realtime_camera.contracts import RealtimeSecondSummaryV1
 from nono_realtime_camera.dashboard_config import DashboardConfigStore, DashboardConfigV1
 from nono_realtime_camera.dashboard_runtime import DashboardRuntime
 from nono_realtime_camera.dashboard_state import DashboardStateStore
-from nono_realtime_camera.frames import FramePacket
+from nono_realtime_camera.frames import FramePacket, FrameWindow
 from nono_realtime_camera.mediapipe_detector import DetectedObject
 from nono_realtime_camera.semantic_worker import SemanticWorker
 from nono_realtime_camera.vlm_client import VlmRequestError, VlmResult
@@ -657,7 +658,12 @@ def test_dynamic_window_submits_first_middle_and_last_frames() -> None:
     runtime = DashboardRuntime(
         camera_factory=DynamicFakeCamera,
         semantic_worker=semantic,
-        config_store=DashboardConfigStore(DashboardConfigV1(semantic_enabled=True)),
+        config_store=DashboardConfigStore(
+            DashboardConfigV1(
+                semantic_enabled=True,
+                semantic_dynamic_frame_count=3,
+            )
+        ),
         window_ms=250,
     )
 
@@ -676,6 +682,74 @@ def test_dynamic_window_submits_first_middle_and_last_frames() -> None:
     assert submitted_event["changed"] is True
     assert len(frames) == 3
     assert frames[0].frame_id < frames[1].frame_id < frames[2].frame_id
+
+
+def test_dynamic_frame_count_hot_update_applies_to_next_changed_window() -> None:
+    semantic = RecordingSemanticWorker(available=True)
+    config = DashboardConfigStore(
+        DashboardConfigV1(
+            semantic_enabled=True,
+            semantic_cooldown_seconds=1,
+            semantic_dynamic_frame_count=1,
+        )
+    )
+    runtime = DashboardRuntime(
+        camera_factory=ContinuousFakeCamera,
+        semantic_worker=semantic,
+        config_store=config,
+    )
+    with runtime._semantic_admission_lock:
+        runtime._semantic_accepting = True
+    frames = tuple(
+        FramePacket(
+            frame_id=frame_id,
+            captured_at_ms=frame_id * 100,
+            image=np.zeros((4, 4, 3), dtype=np.uint8),
+        )
+        for frame_id in range(1, 6)
+    )
+
+    def admit_changed(window_id: int, submitted_at_ms: int) -> None:
+        window = FrameWindow(
+            window_id=window_id,
+            started_at_ms=submitted_at_ms - 1_000,
+            ended_at_ms=submitted_at_ms,
+            frames=frames,
+        )
+        summary = RealtimeSecondSummaryV1(
+            window_id=window_id,
+            started_at_ms=window.started_at_ms,
+            ended_at_ms=window.ended_at_ms,
+            emitted_at_ms=submitted_at_ms,
+            sampled_frame_count=len(frames),
+            target_frame_count=len(frames),
+            objects=(),
+            presence_change="none",
+            motion="moving",
+            scene_changed=False,
+            summary="画面正在变化",
+            confidence=0.9,
+            changed=True,
+            stale=False,
+            source="fast_path",
+            processing_ms=1,
+        )
+        runtime._admit_semantic(window, summary, submitted_at_ms)
+
+    admit_changed(window_id=1, submitted_at_ms=1_000)
+    config.update({"semanticDynamicFrameCount": 4})
+    admit_changed(window_id=2, submitted_at_ms=2_000)
+
+    first_frames = semantic.submissions[0]["frames"]
+    second_frames = semantic.submissions[1]["frames"]
+    assert isinstance(first_frames, tuple)
+    assert isinstance(second_frames, tuple)
+    assert len(first_frames) == 1
+    assert len(second_frames) == 4
+    assert [frame.frame_id for frame in second_frames] == sorted(
+        frame.frame_id for frame in second_frames
+    )
+    runtime.close()
 
 
 def test_hot_cooldown_update_preserves_last_submission_time() -> None:

@@ -203,8 +203,13 @@ def _run_dashboard(args: argparse.Namespace) -> int:
             from .vlm_client import OpenAICompatibleVlmClient
             from .vlm_sidecar import VlmSidecarConfig, VlmSidecarSupervisor
 
+            dynamic_frame_count = 1 if args.vlm_input_mode == "latest" else 3
             config_store = DashboardConfigStore(
-                DashboardConfigV1(semantic_enabled=True, semantic_cooldown_seconds=1)
+                DashboardConfigV1(
+                    semantic_enabled=True,
+                    semantic_cooldown_seconds=1,
+                    semantic_dynamic_frame_count=dynamic_frame_count,
+                )
             )
             state_store.set_semantic_configured(True)
             vlm_supervisor = VlmSidecarSupervisor(

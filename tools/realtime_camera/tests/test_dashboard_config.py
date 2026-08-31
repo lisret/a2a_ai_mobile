@@ -20,6 +20,7 @@ def test_defaults_match_dashboard_contract() -> None:
     assert config.motion_ratio_threshold == 0.01
     assert config.scene_ratio_threshold == 0.35
     assert config.semantic_enabled is False
+    assert config.semantic_dynamic_frame_count == 1
     assert config.revision == 1
 
 
@@ -47,6 +48,8 @@ def test_update_increments_revision_without_mutating_previous_snapshot() -> None
         {"motionRatioThreshold": math.nan},
         {"sceneRatioThreshold": math.inf},
         {"semanticCooldownSeconds": 0},
+        {"semanticDynamicFrameCount": 0},
+        {"semanticDynamicFrameCount": 5},
         {"unknown": 1},
     ],
 )
@@ -66,4 +69,5 @@ def test_to_dict_uses_camel_case_api_names() -> None:
     assert payload["schemaVersion"] == 1
     assert payload["sampleFps"] == 15
     assert payload["detectionScoreThreshold"] == 0.45
+    assert payload["semanticDynamicFrameCount"] == 1
     assert "sample_fps" not in payload

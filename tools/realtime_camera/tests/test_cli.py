@@ -103,8 +103,15 @@ def test_dashboard_rejects_invalid_vlm_limits(option: str, value: str) -> None:
         build_parser().parse_args(["dashboard", "--vlm", option, value])
 
 
+@pytest.mark.parametrize(
+    ("input_mode", "expected_dynamic_frame_count"),
+    [("latest", 1), ("adaptive", 3)],
+)
 def test_run_dashboard_assembles_vlm_stack_without_waiting_for_readiness(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    input_mode: str,
+    expected_dynamic_frame_count: int,
 ) -> None:
     from nono_realtime_camera import (
         dashboard_runtime,
@@ -181,6 +188,8 @@ def test_run_dashboard_assembles_vlm_stack_without_waiting_for_readiness(
             "--model",
             str(model_path),
             "--vlm",
+            "--vlm-input-mode",
+            input_mode,
             "--vlm-no-auto-start",
         ]
     )
@@ -200,10 +209,11 @@ def test_run_dashboard_assembles_vlm_stack_without_waiting_for_readiness(
         "max_tokens": 16,
         "image_max_edge": 448,
     }
-    assert runtime.kwargs["semantic_input_mode"] == "latest"
+    assert runtime.kwargs["semantic_input_mode"] == input_mode
     assert worker.kwargs["available"]() is False
     assert config.semantic_enabled is True
     assert config.semantic_cooldown_seconds == 1
+    assert config.semantic_dynamic_frame_count == expected_dynamic_frame_count
     assert semantic_state["semanticConfigured"] is True
     assert semantic_state["semanticAvailable"] is False
     assert calls == [

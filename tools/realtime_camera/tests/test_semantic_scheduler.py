@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from nono_realtime_camera.contracts import RealtimeSecondSummaryV1
 from nono_realtime_camera.frames import FramePacket, FrameWindow
 from nono_realtime_camera.semantic_scheduler import (
@@ -58,6 +60,39 @@ def test_latest_mode_selects_only_last_frame_even_when_moving() -> None:
         make_summary(motion="moving"),
         input_mode="latest",
     )
+    assert [frame.frame_id for frame in selected] == [5]
+
+
+@pytest.mark.parametrize(
+    ("count", "expected"),
+    [
+        (1, [5]),
+        (2, [1, 5]),
+        (3, [1, 3, 5]),
+        (4, [1, 2, 4, 5]),
+    ],
+)
+def test_moving_window_selects_configured_evenly_spaced_frames(
+    count: int,
+    expected: list[int],
+) -> None:
+    selected = select_semantic_frames(
+        make_window(frame_ids=(1, 2, 3, 4, 5)),
+        make_summary(motion="moving"),
+        dynamic_frame_count=count,
+    )
+
+    assert [frame.frame_id for frame in selected] == expected
+
+
+@pytest.mark.parametrize("count", [1, 2, 3, 4])
+def test_stationary_window_ignores_dynamic_frame_count(count: int) -> None:
+    selected = select_semantic_frames(
+        make_window(frame_ids=(1, 2, 3, 4, 5)),
+        make_summary(motion="stationary"),
+        dynamic_frame_count=count,
+    )
+
     assert [frame.frame_id for frame in selected] == [5]
 
 

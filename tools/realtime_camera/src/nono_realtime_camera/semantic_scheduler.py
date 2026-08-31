@@ -23,14 +23,24 @@ def select_semantic_frames(
     summary: RealtimeSecondSummaryV1,
     *,
     input_mode: SemanticInputMode = "adaptive",
+    dynamic_frame_count: int | None = None,
 ) -> tuple[FramePacket, ...]:
     if not window.frames:
         return ()
-    if input_mode == "latest":
-        return (window.frames[-1],)
+    if dynamic_frame_count is None:
+        dynamic_frame_count = 1 if input_mode == "latest" else 3
 
     dynamic = summary.motion != "stationary" or summary.scene_changed or summary.changed
-    indexes = (0, len(window.frames) // 2, len(window.frames) - 1) if dynamic else (-1,)
+    count = min(len(window.frames), dynamic_frame_count if dynamic else 1)
+    if count == 1:
+        indexes = (len(window.frames) - 1,)
+    else:
+        denominator = count - 1
+        last = len(window.frames) - 1
+        indexes = tuple(
+            (position * last + denominator // 2) // denominator
+            for position in range(count)
+        )
     selected: list[FramePacket] = []
     seen: set[int] = set()
     for index in indexes:

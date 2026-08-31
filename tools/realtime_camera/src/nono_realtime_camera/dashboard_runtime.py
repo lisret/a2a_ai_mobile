@@ -413,6 +413,7 @@ class DashboardRuntime:
                 window,
                 summary,
                 input_mode=self._semantic_input_mode,
+                dynamic_frame_count=config.semantic_dynamic_frame_count,
             )
             if not frames:
                 return

@@ -20,6 +20,7 @@ _API_TO_FIELD = {
     "motionRatioThreshold": "motion_ratio_threshold",
     "sceneRatioThreshold": "scene_ratio_threshold",
     "semanticCooldownSeconds": "semantic_cooldown_seconds",
+    "semanticDynamicFrameCount": "semantic_dynamic_frame_count",
 }
 _FIELD_TO_API = {field: api for api, field in _API_TO_FIELD.items()}
 _FIELD_TO_API.update({"revision": "revision", "schema_version": "schemaVersion"})
@@ -38,6 +39,7 @@ class DashboardConfigV1:
     motion_ratio_threshold: float = 0.01
     scene_ratio_threshold: float = 0.35
     semantic_cooldown_seconds: int = 10
+    semantic_dynamic_frame_count: int = 1
     schema_version: int = 1
 
     def __post_init__(self) -> None:
@@ -52,6 +54,7 @@ class DashboardConfigV1:
         _validate_float("motion_ratio_threshold", self.motion_ratio_threshold, 0.001, 0.20)
         _validate_float("scene_ratio_threshold", self.scene_ratio_threshold, 0.05, 0.95)
         _validate_int("semantic_cooldown_seconds", self.semantic_cooldown_seconds, 1, 60)
+        _validate_int("semantic_dynamic_frame_count", self.semantic_dynamic_frame_count, 1, 4)
         if self.schema_version != 1:
             raise ConfigValidationError("schema_version must be 1")
 

@@ -11,7 +11,7 @@ cd tools/realtime_camera
 
 当前实机锁定组合：Python 3.11.15、MediaPipe 0.10.31、OpenCV 4.12.0、NumPy 2.2.6。MediaPipe 1.0.1 在本机加载两个官方 Object Detector 模型时都会在 `DrishtiMetalHelper` 原生 abort，因此不能升级后直接视为兼容。
 
-`--extra vlm` 同时安装锁定的 `mlx-vlm==0.6.16` 和 SOCKS 下载支持。真实语义模型固定为 `mlx-community/Qwen3-VL-2B-Instruct-4bit`；首次启动会下载约 1.8 GB 到 `.runtime/huggingface`，后续启动复用该缓存。sidecar 默认关闭 HF Xet、使用支持断点续传的普通 HTTP 下载，避免代理环境中大权重停在 0B。
+`--extra vlm` 同时安装锁定的 `mlx-vlm==0.6.16` 和 SOCKS 下载支持。默认真实语义模型为 `mlx-community/Qwen3.5-0.8B-MLX-4bit`；原来的 `mlx-community/Qwen3-VL-2B-Instruct-4bit` 保留为质量对照。模型下载到 `.runtime/huggingface`，后续启动复用缓存。sidecar 默认关闭 HF Xet、使用支持断点续传的普通 HTTP 下载，避免代理环境中大权重停在 0B。
 
 ## 模型
 
@@ -34,12 +34,32 @@ MPLCONFIGDIR=.runtime/matplotlib .venv/bin/nono-camera dashboard \
   --camera-index 0 \
   --model .runtime/models/efficientdet_lite0.tflite \
   --vlm \
+  --vlm-input-mode latest \
+  --vlm-image-max-edge 448 \
+  --vlm-max-tokens 16 \
   --open
+```
+
+这些也是 `--vlm` 的默认快速基准参数：每个满足 1 秒冷却的窗口只提交最新一帧，图片最长边缩到 448 像素，完整答案最多生成 16 tokens。VLM 忙时只保留最新的待处理窗口，不积压历史请求。
+
+要复测原 2B 自适应 1/3 帧质量路径：
+
+```bash
+MPLCONFIGDIR=.runtime/matplotlib .venv/bin/nono-camera dashboard \
+  --camera-index 0 \
+  --model .runtime/models/efficientdet_lite0.tflite \
+  --vlm \
+  --vlm-model mlx-community/Qwen3-VL-2B-Instruct-4bit \
+  --vlm-input-mode adaptive \
+  --vlm-image-max-edge 1280 \
+  --vlm-max-tokens 48
 ```
 
 服务只监听 `127.0.0.1:8765`，VLM sidecar 只监听 `127.0.0.1:8766`。页面包含实时视频、检测框、逐秒摘要、采集/采样/预览 FPS、处理延迟、事件历史，以及采样 FPS、预览 FPS、检测阈值、运动阈值、场景变化阈值和 VLM 冷却时间。滑块参数在下一窗口热生效；停止会释放摄像头，开始可重新打开。原始画面和 MJPEG 不写磁盘。
 
-快速路径始终约 1 Hz 输出，加载模型和语义推理都在异步 sidecar/worker 中执行，不阻塞快速事件。语义结果通常晚于对应的一秒快速摘要：静止窗口使用一帧，运动或场景变化窗口使用三帧。首次真实模型响应前，语义区只显示等待/加载状态，不会伪造占位结果；sidecar 加载失败、退出或推理报错时页面显示 degraded，快速路径和摄像头仍继续运行。可用“重启 VLM”单独恢复 sidecar，不会重启摄像头。
+快速路径始终约 1 Hz 输出，加载模型和语义推理都在异步 sidecar/worker 中执行，不阻塞快速事件。默认 `latest` 模式始终使用一帧；显式选择 `adaptive` 时，静止窗口使用一帧，运动或场景变化窗口使用三帧。首次真实模型响应前，语义区只显示等待/加载状态，不会伪造占位结果；sidecar 加载失败、退出或推理报错时页面显示 degraded，快速路径和摄像头仍继续运行。可用“重启 VLM”单独恢复 sidecar，不会重启摄像头。
+
+首次下载和第一次 Metal 编译属于冷启动，不能混入 warm 延迟比较。判断是否达到 1 秒时，以模型就绪后的完整中文结果处理时间 P50/P95 为准，不用下载时间、快速 CV 延迟或首 token 代替。
 
 摄像头预检：
 

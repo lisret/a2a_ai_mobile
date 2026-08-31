@@ -136,6 +136,7 @@ function applyConfig(config) {
   syncControl("motion-ratio", config.motionRatioThreshold, 3);
   syncControl("scene-ratio", config.sceneRatioThreshold, 2);
   syncControl("semantic-cooldown-seconds", config.semanticCooldownSeconds, 0);
+  syncControl("semantic-dynamic-frame-count", config.semanticDynamicFrameCount, 0);
 }
 
 async function pollState() {

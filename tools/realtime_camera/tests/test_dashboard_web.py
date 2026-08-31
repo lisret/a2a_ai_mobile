@@ -69,6 +69,7 @@ def test_dashboard_contains_semantic_controls_result_and_metrics(client) -> None
     for element_id in (
         "semantic-enabled",
         "semantic-cooldown-seconds",
+        "semantic-dynamic-frame-count",
         "semantic-lifecycle",
         "semantic-summary",
         "semantic-model",
@@ -81,6 +82,7 @@ def test_dashboard_contains_semantic_controls_result_and_metrics(client) -> None
     ):
         assert f'id="{element_id}"' in html
     assert "本次输入帧数" in html
+    assert "变化场景输入帧数" in html
 
 
 def test_dashboard_script_executes_semantic_interaction_contracts() -> None:
@@ -141,6 +143,7 @@ const ids = [
   "preview-fps", "preview-fps-value", "detection-threshold", "detection-threshold-value",
   "motion-ratio", "motion-ratio-value", "scene-ratio", "scene-ratio-value",
   "semantic-cooldown-seconds", "semantic-cooldown-seconds-value", "event-list",
+  "semantic-dynamic-frame-count", "semantic-dynamic-frame-count-value",
   "config-error", "start-button", "stop-button", "restart-button", "restart-vlm",
   "camera-stream",
 ];
@@ -151,6 +154,7 @@ for (const [id, key, step] of [
   ["motion-ratio", "motionRatioThreshold", "0.001"],
   ["scene-ratio", "sceneRatioThreshold", "0.05"],
   ["semantic-cooldown-seconds", "semanticCooldownSeconds", "1"],
+  ["semantic-dynamic-frame-count", "semanticDynamicFrameCount", "1"],
 ]) { elements[id].dataset.config = key; elements[id].step = step; }
 const timers = [];
 const fetchCalls = [];
@@ -162,7 +166,7 @@ let fetchHandler = async (url) => {
 const document = {
   getElementById: (id) => elements[id],
   querySelectorAll: (selector) => selector === "input[data-config]"
-    ? ["sample-fps", "preview-fps", "detection-threshold", "motion-ratio", "scene-ratio", "semantic-cooldown-seconds"].map((id) => elements[id])
+    ? ["sample-fps", "preview-fps", "detection-threshold", "motion-ratio", "scene-ratio", "semantic-cooldown-seconds", "semantic-dynamic-frame-count"].map((id) => elements[id])
     : [],
   createElement: () => new Element("row-cell"),
 };
@@ -185,12 +189,13 @@ function jsonResponse(payload, ok = true) {
 function textResponse(text, ok = false) {
   return { ok, headers: { get: () => "text/plain" }, json: async () => { throw new Error("not json"); }, text: async () => text };
 }
-function state(revision, { configured = true, available = true, phase = "ready", latest = true, cooldown = 10 } = {}) {
+function state(revision, { configured = true, available = true, phase = "ready", latest = true, cooldown = 10, dynamicFrames = 1 } = {}) {
   return {
     lifecycle: { phase: "running" },
     config: { revision, analysisEnabled: true, detectorEnabled: true, semanticEnabled: true,
       sampleFps: 15, previewFps: 12, detectionScoreThreshold: .45, motionRatioThreshold: .01,
-      sceneRatioThreshold: .35, semanticCooldownSeconds: cooldown },
+      sceneRatioThreshold: .35, semanticCooldownSeconds: cooldown,
+      semanticDynamicFrameCount: dynamicFrames },
     metrics: { captureFps: 1, sampleFps: 1, previewFps: 1, processingP95Ms: 1, endToEmitP95Ms: 1,
       staleCount: 0, fastPendingDepth: 0, frameAgeMs: 1, semanticProcessingP95Ms: 3200,
       semanticDroppedCount: 2, semanticInputFrameCount: 9 },
@@ -210,6 +215,19 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
   expect(elements["semantic-summary"].textContent === "一位人士站在室内", "semantic result missing");
   expect(elements["semantic-input-frame-count"].textContent === "3", "latest input frame count missing");
   expect(elements["restart-vlm"].disabled === false, "available restart disabled");
+
+  const dynamicFrames = elements["semantic-dynamic-frame-count"];
+  expect(dynamicFrames.value === "1", "dynamic frame count did not render default");
+  dynamicFrames.value = "4";
+  dynamicFrames.dispatch("input");
+  expect(elements["semantic-dynamic-frame-count-value"].textContent === "4", "dynamic frame count output did not update");
+  fetchHandler = async (url) => url === "/api/config"
+    ? jsonResponse({ config: state(3, { dynamicFrames: 4 }).config })
+    : jsonResponse({ events: [] });
+  timers.shift()();
+  await flush(); await flush();
+  const dynamicPatch = JSON.parse(fetchCalls.at(-1)[1].body);
+  expect(dynamicPatch.semanticDynamicFrameCount === 4, "dynamic frame count did not PATCH");
 
   context.renderState(state(3, { phase: "degraded", latest: false }));
   expect(elements["semantic-lifecycle"].classList.contains("phase-degraded"), "degraded lifecycle missing");

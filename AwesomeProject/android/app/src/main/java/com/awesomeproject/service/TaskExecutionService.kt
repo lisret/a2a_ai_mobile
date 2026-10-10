@@ -43,7 +43,7 @@ class TaskExecutionService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // 处理停止服务的请求（中断任务）
-        if (intent?.action == "STOP_SERVICE" || intent?.action == "CANCEL_TASK") {
+        if (intent?.action == "CANCEL_TASK") {
             val cancelTaskId = intent.getStringExtra("taskId")
             val cancelSessionRevision = intent.getDoubleExtra("sessionRevision", -1.0)
             // Android stopService ignores extras. All stop/cancel requests are delivered
@@ -56,9 +56,7 @@ class TaskExecutionService : Service() {
                 Log.d(TAG, "忽略过期任务的停止请求")
                 return START_NOT_STICKY
             }
-            if (intent.action == "CANCEL_TASK") {
-                sendCancelTaskEvent(cancelTaskId, cancelSessionRevision)
-            }
+            sendCancelTaskEvent(cancelTaskId, cancelSessionRevision)
             stopSelf(startId)
             return START_NOT_STICKY
         }

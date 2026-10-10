@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.util.Log
+import com.awesomeproject.service.TaskServiceLifecycle
 import com.awesomeproject.service.TaskExecutionService
 import com.awesomeproject.service.TaskExecutionHeadlessService
 
@@ -16,8 +17,9 @@ class ServiceManager(private val context: Context) {
     /**
      * 启动任务执行前台服务
      */
-    fun startTaskExecutionService(taskId: String, sessionRevision: Double, statusText: String): Boolean {
-        return try {
+    fun startTaskExecutionService(taskId: String, sessionRevision: Double, statusText: String): Boolean =
+        TaskServiceLifecycle.start(taskId, sessionRevision) {
+        try {
             val intent = Intent(context, TaskExecutionService::class.java).apply {
                 putExtra("taskId", taskId)
                 putExtra("sessionRevision", sessionRevision)
@@ -77,16 +79,12 @@ class ServiceManager(private val context: Context) {
      * 携带本次会话的精确 identity（{taskId, sessionRevision}），与 start/cancel
      * 使用相同的 identity 字段，避免误停其它会话。
      */
-    fun stopTaskExecutionService(taskId: String, sessionRevision: Double): Boolean {
-        return try {
-            val intent = Intent(context, TaskExecutionService::class.java).apply {
-                action = "STOP_SERVICE"
-                putExtra("taskId", taskId)
-                putExtra("sessionRevision", sessionRevision)
-            }
-            // stopService ignores Intent extras; deliver to the service for identity validation.
-            context.startService(intent)
-            Log.d("ServiceManager", "已发送任务执行服务停止请求")
+    fun stopTaskExecutionService(taskId: String, sessionRevision: Double): Boolean =
+        TaskServiceLifecycle.stop(taskId, sessionRevision) {
+        try {
+            // stopService is allowed in the background and also cancels pending starts.
+            // The lifecycle monitor prevents a newer start between identity check and stop.
+            context.stopService(Intent(context, TaskExecutionService::class.java))
             true
         } catch (e: Exception) {
             Log.e("ServiceManager", "停止前台服务失败", e)

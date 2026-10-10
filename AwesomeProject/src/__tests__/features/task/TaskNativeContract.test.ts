@@ -19,18 +19,20 @@ describe('task-scoped runtime channel: native contract', () => {
     expect(service).toMatch(/putDouble\("sessionRevision"/);
     expect(headless).not.toMatch(/任务数据:\s*\$taskData/);
   });
-  it('delivers stop requests to the service for session identity validation', () => {
+  it('stops the active service without starting a service from the background', () => {
     const manager = fs.readFileSync(
       path.resolve('android/app/src/main/java/com/awesomeproject/utils/ServiceManager.kt'),
       'utf8',
     );
-    const stop = manager.slice(
-      manager.indexOf('fun stopTaskExecutionService('),
-      manager.indexOf('fun startBackgroundTask('),
-    );
-    expect(stop).not.toContain('context.stopService(intent)');
-    expect(stop).toContain('action = "STOP_SERVICE"');
-    expect(stop).toContain('context.startService(intent)');
+    const start = manager.indexOf('fun stopTaskExecutionService(');
+    const end = manager.indexOf('fun startBackgroundTask(');
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const stop = manager.slice(start, end);
+    expect(stop).toContain('context.stopService(Intent(');
+    expect(stop).not.toContain('context.startService(intent)');
+    expect(stop).toContain('TaskServiceLifecycle.stop(taskId, sessionRevision)');
+    expect(manager).toContain('TaskServiceLifecycle.start(taskId, sessionRevision)');
   });
   it('does not let delayed LAN service delivery create a new authorization generation', () => {
     const service = fs.readFileSync(

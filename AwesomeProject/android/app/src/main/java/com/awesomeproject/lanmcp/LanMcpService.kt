@@ -71,18 +71,18 @@ class LanMcpService : Service() {
             return START_NOT_STICKY
         }
 
-        val startedGeneration = intent?.getLongExtra(EXTRA_GENERATION, -1L) ?: -1L
-        if (!LanMcpState.generation.isCurrent(startedGeneration)) {
-            if (server == null) stopSelf(startId)
-            return START_NOT_STICKY
-        }
-
         // A foreground service started with startForegroundService must post its
         // notification promptly; do it before any binding work.
         if (!startForegroundCompat(buildNotification("正在启动局域网 MCP 服务…"))) {
             // Fail closed: without a foreground notification the platform would kill the
             // process; never proceed to bind a socket.
             failStart(Codes.FOREGROUND_FAILED, "无法启动前台服务通知，局域网 MCP 服务未启动")
+            return START_NOT_STICKY
+        }
+
+        val startedGeneration = intent?.getLongExtra(EXTRA_GENERATION, -1L) ?: -1L
+        if (!LanMcpState.generation.isCurrent(startedGeneration)) {
+            if (server == null) stopSelf(startId) else updateNotification()
             return START_NOT_STICKY
         }
 

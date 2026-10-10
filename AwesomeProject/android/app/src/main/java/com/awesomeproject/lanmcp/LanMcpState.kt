@@ -39,7 +39,24 @@ object LanMcpState {
         lastMessage = message
     }
 
-    fun markRunning(address: String, port: Int) {
+    @Synchronized
+    fun beginStart(): Long = generation.markStarted()
+
+    @Synchronized
+    fun cancelStart() {
+        generation.markStopped()
+        running = false
+    }
+
+    /** Publication and timeout revocation share a monitor: neither can revive the other. */
+    @Synchronized
+    fun markRunningIfCurrent(captured: Long, address: String, port: Int): Boolean {
+        if (!generation.isCurrent(captured)) return false
+        markRunning(address, port)
+        return true
+    }
+
+    private fun markRunning(address: String, port: Int) {
         bindAddress = address
         endpoint = LanNetwork.endpointFor(address, port)
         lastErrorCode = null

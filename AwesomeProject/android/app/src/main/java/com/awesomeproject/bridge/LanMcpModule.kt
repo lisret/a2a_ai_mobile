@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import com.awesomeproject.lanmcp.Codes
 import com.awesomeproject.lanmcp.ConnectionCode
 import com.awesomeproject.lanmcp.DeviceControlOwnership
@@ -105,7 +106,11 @@ class LanMcpModule(private val reactContext: ReactApplicationContext) :
             }
             // The server's actual bind is authoritative. A separate probe with
             // different socket reuse options can reject a valid immediate restart.
-            val intent = Intent(context, LanMcpService::class.java).apply { action = LanMcpService.ACTION_START }
+            val startedGeneration = LanMcpState.beginStart()
+            val intent = Intent(context, LanMcpService::class.java).apply {
+                action = LanMcpService.ACTION_START
+                putExtra(LanMcpService.EXTRA_GENERATION, startedGeneration)
+            }
             // A previous failed attempt must not reject a new, successful start.
             LanMcpState.lastErrorCode = null
             LanMcpState.lastMessage = null
@@ -116,12 +121,13 @@ class LanMcpModule(private val reactContext: ReactApplicationContext) :
                     context.startService(intent)
                 }
             } catch (error: Exception) {
+                LanMcpState.cancelStart()
                 reject(promise, Codes.BIND_FAILED, "无法启动前台服务：${error.javaClass.simpleName}")
                 return@submit
             }
 
-            val deadline = System.currentTimeMillis() + START_TIMEOUT_MS
-            while (System.currentTimeMillis() < deadline) {
+            val deadline = SystemClock.elapsedRealtime() + START_TIMEOUT_MS
+            while (SystemClock.elapsedRealtime() < deadline) {
                 if (LanMcpState.running) {
                     resolveStatus(promise)
                     return@submit
@@ -133,7 +139,7 @@ class LanMcpModule(private val reactContext: ReactApplicationContext) :
                 }
                 sleepQuietly(POLL_INTERVAL_MS)
             }
-            LanMcpState.generation.markStopped()
+            LanMcpState.cancelStart()
             context.stopService(Intent(context, LanMcpService::class.java))
             reject(promise, Codes.START_TIMEOUT, "服务启动超时，已取消启动，请重试")
         }
@@ -144,15 +150,15 @@ class LanMcpModule(private val reactContext: ReactApplicationContext) :
         submit(promise) {
             val context = reactContext.applicationContext
             // Revoke dispatch before waiting for Android to destroy the service.
-            LanMcpState.generation.markStopped()
+            LanMcpState.cancelStart()
             try {
                 context.stopService(Intent(context, LanMcpService::class.java))
             } catch (error: Exception) {
                 reject(promise, Codes.INTERNAL, "无法关闭服务，请使用系统通知中的停止按钮")
                 return@submit
             }
-            val deadline = System.currentTimeMillis() + STOP_TIMEOUT_MS
-            while ((LanMcpState.running || DeviceControlOwnership.remoteActive()) && System.currentTimeMillis() < deadline) {
+            val deadline = SystemClock.elapsedRealtime() + STOP_TIMEOUT_MS
+            while ((LanMcpState.running || DeviceControlOwnership.remoteActive()) && SystemClock.elapsedRealtime() < deadline) {
                 sleepQuietly(POLL_INTERVAL_MS)
             }
             if (LanMcpState.running || DeviceControlOwnership.remoteActive()) {

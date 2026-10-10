@@ -67,7 +67,13 @@ class LanMcpService : Service() {
         if (intent?.action == ACTION_STOP) {
             LanMcpState.generation.markStopped()
             LanMcpState.running = false
-            stopSelf()
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+
+        val startedGeneration = intent?.getLongExtra(EXTRA_GENERATION, -1L) ?: -1L
+        if (!LanMcpState.generation.isCurrent(startedGeneration)) {
+            if (server == null) stopSelf(startId)
             return START_NOT_STICKY
         }
 
@@ -107,7 +113,6 @@ class LanMcpService : Service() {
 
         val address = binding.address
         boundNetwork = binding.network
-        val startedGeneration = LanMcpState.generation.markStarted()
         val actions = AccessibilityDeviceActions(applicationContext)
         val executor = ToolExecutor(
             actions = actions,
@@ -174,7 +179,12 @@ class LanMcpService : Service() {
         codeBytes = code
         generation = startedGeneration
         started = true
-        LanMcpState.markRunning(address, LanNetwork.PORT)
+        if (!LanMcpState.markRunningIfCurrent(startedGeneration, address, LanNetwork.PORT)) {
+            // Timeout/stop revoked this attempt while bind or network registration ran.
+            teardown(candidate)
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
         updateNotification()
         Log.i(TAG, "LAN MCP service started on ${LanMcpState.endpoint}")
         return START_NOT_STICKY
@@ -408,6 +418,7 @@ class LanMcpService : Service() {
     companion object {
         private const val TAG = "LanMcpService"
 
+        const val EXTRA_GENERATION = "startGeneration"
         const val ACTION_START = "com.awesomeproject.lanmcp.action.START"
         const val ACTION_STOP = "com.awesomeproject.lanmcp.action.STOP"
 

@@ -44,18 +44,22 @@ class TaskExecutionService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // 处理停止服务的请求（中断任务）
         if (intent?.action == "STOP_SERVICE" || intent?.action == "CANCEL_TASK") {
-            Log.d(TAG, "收到中断任务请求")
-            // 优先使用 cancel Intent 携带的 identity，回退到本次运行保存的 identity
-            val cancelTaskId = intent.getStringExtra("taskId") ?: currentTaskId
-            val cancelSessionRevision =
-                if (intent.hasExtra("sessionRevision")) {
-                    intent.getDoubleExtra("sessionRevision", -1.0)
-                } else {
-                    currentSessionRevision
-                }
-            // 发送事件到 JS，通知任务中断（仅在有精确 identity 时）
-            sendCancelTaskEvent(cancelTaskId, cancelSessionRevision)
-            stopSelf()
+            val cancelTaskId = intent.getStringExtra("taskId")
+            val cancelSessionRevision = intent.getDoubleExtra("sessionRevision", -1.0)
+            // Android stopService ignores extras. All stop/cancel requests are delivered
+            // here and matched on the main thread before touching the active service.
+            if (currentTaskId == null) {
+                stopSelf(startId)
+                return START_NOT_STICKY
+            }
+            if (cancelTaskId != currentTaskId || cancelSessionRevision != currentSessionRevision) {
+                Log.d(TAG, "忽略过期任务的停止请求")
+                return START_NOT_STICKY
+            }
+            if (intent.action == "CANCEL_TASK") {
+                sendCancelTaskEvent(cancelTaskId, cancelSessionRevision)
+            }
+            stopSelf(startId)
             return START_NOT_STICKY
         }
 
@@ -74,15 +78,20 @@ class TaskExecutionService : Service() {
             incomingTaskId == currentTaskId &&
             incomingSessionRevision == currentSessionRevision
 
+        if (intent?.action == "UPDATE_SERVICE" && !isSameTaskIdentity) {
+            if (currentTaskId == null) stopSelf(startId)
+            return START_NOT_STICKY
+        }
+
         // 局域网 MCP 服务正在控制设备时，拒绝启动“新的”本地任务，避免两个控制器同时驱动 UI。
         // 复用既有的精确 identity 取消事件让 JS 侧任务中止，不新增对外 API。
         if (DeviceControlOwnership.remoteActive() && !isSameTaskIdentity) {
             Log.w(TAG, "局域网 MCP 服务正在控制设备，拒绝启动新的本地任务")
             sendCancelTaskEvent(incomingTaskId, incomingSessionRevision)
             // 只有本次请求是该服务唯一用途时才停止自己：若本服务正在为另一个任务服务，
-            // stopSelf() 会误停那个正在运行的任务（前台通知也已就绪，不会有 5 秒限制问题）。
+            // stopSelf(startId) 会误停那个正在运行的任务（前台通知也已就绪，不会有 5 秒限制问题）。
             if (currentTaskId == null) {
-                stopSelf()
+                stopSelf(startId)
             }
             return START_NOT_STICKY
         }

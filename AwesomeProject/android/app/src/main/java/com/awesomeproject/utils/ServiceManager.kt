@@ -59,6 +59,7 @@ class ServiceManager(private val context: Context) {
     fun updateTaskExecutionService(taskId: String, sessionRevision: Double, statusText: String): Boolean {
         return try {
             val intent = Intent(context, TaskExecutionService::class.java).apply {
+                action = "UPDATE_SERVICE"
                 putExtra("taskId", taskId)
                 putExtra("sessionRevision", sessionRevision)
                 putExtra("statusText", statusText)
@@ -79,11 +80,13 @@ class ServiceManager(private val context: Context) {
     fun stopTaskExecutionService(taskId: String, sessionRevision: Double): Boolean {
         return try {
             val intent = Intent(context, TaskExecutionService::class.java).apply {
+                action = "STOP_SERVICE"
                 putExtra("taskId", taskId)
                 putExtra("sessionRevision", sessionRevision)
             }
-            context.stopService(intent)
-            Log.d("ServiceManager", "任务执行前台服务已停止")
+            // stopService ignores Intent extras; deliver to the service for identity validation.
+            context.startService(intent)
+            Log.d("ServiceManager", "已发送任务执行服务停止请求")
             true
         } catch (e: Exception) {
             Log.e("ServiceManager", "停止前台服务失败", e)

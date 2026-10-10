@@ -129,7 +129,7 @@ describe('phone operate permission gate', () => {
     );
   });
 
-  it('asks for permissions from the capabilities toggle without waiting on the switch', () => {
+  it('asks for permissions when entering phone operation from capabilities', () => {
     const source = fs.readFileSync(
       path.resolve(
         __dirname,
@@ -137,9 +137,8 @@ describe('phone operate permission gate', () => {
       ),
       'utf8',
     );
-    // Capabilities is now ViewState-driven via `useAppFacades`; the device
-    // permission request still fires immediately when a device-operating
-    // capability is switched on, without waiting on the async facade write.
+    // The simplified capability entry still requests device permissions when
+    // entering phone operation; facade state is not a prerequisite.
     expect(source).toContain('useAppFacades');
     expect(source).toContain('requestOperatePermissions()');
     expect(source).not.toContain('nonoConfigService');

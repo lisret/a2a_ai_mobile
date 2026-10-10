@@ -5,6 +5,7 @@ import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import type {RootStackParamList} from '@shared/types/navigation';
 import {PageLayout} from '@shared/components/PageLayout';
 import {COLORS} from '@shared/constants';
+import {requestOperatePermissions} from '../services/operatePermissions';
 import {useAppFacades} from '../../../application/facades/AppFacadesContext';
 import type {
   PhoneOperateViewState,
@@ -47,7 +48,10 @@ export const CapabilitiesScreen: React.FC = () => {
       <ScrollView contentContainerStyle={styles.content}>
         <TouchableOpacity
           style={styles.card}
-          onPress={() => navigation.navigate('PhoneOperate')}
+          onPress={() => {
+            navigation.navigate('PhoneOperate');
+            void requestOperatePermissions();
+          }}
           activeOpacity={0.85}>
           <Text style={styles.title}>操控手机</Text>
           <Text style={styles.body}>

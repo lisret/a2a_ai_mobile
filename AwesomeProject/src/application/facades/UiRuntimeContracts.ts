@@ -13,6 +13,7 @@ import type {
 export type Unsubscribe = () => void;
 
 export type UiBlockerCode =
+  | 'device_control_busy'
   | 'phone_operate_disabled'
   | 'missing_unified_model'
   | 'missing_split_vision_model'

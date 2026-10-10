@@ -8,6 +8,8 @@ import { CustomTabBar } from './CustomTabBar';
 import type { RootStackParamList, MainTabParamList } from '../shared/types/navigation';
 import { CapabilitiesScreen } from '../features/capability/screens/CapabilitiesScreen';
 import { PhoneOperateScreen } from '../features/capability/screens/PhoneOperateScreen';
+import { RemoteControlScreen } from '../features/capability/screens/RemoteControlScreen';
+import { LanMcpScreen } from '../features/capability/screens/LanMcpScreen';
 import { VisualAgentToolsScreen } from '../features/capability/screens/VisualAgentToolsScreen';
 import { OpenClawScreen } from '../features/capability/screens/OpenClawScreen';
 import { ErrandsScreen } from '../features/capability/screens/ErrandsScreen';
@@ -153,6 +155,8 @@ export const AppNavigator: React.FC = () => {
         />
         <Stack.Screen name="DebugLog" component={DebugLogScreen} />
         <Stack.Screen name="PhoneOperate" component={PhoneOperateScreen} />
+        <Stack.Screen name="RemoteControl" component={RemoteControlScreen} />
+        <Stack.Screen name="LanMcp" component={LanMcpScreen} />
         <Stack.Screen name="VisualAgentTools" component={VisualAgentToolsScreen} />
         <Stack.Screen name="OpenClaw" component={OpenClawScreen} />
         <Stack.Screen name="Errands" component={ErrandsScreen} />

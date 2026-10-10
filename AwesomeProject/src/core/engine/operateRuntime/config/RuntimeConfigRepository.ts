@@ -17,7 +17,7 @@ import {
   type RuntimeAsyncStorage,
 } from './RuntimeConfigStorageKeys';
 import {
-  EMPTY_ROUTE_CONFIG,
+  DEFAULT_SEEDED_ROUTE_CONFIG,
   assertNoForbiddenKeys,
   validateRuntimeRoute,
 } from './RuntimeConfigValidation';
@@ -331,6 +331,19 @@ export class AsyncStorageRuntimeConfigRepository
       if (envelope.schemaVersion !== 1 || typeof envelope.revision !== 'number') {
         throw new RuntimeConfigError('runtime_config_corrupt');
       }
+      if (
+        envelope.active.modelAPI.bindings.length === 0 &&
+        envelope.active.modelAPI.profiles.length === 0
+      ) {
+        const seeded: RuntimeConfigEnvelopeV1 = {
+          schemaVersion: 1,
+          revision: envelope.revision + 1,
+          active: clone(DEFAULT_SEEDED_ROUTE_CONFIG),
+          draft: clone(DEFAULT_SEEDED_ROUTE_CONFIG),
+        };
+        await this.write(seeded);
+        return seeded;
+      }
       this.cached = envelope;
       return envelope;
     }
@@ -341,14 +354,14 @@ export class AsyncStorageRuntimeConfigRepository
         return migrated;
       }
     }
-    const empty: RuntimeConfigEnvelopeV1 = {
+    const seeded: RuntimeConfigEnvelopeV1 = {
       schemaVersion: 1,
-      revision: 0,
-      active: clone(EMPTY_ROUTE_CONFIG),
-      draft: clone(EMPTY_ROUTE_CONFIG),
+      revision: 1,
+      active: clone(DEFAULT_SEEDED_ROUTE_CONFIG),
+      draft: clone(DEFAULT_SEEDED_ROUTE_CONFIG),
     };
-    this.cached = empty;
-    return empty;
+    await this.write(seeded);
+    return seeded;
   }
 
   private async write(envelope: RuntimeConfigEnvelopeV1): Promise<void> {

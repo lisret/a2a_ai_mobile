@@ -255,3 +255,43 @@ export const EMPTY_ROUTE_CONFIG: RuntimeRouteConfigV1 = {
   modelAPI: {agentConfig: DEFAULT_AGENT_CONFIG_V2, profiles: [], bindings: []},
   visualAgent: {enabled: false, activeProfileId: null, profiles: []},
 };
+
+export const DEFAULT_MODEL_PROFILE_ID = 'profile-default-deepseek';
+export const DEFAULT_COMPANION_BINDING_ID = 'binding-default-companion';
+export const DEFAULT_DIRECT_BINDING_ID = 'binding-default-direct';
+
+export const DEFAULT_SEEDED_ROUTE_CONFIG: RuntimeRouteConfigV1 = {
+  ...EMPTY_ROUTE_CONFIG,
+  modelAPI: {
+    agentConfig: DEFAULT_AGENT_CONFIG_V2,
+    profiles: [
+      {
+        id: DEFAULT_MODEL_PROFILE_ID,
+        label: 'DeepSeek',
+        mode: 'preset',
+        preset: 'deepseek',
+        baseURLOverride: null,
+        region: null,
+        channel: null,
+        secretRef: null,
+        generation: 1,
+      },
+    ],
+    bindings: [
+      {
+        id: DEFAULT_COMPANION_BINDING_ID,
+        role: 'companion',
+        profileId: DEFAULT_MODEL_PROFILE_ID,
+        modelId: 'deepseek-chat',
+        maxSteps: DEFAULT_AGENT_CONFIG_V2.maxSteps,
+      },
+      {
+        id: DEFAULT_DIRECT_BINDING_ID,
+        role: 'direct',
+        profileId: DEFAULT_MODEL_PROFILE_ID,
+        modelId: 'deepseek-chat',
+        maxSteps: DEFAULT_AGENT_CONFIG_V2.maxSteps,
+      },
+    ],
+  },
+};

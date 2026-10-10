@@ -1,5 +1,5 @@
 import React, {useCallback, useState} from 'react';
-import {ScrollView, View, Text, StyleSheet, Switch, TouchableOpacity} from 'react-native';
+import {ScrollView, View, Text, StyleSheet, TouchableOpacity} from 'react-native';
 import {useFocusEffect, useNavigation} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import type {RootStackParamList} from '@shared/types/navigation';
@@ -7,76 +7,30 @@ import {PageLayout} from '@shared/components/PageLayout';
 import {COLORS} from '@shared/constants';
 import {useAppFacades} from '../../../application/facades/AppFacadesContext';
 import type {
-  ErrandsViewState,
   PhoneOperateViewState,
-  PrivacyViewState,
-  VisualAgentToolsViewState,
 } from '../../../application/facades/UiRuntimeContracts';
-import {requestOperatePermissions} from '../services/operatePermissions';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
-interface CardErrors {
-  phone: boolean;
-  errand: boolean;
-  tools: boolean;
-  privacy: boolean;
-}
-
 export const CapabilitiesScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
-  const {phoneOperate, errands, visualAgentTools, privacy} = useAppFacades();
+  const {phoneOperate} = useAppFacades();
 
   const [phone, setPhone] = useState<PhoneOperateViewState | null>(null);
-  const [errand, setErrand] = useState<ErrandsViewState | null>(null);
-  const [tools, setTools] = useState<VisualAgentToolsViewState | null>(null);
-  const [privacyState, setPrivacyState] = useState<PrivacyViewState | null>(null);
-  const [errors, setErrors] = useState<CardErrors>({
-    phone: false,
-    errand: false,
-    tools: false,
-    privacy: false,
-  });
+  const [phoneError, setPhoneError] = useState(false);
 
   const reloadPhone = useCallback(() => {
-    setErrors(prev => ({...prev, phone: false}));
+    setPhoneError(false);
     phoneOperate
       .getViewState()
       .then(setPhone)
-      .catch(() => setErrors(prev => ({...prev, phone: true})));
+      .catch(() => setPhoneError(true));
   }, [phoneOperate]);
-
-  const reloadErrand = useCallback(() => {
-    setErrors(prev => ({...prev, errand: false}));
-    errands
-      .getViewState()
-      .then(setErrand)
-      .catch(() => setErrors(prev => ({...prev, errand: true})));
-  }, [errands]);
-
-  const reloadTools = useCallback(() => {
-    setErrors(prev => ({...prev, tools: false}));
-    visualAgentTools
-      .getViewState()
-      .then(setTools)
-      .catch(() => setErrors(prev => ({...prev, tools: true})));
-  }, [visualAgentTools]);
-
-  const reloadPrivacy = useCallback(() => {
-    setErrors(prev => ({...prev, privacy: false}));
-    privacy
-      .getViewState()
-      .then(setPrivacyState)
-      .catch(() => setErrors(prev => ({...prev, privacy: true})));
-  }, [privacy]);
 
   useFocusEffect(
     useCallback(() => {
       reloadPhone();
-      reloadErrand();
-      reloadTools();
-      reloadPrivacy();
-    }, [reloadPhone, reloadErrand, reloadTools, reloadPrivacy]),
+    }, [reloadPhone]),
   );
 
   const phoneMeta = phone
@@ -85,119 +39,39 @@ export const CapabilitiesScreen: React.FC = () => {
       } ›`
     : '读取中 ›';
 
-  const errandMeta = errand
-    ? errand.enabled
-      ? `已开 · ${errand.pendingCount} 件在记着 ›`
-      : '已关 ›'
-    : '读取中 ›';
-
-  const activeProfile = tools?.profiles.find(
-    profile => profile.profileId === tools.activeProfileId,
-  );
-  const toolsMeta = tools
-    ? tools.enabled
-      ? activeProfile
-        ? `${activeProfile.displayName} · ${
-            tools.canOperate ? '可操作' : '待连接'
-          } ›`
-        : '已开 · 未选择连接 ›'
-      : '已关 ›'
-    : '读取中 ›';
-
-  const privacyMeta = privacyState
-    ? privacyState.memoryEnabled
-      ? `记忆开启 · ${
-          privacyState.memoryLocation === 'visual_agent'
-            ? '随视觉工具'
-            : '仅这台手机'
-        } ›`
-      : '记忆已关闭 ›'
-    : '读取中 ›';
-
-  const toggleErrands = (value: boolean) => {
-    setErrand(current => (current ? {...current, enabled: value} : current));
-    void errands
-      .setEnabled(value)
-      .then(setErrand)
-      .catch(() => {
-        // Keep the last known state on failure; no silent success.
-      });
-  };
-
-  const toggleTools = (value: boolean) => {
-    if (!tools) {
-      return;
-    }
-    if (value) {
-      void requestOperatePermissions();
-    }
-    void visualAgentTools
-      .setEnabled(value, tools.revision)
-      .then(setTools)
-      .catch(() => {
-        // Optimistic-concurrency or read failure keeps the prior state.
-      });
-  };
-
   return (
     <PageLayout
       title="能力"
-      kicker="它会做什么"
+      showHeader={false}
       backgroundColor={COLORS.background.default}>
       <ScrollView contentContainerStyle={styles.content}>
         <TouchableOpacity
           style={styles.card}
           onPress={() => navigation.navigate('PhoneOperate')}
           activeOpacity={0.85}>
-          <Text style={styles.title}>替我操作手机</Text>
+          <Text style={styles.title}>操控手机</Text>
           <Text style={styles.body}>
-            这台机自己看屏、点应用。对话模型在设置里单独配。
+            看懂屏幕，完成点击、滑动和输入。
           </Text>
-          {errors.phone ? (
+          {phoneError ? (
             <RetryMeta onRetry={reloadPhone} />
           ) : (
             <Text style={styles.meta}>{phoneMeta}</Text>
           )}
         </TouchableOpacity>
 
-        <CapabilityCard
-          title="交代的事"
-          body="你说一次要办，或到点再办。办完进「做过的事」。"
-          meta={errandMeta}
-          value={errand?.enabled ?? false}
-          onToggle={toggleErrands}
-          onPress={() => navigation.navigate('Errands')}
-          error={errors.errand}
-          onRetry={reloadErrand}
-        />
-
-        <CapabilityCard
-          title="视觉工具"
-          body="接入外部视觉智能体，让它看屏、操作。可进机群。"
-          meta={toolsMeta}
-          value={tools?.enabled ?? false}
-          onToggle={toggleTools}
-          onPress={() => navigation.navigate('VisualAgentTools')}
-          error={errors.tools}
-          onRetry={reloadTools}
-        />
-
         <TouchableOpacity
           style={styles.card}
-          onPress={() => navigation.navigate('Privacy')}
+          onPress={() => navigation.navigate('RemoteControl')}
           activeOpacity={0.85}>
-          <Text style={styles.title}>隐私</Text>
-          <Text style={styles.body}>截图去哪、记忆存在哪、诊断包含什么。</Text>
-          {errors.privacy ? (
-            <RetryMeta onRetry={reloadPrivacy} />
-          ) : (
-            <Text style={styles.meta}>{privacyMeta}</Text>
-          )}
+          <Text style={styles.title}>被操控模式</Text>
+          <Text style={styles.body}>作为节点，接收外部指令并执行手机操作。</Text>
+          <Text style={styles.meta}>选择连接方式 ›</Text>
         </TouchableOpacity>
 
         <View style={styles.card}>
           <Text style={styles.title}>后续能力</Text>
-          <Text style={styles.body}>信息整理会放在这里。首页不用改。</Text>
+          <Text style={styles.body}>更多能力，陆续加入。</Text>
         </View>
       </ScrollView>
     </PageLayout>
@@ -208,47 +82,6 @@ const RetryMeta = ({onRetry}: {onRetry: () => void}) => (
   <TouchableOpacity onPress={onRetry} activeOpacity={0.7}>
     <Text style={styles.retryMeta}>读取失败，点此重试</Text>
   </TouchableOpacity>
-);
-
-const CapabilityCard = ({
-  title,
-  body,
-  meta,
-  value,
-  onToggle,
-  onPress,
-  error,
-  onRetry,
-}: {
-  title: string;
-  body: string;
-  meta: string;
-  value: boolean;
-  onToggle: (value: boolean) => void;
-  onPress: () => void;
-  error: boolean;
-  onRetry: () => void;
-}) => (
-  <View style={[styles.card, value && styles.cardActive]}>
-    <View style={styles.topline}>
-      <TouchableOpacity style={styles.copy} onPress={onPress} activeOpacity={0.8}>
-        <Text style={styles.title}>{title}</Text>
-        <Text style={styles.body}>{body}</Text>
-        {error ? (
-          <RetryMeta onRetry={onRetry} />
-        ) : (
-          <Text style={styles.meta}>{meta}</Text>
-        )}
-      </TouchableOpacity>
-      <Switch
-        value={value}
-        onValueChange={onToggle}
-        disabled={error}
-        trackColor={{false: '#d8d7df', true: COLORS.violet}}
-        thumbColor="#ffffff"
-      />
-    </View>
-  </View>
 );
 
 const styles = StyleSheet.create({
@@ -263,17 +96,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.84)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.92)',
-  },
-  cardActive: {
-    borderColor: 'rgba(117,107,240,0.38)',
-  },
-  topline: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-  },
-  copy: {
-    flex: 1,
   },
   title: {
     color: COLORS.text.primary,

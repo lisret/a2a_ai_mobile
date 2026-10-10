@@ -168,11 +168,18 @@ dependencies {
     implementation("com.facebook.react:flipper-integration")
     testImplementation("junit:junit:4.13.2")
 
+    // LAN MCP: embedded HTTP transport (NanoHTTPD 2.3.1 core).
+    // All protocol, auth and body-limit logic lives in com.awesomeproject.lanmcp and
+    // never hand-writes an HTTP parser.
+    implementation("org.nanohttpd:nanohttpd:2.3.1")
+
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")
     } else {
         implementation jscFlavor
     }
+
+    implementation("org.apache.commons:commons-compress:1.26.2")
 
     def sherpaAar = file("${projectDir}/libs/sherpa-onnx.aar")
     if (sherpaAar.exists()) {

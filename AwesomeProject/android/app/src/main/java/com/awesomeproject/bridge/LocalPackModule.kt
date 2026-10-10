@@ -157,9 +157,10 @@ class LocalPackModule(reactContext: ReactApplicationContext) :
                 }
 
                 dir.mkdirs()
-                part = File(dir, "$id.part")
-                if (part.exists()) {
-                    part.delete()
+                val partFile = File(dir, "$id.part")
+                part = partFile
+                if (partFile.exists()) {
+                    partFile.delete()
                 }
 
                 val digest = MessageDigest.getInstance("SHA-256")
@@ -170,7 +171,7 @@ class LocalPackModule(reactContext: ReactApplicationContext) :
                     connection.readTimeout = READ_TIMEOUT_MS
                     connection.instanceFollowRedirects = true
                     connection.inputStream.use { input ->
-                        part.outputStream().use { output ->
+                        partFile.outputStream().use { output ->
                             val buffer = ByteArray(BUFFER_SIZE)
                             while (true) {
                                 val read = input.read(buffer)

@@ -61,7 +61,7 @@ export const PhoneOperateScreen: React.FC = () => {
 
   return (
     <PageLayout
-      title="替我操作手机"
+      title="操控手机"
       showBackButton
       backgroundColor={COLORS.background.default}>
       <ScrollView contentContainerStyle={styles.content} stickyHeaderIndices={[0]}>
@@ -138,6 +138,13 @@ export const PhoneOperateScreen: React.FC = () => {
           accessibilityState={{disabled: !runnable}}
           onPress={activate}>
           <Text style={styles.primaryText}>使用此模式</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.guide}
+          onPress={() => navigation.navigate('VisualAgentTools')}>
+          <Text style={styles.guideText}>连接外部 AI</Text>
+          <Text style={styles.guideChevron}>›</Text>
         </TouchableOpacity>
 
         <View style={styles.heading}>

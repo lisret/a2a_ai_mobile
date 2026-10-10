@@ -13,6 +13,8 @@ import com.facebook.react.bridge.ReactContext
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.awesomeproject.core.MainApplication
+import com.awesomeproject.lanmcp.LanMcpLocalTask
+import com.awesomeproject.lanmcp.DeviceControlOwnership
 
 /**
  * 任务执行前台服务
@@ -59,13 +61,34 @@ class TaskExecutionService : Service() {
 
         Log.d(TAG, "任务执行服务已启动")
         val statusText = intent?.getStringExtra("statusText") ?: "任务执行中..."
-        currentTaskId = intent?.getStringExtra("taskId") ?: currentTaskId
-        currentSessionRevision =
+        val incomingTaskId = intent?.getStringExtra("taskId")
+        val incomingSessionRevision =
             if (intent?.hasExtra("sessionRevision") == true) {
                 intent.getDoubleExtra("sessionRevision", currentSessionRevision)
             } else {
                 currentSessionRevision
             }
+        // 同一 identity 的重复 startService 只是“更新通知”（ServiceManager.updateTaskExecutionService
+        // 走的就是这条路），必须放行，否则会误取消正在运行的任务。
+        val isSameTaskIdentity = incomingTaskId != null &&
+            incomingTaskId == currentTaskId &&
+            incomingSessionRevision == currentSessionRevision
+
+        // 局域网 MCP 服务正在控制设备时，拒绝启动“新的”本地任务，避免两个控制器同时驱动 UI。
+        // 复用既有的精确 identity 取消事件让 JS 侧任务中止，不新增对外 API。
+        if (DeviceControlOwnership.remoteActive() && !isSameTaskIdentity) {
+            Log.w(TAG, "局域网 MCP 服务正在控制设备，拒绝启动新的本地任务")
+            sendCancelTaskEvent(incomingTaskId, incomingSessionRevision)
+            // 只有本次请求是该服务唯一用途时才停止自己：若本服务正在为另一个任务服务，
+            // stopSelf() 会误停那个正在运行的任务（前台通知也已就绪，不会有 5 秒限制问题）。
+            if (currentTaskId == null) {
+                stopSelf()
+            }
+            return START_NOT_STICKY
+        }
+
+        currentTaskId = incomingTaskId ?: currentTaskId
+        currentSessionRevision = incomingSessionRevision
         
         try {
             // 【关键】必须即时创建并显示通知
@@ -112,7 +135,10 @@ class TaskExecutionService : Service() {
             // 其他异常
             Log.e(TAG, "启动前台服务时发生未知错误", e)
         }
-        
+
+        // 即使系统通知失败，本地任务仍可能执行；保守地保留占用标记直到服务销毁。
+        LanMcpLocalTask.setRunning(true)
+
         return START_STICKY // 服务被杀死后自动重启
     }
 
@@ -121,6 +147,8 @@ class TaskExecutionService : Service() {
     }
 
     override fun onDestroy() {
+        // 本地任务结束：立即释放“设备占用”标记，局域网 MCP 恢复可控制。
+        LanMcpLocalTask.setRunning(false)
         super.onDestroy()
         Log.d(TAG, "任务执行服务已销毁")
     }
@@ -257,4 +285,3 @@ class TaskExecutionService : Service() {
         }
     }
 }
-

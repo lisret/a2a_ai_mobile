@@ -14,6 +14,8 @@ export type RootStackParamList = {
   APIKeyGuide: {presetId?: ProviderPresetV1; mode?: 'preset' | 'custom'} | undefined;
   DebugLog: undefined;
   PhoneOperate: undefined;
+  RemoteControl: undefined;
+  LanMcp: undefined;
   // Canonical visual-agent tools route; `OpenClaw` is a compatibility alias that
   // immediately replaces to this route with `{initialPreset: 'openclaw'}`.
   VisualAgentTools: {initialPreset?: BuiltInVisualAgentToolId} | undefined;

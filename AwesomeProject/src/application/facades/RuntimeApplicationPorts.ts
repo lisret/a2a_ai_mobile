@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {acquireLocalDeviceControl} from '../../core/ability/accessibility/LocalDeviceControlLease';
 import {accessibilityService} from '../../core/ability/accessibility/AccessibilityService';
 import {OperateRuntime} from '../../core/engine/operateRuntime/OperateRuntime';
 import type {RuntimeConfigRepository} from '../../core/engine/operateRuntime/contracts/RuntimeConfigContracts';
@@ -177,6 +178,29 @@ export class RuntimeOperatePort implements OperateApplicationPort {
   }
 
   async start(instruction: string): Promise<StartOperateResult> {
+    let release: (() => Promise<void>) | null;
+    try {
+      release = await acquireLocalDeviceControl(newId('device-owner'));
+    } catch {
+      return {kind: 'blocked', blocker: {code: 'device_control_busy', message: '暂时无法确认设备控制状态，请稍后重试。'}};
+    }
+    if (!release) {
+      return {kind: 'blocked', blocker: {code: 'device_control_busy', message: '设备正在被操控或已有任务运行，请先关闭被操控模式或等待任务结束。'}};
+    }
+    try {
+      const result = await this.startWithDeviceControl(instruction, release);
+      if (result.kind === 'blocked') await release();
+      return result;
+    } catch (error) {
+      await release();
+      throw error;
+    }
+  }
+
+  private async startWithDeviceControl(
+    instruction: string,
+    release: () => Promise<void>,
+  ): Promise<StartOperateResult> {
     const sessionStore = new OperateSessionStore();
     const visualRegistry = createBuiltInVisualAgentToolRegistry();
     const resolver = new OperateSessionResolver({
@@ -217,7 +241,11 @@ export class RuntimeOperatePort implements OperateApplicationPort {
     };
     this.abort = new AbortController();
     this.sequence = 0;
-    void this.drive(runtime, sessionStore, visualRegistry, taskId, sessionRevision, instruction);
+    // Hold ownership through the full drive, including cancellation cleanup and errors.
+    void this.drive(runtime, sessionStore, visualRegistry, taskId, sessionRevision, instruction)
+      .catch(error => this.fail('operate_failed', error instanceof Error ? error.message : '操作失败'))
+      .finally(release)
+      .catch(() => this.fail('device_control_release_failed', '设备控制状态未释放，请重新启动 App。'));
     return {kind: 'started', taskId, sessionRevision};
   }
 

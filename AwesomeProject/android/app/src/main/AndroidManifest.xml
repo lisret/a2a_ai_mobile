@@ -81,5 +81,13 @@
         android:enabled="true"
         android:exported="false"
         android:foregroundServiceType="specialUse" />
+
+      <!-- 局域网 MCP 服务：仅用户显式启动，仅绑定当前私有 Wi-Fi IPv4:8765，
+           前台常驻通知含停止按钮，网络变化即停止，不自动重启 -->
+      <service
+        android:name=".lanmcp.LanMcpService"
+        android:enabled="true"
+        android:exported="false"
+        android:foregroundServiceType="specialUse" />
     </application>
 </manifest>

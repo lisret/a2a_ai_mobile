@@ -12,7 +12,6 @@ import {useNavigation, useFocusEffect} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import type {RootStackParamList} from '@shared/types/navigation';
 import {PageLayout} from '@shared/components/PageLayout';
-import {NoNoMascot} from '@shared/components/NoNoMascot';
 import {COLORS} from '@shared/constants';
 import {ConfirmModal} from '@shared/components/ConfirmModal';
 import {LoadErrorView} from '@shared/components/LoadErrorView';
@@ -174,8 +173,7 @@ export const TaskHistoryScreenTab: React.FC = () => {
     return (
       <PageLayout
         title="活动"
-        kicker="共同经历"
-        headerAccessory={<NoNoMascot size={50} />}
+        showHeader={false}
         backgroundColor={COLORS.background.default}>
         <View style={styles.listContent}>
           <LoadErrorView title="暂时读不到活动记录" onRetry={retry} />
@@ -187,8 +185,7 @@ export const TaskHistoryScreenTab: React.FC = () => {
   return (
     <PageLayout
       title="活动"
-      kicker="共同经历"
-      headerAccessory={<NoNoMascot size={50} />}
+      showHeader={false}
       backgroundColor={COLORS.background.default}>
       {tab === 'remember' ? (
         <ScrollView contentContainerStyle={styles.listContent}>

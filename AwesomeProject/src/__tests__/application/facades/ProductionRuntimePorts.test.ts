@@ -1,3 +1,4 @@
+import * as deviceControl from '../../../core/ability/accessibility/LocalDeviceControlLease';
 import type {
   RuntimeConfigEnvelopeV1,
   RuntimeConfigRepository,
@@ -71,6 +72,38 @@ describe('production application ports', () => {
     AsyncStorage.removeItem.mockImplementation(async (key: string) => {
       delete storage[key];
     });
+  });
+
+  it('refuses a local task before config or planning when remote control owns the device', async () => {
+    const acquire = jest.spyOn(deviceControl, 'acquireLocalDeviceControl').mockResolvedValue(null);
+    try {
+      const repo = repoWith(emptyRoute());
+      const port = new RuntimeOperatePort(repo, new TaskUiEventBus(), {} as never, {} as never);
+      await expect(port.start('打开设置')).resolves.toMatchObject({kind: 'blocked', blocker: {code: 'device_control_busy'}});
+      expect(repo.load).not.toHaveBeenCalled();
+    } finally { acquire.mockRestore(); }
+  });
+
+  it('releases device ownership when session setup is blocked', async () => {
+    const release = jest.fn().mockResolvedValue(undefined);
+    const acquire = jest.spyOn(deviceControl, 'acquireLocalDeviceControl').mockResolvedValue(release);
+    try {
+      const port = new RuntimeOperatePort(repoWith(emptyRoute()), new TaskUiEventBus(), {resolveExecutionTarget: jest.fn()} as never, {} as never);
+      await expect(port.start('打开设置')).resolves.toMatchObject({kind: 'blocked'});
+      expect(release).toHaveBeenCalledTimes(1);
+    } finally { acquire.mockRestore(); }
+  });
+
+  it('releases device ownership on unexpected config failure', async () => {
+    const release = jest.fn().mockResolvedValue(undefined);
+    const acquire = jest.spyOn(deviceControl, 'acquireLocalDeviceControl').mockResolvedValue(release);
+    try {
+      const repo = repoWith(emptyRoute());
+      (repo.load as jest.Mock).mockRejectedValue(new Error('storage unavailable'));
+      const port = new RuntimeOperatePort(repo, new TaskUiEventBus(), {} as never, {} as never);
+      await expect(port.start('打开设置')).rejects.toThrow('storage unavailable');
+      expect(release).toHaveBeenCalledTimes(1);
+    } finally { acquire.mockRestore(); }
   });
 
   it('companion getState does not throw when no companion model is configured', async () => {

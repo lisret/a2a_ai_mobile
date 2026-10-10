@@ -5,7 +5,7 @@
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>NoNo 全应用交互原型</title>
+    <title>NoNo Android 全应用交互原型</title>
     <style>
       :root {
         color-scheme: light;
@@ -2409,6 +2409,174 @@
         padding-right: 96px;
       }
 
+      .agent-node-page {
+        padding-bottom: 132px;
+        scroll-behavior: smooth;
+      }
+
+      .agent-node-page .setting-row,
+      .agent-provider-card,
+      .agent-task-card {
+        transition: transform 180ms var(--motion-ease),
+          border-color 220ms ease, box-shadow 220ms ease,
+          background 220ms ease;
+      }
+
+      .agent-node-page .setting-row {
+        position: relative;
+        overflow: hidden;
+      }
+
+      .agent-node-hero {
+        isolation: isolate;
+      }
+
+      .agent-node-hero::before {
+        content: '';
+        width: 112px;
+        height: 112px;
+        position: absolute;
+        right: -28px;
+        bottom: -52px;
+        z-index: -1;
+        border-radius: 50%;
+        background: radial-gradient(
+          circle,
+          rgba(141, 244, 226, 0.28),
+          transparent 68%
+        );
+      }
+
+      .agent-node-eyebrow,
+      .agent-session-state-line {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+
+      .agent-online-dot {
+        width: 7px;
+        height: 7px;
+        flex: 0 0 auto;
+        border-radius: 50%;
+        background: var(--mint);
+        box-shadow: 0 0 0 0 rgba(141, 244, 226, 0.32);
+        animation: agent-online-breathe 2.4s ease-in-out infinite;
+      }
+
+      .agent-online-dot.is-paused {
+        background: #858896;
+        box-shadow: none;
+        animation: none;
+      }
+
+      .agent-provider-list {
+        gap: 9px;
+      }
+
+      .agent-provider-card {
+        width: 100%;
+        min-height: 70px;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        text-align: left;
+      }
+
+      .agent-provider-card:active {
+        transform: scale(0.985);
+      }
+
+      .agent-provider-card.is-active {
+        background: linear-gradient(
+          145deg,
+          rgba(255, 255, 255, 0.96),
+          rgba(239, 237, 255, 0.92)
+        );
+        animation: agent-provider-select 260ms var(--motion-ease);
+      }
+
+      .agent-provider-card .status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+      }
+
+      .agent-provider-card .status-badge::before {
+        content: '';
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: currentColor;
+        opacity: 0.72;
+      }
+
+      .agent-node-details {
+        animation: agent-details-refresh 240ms var(--motion-ease) both;
+      }
+
+      .agent-task-card {
+        position: relative;
+        overflow: hidden;
+      }
+
+      .agent-task-topline {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .agent-task-progress {
+        height: 5px;
+        margin-top: 13px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: #ebe9f5;
+      }
+
+      .agent-task-progress span {
+        display: block;
+        width: var(--agent-task-progress, 0%);
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(90deg, var(--violet), #9a91ff);
+        transition: width 280ms var(--motion-ease);
+      }
+
+      .agent-node-page.agent-node-blocked .setting-row,
+      .agent-node-page.agent-node-blocked .agent-provider-list {
+        animation: agent-control-reject 240ms ease;
+      }
+
+      @keyframes agent-online-breathe {
+        50% {
+          box-shadow: 0 0 0 5px rgba(141, 244, 226, 0);
+          opacity: 0.78;
+        }
+      }
+
+      @keyframes agent-provider-select {
+        from {
+          transform: scale(0.985);
+          box-shadow: 0 7px 18px rgba(83, 75, 188, 0.06);
+        }
+      }
+
+      @keyframes agent-details-refresh {
+        from {
+          opacity: 0.58;
+          transform: translateY(5px);
+        }
+      }
+
+      @keyframes agent-control-reject {
+        30% {
+          transform: translateX(-3px);
+        }
+        65% {
+          transform: translateX(3px);
+        }
+      }
+
       @media (max-width: 560px) {
         #app {
           display: block;
@@ -2685,17 +2853,30 @@
         ],
         capabilities: {
           phoneOperate: true,
-          openclaw: false,
+          agentConsole: false,
           errands: true,
         },
         privacy: {
           memoryEnabled: true,
           memoryLocation: 'device',
+          memoryAgentProvider: null,
         },
-        openclaw: {
-          gateway: 'gateway.example.ai',
-          deviceId: 'nono-pixel-demo',
-          cluster: '未加入',
+        agentConsole: {
+          activeProvider: 'openclaw',
+          node: {
+            identity: 'nono-pixel-demo',
+            workspace: '默认工作区',
+          },
+          providers: {
+            openclaw: {
+              name: 'OpenClaw',
+              endpoint: 'gateway.example.ai',
+            },
+            dsh: {
+              name: 'DSH',
+              endpoint: 'agent.dsh.example.ai',
+            },
+          },
         },
         settings: {
           completionSound: true,
@@ -2749,6 +2930,18 @@
         renderToast();
       }
 
+      function pulseAgentNodeBlocked(target) {
+        const page = target.closest('.agent-node-page');
+        if (!page) return;
+        page.classList.remove('agent-node-blocked');
+        void page.offsetWidth;
+        page.classList.add('agent-node-blocked');
+        window.setTimeout(
+          () => page.classList.remove('agent-node-blocked'),
+          280,
+        );
+      }
+
       function createDemoTask(instruction) {
         const cleanInstruction = String(instruction || '').trim();
         if (!cleanInstruction) {
@@ -2765,6 +2958,9 @@
         appState.task = {
           id: `demo-${Date.now()}`,
           instruction: cleanInstruction,
+          agentProviderId: appState.capabilities.agentConsole
+            ? appState.agentConsole.activeProvider
+            : null,
           status: 'running',
           stepIndex: 0,
           steps: [...DEMO_STEPS],
@@ -3086,8 +3282,12 @@
       }
 
       function isOperateReady() {
-        if (appState.capabilities.openclaw) return true;
+        if (appState.capabilities.agentConsole) return true;
         return appState.capabilities.phoneOperate && isAgentRunnable();
+      }
+
+      function activeAgentProvider(providerId = appState.agentConsole.activeProvider) {
+        return appState.agentConsole.providers[providerId];
       }
 
       function activeCompanion() {
@@ -3149,8 +3349,14 @@
       }
 
       function redirectForOperateSetup() {
-        if (!appState.capabilities.phoneOperate && !appState.capabilities.openclaw) {
-          showToast('要操作手机，请先打开「替我操作手机」或 OpenClaw', 'warning');
+        if (
+          !appState.capabilities.phoneOperate &&
+          !appState.capabilities.agentConsole
+        ) {
+          showToast(
+            '要操作手机，请先打开「替我操作手机」或 Agent 节点',
+            'warning',
+          );
           navigate('capabilities');
           return;
         }
@@ -3159,9 +3365,11 @@
       }
 
       function memoryLocationLabel() {
-        return appState.privacy.memoryLocation === 'openclaw'
-          ? '随 OpenClaw 在网关'
-          : '仅这台手机';
+        if (appState.privacy.memoryLocation !== 'agent') return '仅这台手机';
+        const provider = activeAgentProvider(
+          appState.privacy.memoryAgentProvider,
+        );
+        return provider ? `随 ${provider.name} 在服务端` : '随 Agent 在服务端';
       }
 
       function memoryKindLabel(kind) {
@@ -3587,9 +3795,13 @@
           return appState.stack[0] === 'settings' ? 'settings' : 'capabilities';
         }
         if (
-          ['capabilities', 'models', 'openclaw', 'privacy', 'errands'].includes(
-            route,
-          )
+          [
+            'capabilities',
+            'models',
+            'agent-console',
+            'privacy',
+            'errands',
+          ].includes(route)
         ) {
           return 'capabilities';
         }
@@ -4239,7 +4451,8 @@
 
       function renderCapabilities() {
         const phoneOn = appState.capabilities.phoneOperate;
-        const clawOn = appState.capabilities.openclaw;
+        const agentOn = appState.capabilities.agentConsole;
+        const provider = activeAgentProvider();
         const errandsOn = appState.capabilities.errands;
         const memoryOn = appState.privacy.memoryEnabled;
         const errandCount = appState.memories.filter(
@@ -4278,18 +4491,18 @@
                   <button class="toggle" type="button" data-action="toggle-capability" data-key="errands" aria-label="开关交代的事" aria-pressed="${errandsOn}"></button>
                 </div>
               </article>
-              <article class="surface-card ${clawOn ? 'is-active' : ''}">
+              <article class="surface-card ${agentOn ? 'is-active' : ''}">
                 <div class="card-topline">
-                  <button class="capability-open" type="button" data-action="open-capability" data-id="openclaw">
-                    <strong>OpenClaw 远程</strong>
-                    <span>大脑在网关，这台手机当手脚；可进机群。</span>
+                  <button class="capability-open" type="button" data-action="open-capability" data-id="agent-console">
+                    <strong>Agent 节点</strong>
+                    <span>将这台 Android 接入 Agent，接受远程任务。</span>
                     <small>${
-                      clawOn
-                        ? `已开 · ${escapeHtml(appState.openclaw.gateway)}`
+                      agentOn
+                        ? `已开 · ${escapeHtml(provider.name)}`
                         : '已关'
                     } ›</small>
                   </button>
-                  <button class="toggle" type="button" data-action="toggle-capability" data-key="openclaw" aria-label="开关 OpenClaw 远程" aria-pressed="${clawOn}"></button>
+                  <button class="toggle" type="button" data-action="toggle-capability" data-key="agentConsole" aria-label="开关 Agent 节点" aria-pressed="${agentOn}"></button>
                 </div>
               </article>
               <article class="surface-card">
@@ -4310,27 +4523,103 @@
           </main>`;
       }
 
-      function renderOpenClaw() {
-        const on = appState.capabilities.openclaw;
+      function renderAgentConsole() {
+        const on = appState.capabilities.agentConsole;
+        const provider = activeAgentProvider();
+        const node = appState.agentConsole.node;
+        const remoteTask =
+          isTaskBusy() &&
+          appState.task?.agentProviderId === appState.agentConsole.activeProvider
+            ? appState.task
+            : null;
         return `
-          <main class="app-screen" data-route="openclaw">
+          <main class="app-screen agent-node-page" data-route="agent-console">
             <div class="status-bar"><span>9:41</span><span class="status-icons">● ● 100%</span></div>
-            ${renderSubpageHeader('OpenClaw 远程')}
-            <article class="setting-row"><span class="setting-copy"><strong>使用远程大脑</strong><span>只接管操作：点应用走网关。首页说话仍用设置里的陪伴模型。</span></span><button class="toggle" type="button" data-action="toggle-capability" data-key="openclaw" aria-label="开关 OpenClaw 远程" aria-pressed="${on}"></button></article>
-            <div class="section-heading"><h3>网关</h3><span>演示占位</span></div>
-            <section class="card-list">
-              <article class="surface-card"><div class="card-copy"><strong>网关地址</strong><span>${escapeHtml(
-                appState.openclaw.gateway,
-              )}</span></div></article>
+            ${renderSubpageHeader('Agent 节点')}
+            <article class="setting-row"><span class="setting-copy"><strong>接受远程任务</strong><span>打开后，这台 Android 会把看屏和操作能力交给当前活动 Agent。</span></span><button class="toggle" type="button" data-action="toggle-capability" data-key="agentConsole" aria-label="开关 Agent 节点" aria-pressed="${on}"></button></article>
+            <section class="feature-hero agent-node-hero agent-node-details"><div class="agent-node-eyebrow"><span class="agent-online-dot ${
+              on ? '' : 'is-paused'
+            }" aria-hidden="true"></span><small>ANDROID EXECUTION NODE</small></div><h2>${
+              on
+                ? `正在接受 ${escapeHtml(provider.name)} 任务`
+                : 'Agent 节点已暂停'
+            }</h2><p>${escapeHtml(
+              node.identity,
+            )} · 这台设备只负责执行与回传，不负责 Agent 对话。</p></section>
+            <div class="section-heading"><h3>Agent 连接</h3><span>仅一个活动</span></div>
+            <section class="card-list agent-provider-list" aria-label="已保存的 Agent 连接">
+              ${Object.entries(appState.agentConsole.providers)
+                .map(
+                  ([id, item]) =>
+                    `<button type="button" class="surface-card activity-card agent-provider-card ${
+                      appState.agentConsole.activeProvider === id
+                        ? 'is-active'
+                        : ''
+                    }" data-action="select-node-agent" data-provider="${id}" aria-pressed="${
+                      appState.agentConsole.activeProvider === id
+                    }"><span class="status-badge">${
+                      appState.agentConsole.activeProvider === id
+                        ? '活动'
+                        : '已保存'
+                    }</span><span class="card-copy"><strong>${escapeHtml(
+                      item.name,
+                    )}</strong><span>${escapeHtml(
+                      item.endpoint,
+                    )}</span></span><span>›</span></button>`,
+                )
+                .join('')}
+            </section>
+            <p class="pipeline-caption">可以保存多个连接；切换活动 Agent 前必须结束当前任务。</p>
+            <div class="section-heading"><h3>本机身份</h3><span>演示占位</span></div>
+            <section class="card-list agent-node-details">
               <article class="surface-card"><div class="card-copy"><strong>设备身份</strong><span>${escapeHtml(
-                appState.openclaw.deviceId,
+                node.identity,
               )}</span></div></article>
-              <article class="surface-card"><div class="card-copy"><strong>集群</strong><span>${escapeHtml(
-                appState.openclaw.cluster,
+              <article class="surface-card"><div class="card-copy"><strong>工作区</strong><span>${escapeHtml(
+                node.workspace,
               )} · 本原型不联网</span></div></article>
             </section>
-            <div class="section-heading"><h3>截图回传</h3><span>必读</span></div>
-            <article class="surface-card"><div class="card-copy"><strong>只接管操作</strong><span>远程开启时，屏幕画面会送到网关，本机三种操作模式不参与该次任务。陪伴对话不走网关，仍用设置里的陪伴模型。</span></div></article>
+            <div class="section-heading"><h3>允许使用</h3><span>本机授权</span></div>
+            <section class="card-list">
+              <article class="surface-card"><span class="status-badge">✓</span><div class="card-copy"><strong>查看屏幕</strong><span>任务执行期间截图并回传给活动 Agent。</span></div></article>
+              <article class="surface-card"><span class="status-badge">✓</span><div class="card-copy"><strong>点击、滑动与输入</strong><span>只执行通过动作校验的结构化指令。</span></div></article>
+              <article class="surface-card"><span class="status-badge">!</span><div class="card-copy"><strong>风险操作始终确认</strong><span>付款、授权和不可逆操作不会静默执行。</span></div></article>
+            </section>
+            <div class="section-heading"><h3>当前任务</h3><span>${escapeHtml(
+              provider.name,
+            )}</span></div>
+            <article class="surface-card agent-task-card agent-node-details ${
+              remoteTask ? 'is-active' : ''
+            }"><div class="agent-task-topline"><div class="card-copy"><strong>${
+              remoteTask
+                ? escapeHtml(remoteTask.instruction)
+                : on
+                  ? '等待远程任务'
+                  : '节点未接收任务'
+            }</strong><span>${
+              remoteTask
+                ? `步骤 ${Math.min(
+                    remoteTask.stepIndex + 1,
+                    remoteTask.steps.length,
+                  )}/${remoteTask.steps.length} · ${escapeHtml(
+                    remoteTask.steps[remoteTask.stepIndex],
+                  )}`
+                : on
+                  ? `${escapeHtml(provider.name)} 可以向这台设备下发任务。`
+                  : '打开 Agent 节点后才会接受远程任务。'
+            }</span></div>${
+              remoteTask
+                ? '<span class="agent-session-state-line"><span class="agent-online-dot" aria-hidden="true"></span><span class="status-badge">执行中</span></span>'
+                : ''
+            }</div>${
+              remoteTask
+                ? `<div class="agent-task-progress" style="--agent-task-progress:${Math.round(
+                    ((remoteTask.stepIndex + 1) / remoteTask.steps.length) * 100,
+                  )}%" aria-label="任务进度"><span></span></div>`
+                : ''
+            }</article>
+            <div class="section-heading"><h3>数据边界</h3><span>必读</span></div>
+            <article class="surface-card"><div class="card-copy"><strong>Agent 只接管任务执行</strong><span>操作画面只送到当前活动 Agent；陪伴对话仍使用设置里的陪伴模型。</span></div></article>
           </main>`;
       }
 
@@ -4347,7 +4636,7 @@
               <article class="surface-card"><div class="card-copy"><strong>定时</strong><span>到点再办。这一次办完仍留在交代里，直到你取消。</span></div></article>
             </section>
             <div class="section-heading"><h3>怎么执行</h3><span>不另配模型</span></div>
-            <article class="surface-card"><div class="card-copy"><strong>用手，不用另一颗大脑</strong><span>到点后走已开启的「替我操作手机」或 OpenClaw。风险操作仍要确认。陪伴模型和操作模型都不因为交代而改。</span></div></article>
+            <article class="surface-card"><div class="card-copy"><strong>用手，不用另一颗大脑</strong><span>到点后走已开启的「替我操作手机」或 Agent 节点。风险操作仍要确认。陪伴模型和操作模型都不因为交代而改。</span></div></article>
           </main>`;
       }
 
@@ -4366,23 +4655,25 @@
               <button type="button" role="tab" data-action="select-memory-location" data-location="device" class="${
                 location === 'device' ? 'is-selected' : ''
               }">仅这台手机</button>
-              <button type="button" role="tab" data-action="select-memory-location" data-location="openclaw" class="${
-                location === 'openclaw' ? 'is-selected' : ''
-              }">随 OpenClaw 在网关</button>
+              <button type="button" role="tab" data-action="select-memory-location" data-location="agent" class="${
+                location === 'agent' ? 'is-selected' : ''
+              }">随 Agent 在服务端</button>
             </div>
             <p class="pipeline-caption">${
-              location === 'openclaw'
-                ? '远程任务里的记忆会记在网关，不默认同步回本机。'
+              location === 'agent'
+                ? '远程任务里的记忆会记在当前 Agent 服务端，不默认同步回本机。'
                 : '三种本机运行方式下，记忆只留在这台手机。'
             }</p>
             <div class="section-heading"><h3>数据去向</h3><span>总览</span></div>
             <section class="card-list">
-              <article class="surface-card"><div class="card-copy"><strong>陪伴对话</strong><span>说话内容发给设置里的陪伴模型，不走操作模型和 OpenClaw。</span></div></article>
+              <article class="surface-card"><div class="card-copy"><strong>陪伴对话</strong><span>说话内容发给设置里的陪伴模型，不走操作模型或 Agent 节点。</span></div></article>
               <article class="surface-card"><div class="card-copy"><strong>替我操作手机</strong><span>本地视觉：截图不离机。云端模式：截图会发给所选视觉模型。</span></div></article>
-              <article class="surface-card"><div class="card-copy"><strong>OpenClaw 远程</strong><span>${
-                appState.capabilities.openclaw
-                  ? '当前开着：操作时的屏幕画面会送到网关。陪伴对话仍留在本机陪伴模型。'
-                  : '当前关着：不会把截图送到网关。'
+              <article class="surface-card"><div class="card-copy"><strong>Agent 节点</strong><span>${
+                appState.capabilities.agentConsole
+                  ? `当前开着：操作画面会送到 ${escapeHtml(
+                      activeAgentProvider().name,
+                    )}。陪伴对话仍使用陪伴模型。`
+                  : '当前关着：不会把操作画面送到远程 Agent。'
               }</span></div></article>
               <article class="surface-card"><div class="card-copy"><strong>记忆</strong><span>称呼和偏好。不存原始截图、完整屏幕文字或 API Key。</span></div></article>
               <article class="surface-card"><div class="card-copy"><strong>交代的事</strong><span>只存你交代的目标和时间，不存截图。单次办完进「做过的事」。</span></div></article>
@@ -4730,7 +5021,7 @@
           '关于 NoNo',
         )}<section class="about-mark">${renderAppIcon(
           84,
-        )}<h2>NoNo</h2><p>交互原型 1.0 · Pearl Orbit</p></section><section class="card-list"><article class="surface-card"><div class="card-copy"><strong>离线演示</strong><span>所有数据仅存在于当前页面内存，刷新后恢复初始状态。</span></div></article><article class="surface-card"><div class="card-copy"><strong>隐私边界</strong><span>不会访问网络、系统权限、真实通知或设备数据。</span></div></article></section><div class="section-heading"><h3>原型控制</h3><span>不可恢复</span></div><button class="danger-button" type="button" data-action="reset-demo">重置全部演示数据</button></main>`;
+        )}<h2>NoNo</h2><p>Android 交互原型 1.0 · Pearl Orbit</p></section><section class="card-list"><article class="surface-card"><div class="card-copy"><strong>离线演示</strong><span>所有数据仅存在于当前页面内存，刷新后恢复初始状态。</span></div></article><article class="surface-card"><div class="card-copy"><strong>平台边界</strong><span>此文件展示 Android 的无障碍、悬浮窗和 ADB 产品语义，不代表 iOS 能力。</span></div></article><article class="surface-card"><div class="card-copy"><strong>隐私边界</strong><span>不会访问网络、系统权限、真实通知或设备数据。</span></div></article></section><div class="section-heading"><h3>原型控制</h3><span>不可恢复</span></div><button class="danger-button" type="button" data-action="reset-demo">重置全部演示数据</button></main>`;
       }
 
       function renderHome() {
@@ -4969,7 +5260,7 @@
           'avatar-looks': renderAvatarLooks,
           'model-form': () => renderModelForm(appState.viewData.mode),
           'api-guide': renderApiKeyGuide,
-          openclaw: renderOpenClaw,
+          'agent-console': renderAgentConsole,
           errands: renderErrands,
           privacy: renderPrivacy,
           activity: renderActivity,
@@ -4988,10 +5279,16 @@
         const currentLayer = document.querySelector(
           '[data-screen-layer="current"]',
         );
-        const prevScroll =
-          currentLayer.querySelector('.page-scroll')?.scrollTop || 0;
+        const previousScroller =
+          currentLayer.querySelector('.page-scroll') ||
+          currentLayer.querySelector('.app-screen');
+        const sameRoute = currentLayer.dataset.renderedRoute === appState.route;
+        const prevScroll = sameRoute ? previousScroller?.scrollTop || 0 : 0;
         currentLayer.innerHTML = renderPageMarkup();
-        const nextScroll = currentLayer.querySelector('.page-scroll');
+        currentLayer.dataset.renderedRoute = appState.route;
+        const nextScroll =
+          currentLayer.querySelector('.page-scroll') ||
+          currentLayer.querySelector('.app-screen');
         if (nextScroll) nextScroll.scrollTop = prevScroll;
         updateTabBar();
         renderOverlay();
@@ -5047,22 +5344,57 @@
           const dest = {
             phone: 'models',
             errands: 'errands',
-            openclaw: 'openclaw',
+            'agent-console': 'agent-console',
             privacy: 'privacy',
           }[target.dataset.id];
           if (dest) openCapabilityPage(dest);
+        } else if (action === 'select-node-agent') {
+          if (isTaskBusy()) {
+            pulseAgentNodeBlocked(target);
+            showToast('任务进行中不能切换控制端', 'warning');
+            return;
+          }
+          if (appState.agentConsole.activeProvider === target.dataset.provider) {
+            return;
+          }
+          appState.agentConsole.activeProvider = target.dataset.provider;
+          if (appState.privacy.memoryLocation === 'agent') {
+            appState.privacy.memoryLocation = 'device';
+            appState.privacy.memoryAgentProvider = null;
+            showToast(
+              `已切换到 ${activeAgentProvider().name}，记忆改回仅这台手机`,
+              'warning',
+            );
+          } else {
+            showToast(`已切换到 ${activeAgentProvider().name}`, 'success');
+          }
+          renderApp();
         } else if (action === 'toggle-capability') {
           const key = target.dataset.key;
+          if (
+            key === 'agentConsole' &&
+            appState.capabilities.agentConsole &&
+            isTaskBusy() &&
+            appState.task?.agentProviderId
+          ) {
+            pulseAgentNodeBlocked(target);
+            showToast('远程任务进行中，暂时不能关闭 Agent 节点', 'warning');
+            return;
+          }
           appState.capabilities[key] = !appState.capabilities[key];
-          if (key === 'openclaw' && appState.capabilities.openclaw) {
-            showToast('远程开启：操作走网关。首页说话仍用陪伴模型', 'info');
+          if (key === 'agentConsole' && appState.capabilities.agentConsole) {
+            showToast(
+              `Agent 节点已开启：当前控制端是 ${activeAgentProvider().name}`,
+              'info',
+            );
           } else if (
-            key === 'openclaw' &&
-            !appState.capabilities.openclaw &&
-            appState.privacy.memoryLocation === 'openclaw'
+            key === 'agentConsole' &&
+            !appState.capabilities.agentConsole &&
+            appState.privacy.memoryLocation === 'agent'
           ) {
             appState.privacy.memoryLocation = 'device';
-            showToast('OpenClaw 已关，记忆改回仅这台手机', 'warning');
+            appState.privacy.memoryAgentProvider = null;
+            showToast('Agent 节点已关，记忆改回仅这台手机', 'warning');
           } else {
             showToast(
               appState.capabilities[key] ? '能力已打开' : '能力已关闭',
@@ -5081,13 +5413,17 @@
           renderApp();
         } else if (action === 'select-memory-location') {
           if (
-            target.dataset.location === 'openclaw' &&
-            !appState.capabilities.openclaw
+            target.dataset.location === 'agent' &&
+            !appState.capabilities.agentConsole
           ) {
-            showToast('先打开 OpenClaw，才能把记忆放在网关', 'warning');
+            showToast('先打开 Agent 节点，才能把记忆放在服务端', 'warning');
             return;
           }
           appState.privacy.memoryLocation = target.dataset.location;
+          appState.privacy.memoryAgentProvider =
+            target.dataset.location === 'agent'
+              ? appState.agentConsole.activeProvider
+              : null;
           showToast(`记忆${memoryLocationLabel()}`, 'success');
           renderApp();
         } else if (action === 'select-activity-tab') {
@@ -5469,9 +5805,17 @@
         sheen: 0.45,
         sheenColor: new THREE.Color(0xffffff),
       });
-      const body = new THREE.Mesh(new THREE.SphereGeometry(0.78, 48, 36), bodyMat);
-      body.scale.set(1, 0.92, 0.86);
+      const body = new THREE.Mesh(new THREE.SphereGeometry(0.78, 56, 40), bodyMat);
+      body.scale.set(1, 0.9, 0.84);
       root.add(body);
+      const cheekMat = bodyMat.clone();
+      cheekMat.color = new THREE.Color(0xb8a8f4);
+      const leftCheek = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 12), cheekMat);
+      leftCheek.position.set(-0.52, -0.08, 0.42);
+      leftCheek.scale.set(1, 0.72, 0.7);
+      const rightCheek = leftCheek.clone();
+      rightCheek.position.x = 0.52;
+      root.add(leftCheek, rightCheek);
       const shadow = new THREE.Mesh(
         new THREE.CircleGeometry(0.72, 32),
         new THREE.MeshBasicMaterial({
@@ -5484,26 +5828,29 @@
       shadow.position.y = -0.9;
       root.add(shadow);
 
-      const earGeo = new THREE.CapsuleGeometry(0.09, 0.28, 6, 12);
-      const leftEar = new THREE.Mesh(earGeo, bodyMat);
-      leftEar.position.set(-0.72, 0.08, 0);
-      leftEar.rotation.z = 0.35;
-      const rightEar = leftEar.clone();
-      rightEar.position.x = 0.72;
-      rightEar.rotation.z = -0.35;
-      root.add(leftEar, rightEar);
+      const earGeo = new THREE.CapsuleGeometry(0.1, 0.3, 8, 14);
+      function makeEar(sign) {
+        const pivot = new THREE.Group();
+        pivot.position.set(sign * 0.68, 0.14, -0.02);
+        const ear = new THREE.Mesh(earGeo, bodyMat);
+        ear.position.set(0, 0.24, 0);
+        ear.rotation.z = sign * 0.22;
+        pivot.add(ear);
+        root.add(pivot);
+        return pivot;
+      }
+      const leftEar = makeEar(-1);
+      const rightEar = makeEar(1);
 
-      const visor = new THREE.Mesh(
-        new THREE.BoxGeometry(0.92, 0.38, 0.18),
-        new THREE.MeshPhysicalMaterial({
-          color: 0x1b1d30,
-          roughness: 0.18,
-          metalness: 0.35,
-          clearcoat: 0.8,
-        }),
-      );
-      visor.position.set(0, 0.06, 0.62);
-      visor.scale.set(1, 1, 0.7);
+      const visorMat = new THREE.MeshPhysicalMaterial({
+        color: 0x1b1d30,
+        roughness: 0.16,
+        metalness: 0.42,
+        clearcoat: 0.86,
+      });
+      const visor = new THREE.Mesh(new THREE.SphereGeometry(0.48, 28, 18), visorMat);
+      visor.position.set(0, 0.07, 0.58);
+      visor.scale.set(1.12, 0.42, 0.38);
       root.add(visor);
 
       const eyeMat = new THREE.MeshStandardMaterial({
@@ -5512,27 +5859,29 @@
         emissiveIntensity: 1.4,
       });
       const eyes = new THREE.Group();
-      const leftEye = new THREE.Mesh(new THREE.SphereGeometry(0.07, 16, 12), eyeMat);
-      leftEye.position.set(-0.16, 0.08, 0.08);
+      const leftEye = new THREE.Mesh(new THREE.SphereGeometry(0.075, 16, 12), eyeMat);
+      leftEye.position.set(-0.16, 0.04, 0.1);
       const rightEye = leftEye.clone();
       rightEye.position.x = 0.16;
-      eyes.position.set(0, 0.06, 0.72);
+      eyes.position.set(0, 0.08, 0.74);
       eyes.add(leftEye, rightEye);
       root.add(eyes);
 
       const light = new THREE.Mesh(
-        new THREE.SphereGeometry(0.055, 12, 10),
+        new THREE.SphereGeometry(0.05, 12, 10),
         new THREE.MeshStandardMaterial({
           color: 0x8df4e2,
           emissive: 0x8df4e2,
           emissiveIntensity: 1.6,
         }),
       );
-      light.position.set(0.34, 0.18, 0.7);
+      light.position.set(0.36, 0.16, 0.68);
       root.add(light);
 
       let layout = 'hidden';
       let mood = 'idle';
+      let moodStarted = 0;
+      let blinkAt = 1.8;
       let look = {x: 0, y: 0};
       let targetLook = {x: 0, y: 0};
 
@@ -5556,8 +5905,15 @@
         error: 0xff9b79,
       };
 
+      function burst(t, duration, cycles) {
+        if (t <= 0 || t >= duration) return 0;
+        const u = t / duration;
+        return Math.sin(u * Math.PI * cycles) * (1 - u);
+      }
+
       function applyMood(next) {
         mood = next;
+        moodStarted = performance.now();
         const color = moodColors[next] || moodColors.idle;
         eyeMat.color.setHex(color);
         eyeMat.emissive.setHex(color);
@@ -5568,16 +5924,56 @@
 
       function tick(now) {
         const t = now * 0.001;
+        const phase = (now - moodStarted) * 0.001;
         look.x += (targetLook.x - look.x) * 0.08;
         look.y += (targetLook.y - look.y) * 0.08;
-        const breathe = reducedMotion ? 0 : Math.sin(t * 2.1) * 0.028;
-        const think = mood === 'thinking' && !reducedMotion ? Math.sin(t * 8) * 0.03 : 0;
-        root.position.y = breathe;
-        root.rotation.y = look.x * 0.28 + (reducedMotion ? 0 : Math.sin(t * 0.7) * 0.06);
-        root.rotation.x = -look.y * 0.16 + think;
+        const motion = !reducedMotion;
+        const breathe = motion ? Math.sin(t * 2.1) * 0.028 : 0;
+        const hop =
+          mood === 'success' && motion
+            ? Math.max(0, Math.sin(Math.min(phase, 0.62) / 0.62 * Math.PI)) *
+              0.16 *
+              (phase < 0.62 ? 1 : 0)
+            : 0;
+        const thinkNod =
+          mood === 'thinking' && motion ? Math.sin(t * 7.2) * 0.035 : 0;
+        const confirmNod = mood === 'confirm' && motion ? burst(phase, 0.9, 4) * 0.16 : 0;
+        const listenLean = mood === 'listen' && motion ? 0.12 : 0;
+        const thinkTilt = mood === 'thinking' && motion ? 0.1 : 0;
+        const shake = mood === 'error' && motion ? burst(phase, 0.48, 8) * 0.12 : 0;
+        const sway = motion ? Math.sin(t * 0.7) * 0.06 : 0;
+        const blinkWindow = ((t - blinkAt) % 3.4);
+        const blink =
+          motion && blinkWindow > 0 && blinkWindow < 0.12
+            ? 1 - Math.abs(blinkWindow / 0.06 - 1)
+            : 0;
+        const listenPerk = mood === 'listen' ? 0.28 : 0;
+        const twitch =
+          motion && mood === 'idle' && (t % 5.2) < 0.35
+            ? Math.sin((t % 5.2) * 18) * 0.12
+            : 0;
+
+        root.position.y = breathe + hop;
+        root.rotation.y = look.x * 0.28 + sway + shake;
+        root.rotation.x = -look.y * 0.16 + thinkNod + confirmNod + listenLean;
+        root.rotation.z = thinkTilt;
+        body.scale.set(
+          1 + (mood === 'listen' ? 0.02 : 0),
+          0.9 - breathe * 0.35 + hop * 0.2,
+          0.84,
+        );
         eyes.rotation.y = look.x * 0.18;
         eyes.rotation.x = -look.y * 0.12;
-        visor.scale.y = mood === 'thinking' ? 0.82 : 1;
+        eyes.scale.y = 1 - blink * 0.88;
+        visor.scale.set(1.12, 0.42 * (mood === 'thinking' ? 0.78 : 1), 0.38);
+        leftEar.rotation.z = -0.08 - listenPerk + twitch;
+        rightEar.rotation.z = 0.08 + listenPerk + twitch * 0.35;
+        leftEar.rotation.x = mood === 'listen' ? -0.12 : 0;
+        rightEar.rotation.x = mood === 'listen' ? -0.12 : 0;
+        const pulse = mood === 'listen' && motion ? 1.7 + Math.sin(t * 9) * 0.7 : 1.6;
+        light.material.emissiveIntensity = pulse;
+        shadow.scale.setScalar(1 - hop * 1.4);
+        shadow.material.opacity = 0.2 - hop * 0.08;
         renderer.render(scene, camera);
         requestAnimationFrame(tick);
       }

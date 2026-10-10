@@ -114,6 +114,67 @@ const makeRepo = (
   });
 
 describe('AsyncStorageRuntimeConfigRepository', () => {
+  it('seeds a default DeepSeek companion and operate model on first empty load', async () => {
+    const storage = makeStorage();
+    const repo = makeRepo(storage);
+    const envelope = await repo.load();
+    expect(envelope.active.modelAPI.profiles).toEqual([
+      expect.objectContaining({
+        id: 'profile-default-deepseek',
+        mode: 'preset',
+        preset: 'deepseek',
+        secretRef: null,
+      }),
+    ]);
+    expect(envelope.active.modelAPI.bindings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'companion',
+          profileId: 'profile-default-deepseek',
+          modelId: 'deepseek-chat',
+        }),
+        expect.objectContaining({
+          role: 'direct',
+          profileId: 'profile-default-deepseek',
+          modelId: 'deepseek-chat',
+        }),
+      ]),
+    );
+    expect(storage.setItem).toHaveBeenCalledWith(
+      RUNTIME_STORAGE_KEYS.RUNTIME_CONFIG_V1,
+      expect.any(String),
+    );
+    const stored = JSON.parse(
+      (storage.setItem as jest.Mock).mock.calls[0][1] as string,
+    );
+    expect(stored.active.modelAPI.bindings).toHaveLength(2);
+  });
+
+  it('seeds defaults when a stored envelope has no model bindings', async () => {
+    const empty = {
+      schemaVersion: 1 as const,
+      revision: 0,
+      active: {
+        capabilities: {phoneOperate: false, errands: false},
+        privacy: {memoryEnabled: false, memoryLocation: 'device' as const, memoryProfileId: null},
+        modelAPI: {agentConfig: DEFAULT_AGENT_CONFIG_V2, profiles: [], bindings: []},
+        visualAgent: {enabled: false, activeProfileId: null, profiles: []},
+      },
+      draft: {
+        capabilities: {phoneOperate: false, errands: false},
+        privacy: {memoryEnabled: false, memoryLocation: 'device' as const, memoryProfileId: null},
+        modelAPI: {agentConfig: DEFAULT_AGENT_CONFIG_V2, profiles: [], bindings: []},
+        visualAgent: {enabled: false, activeProfileId: null, profiles: []},
+      },
+    };
+    const repo = makeRepo(makeStorage(empty));
+    const envelope = await repo.load();
+    expect(envelope.active.modelAPI.bindings.map(item => item.role).sort()).toEqual([
+      'companion',
+      'direct',
+    ]);
+  });
+
   it('does not change visualAgent when a model binding is activated', async () => {
     const repo = makeRepo(makeStorage(seededEnvelope(0)));
     const before = await repo.load();

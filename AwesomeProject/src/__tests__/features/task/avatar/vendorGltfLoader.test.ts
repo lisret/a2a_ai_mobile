@@ -7,6 +7,20 @@ describe('vendored GLTFLoader.js', () => {
     '../../../../features/task/avatar/GLTFLoader.js',
   );
 
+  it('packs the local three ESM build into Android avatar assets', () => {
+    const gradle = fs.readFileSync(
+      path.resolve(__dirname, '../../../../../android/app/build.gradle'),
+      'utf8',
+    );
+    expect(gradle).toContain('node_modules/three/build');
+    expect(gradle).toContain('three.module.js');
+    expect(
+      fs.existsSync(
+        path.resolve(__dirname, '../../../../../node_modules/three/build/three.module.js'),
+      ),
+    ).toBe(true);
+  });
+
   it('imports three from the local ESM build and never from a CDN', () => {
     const source = fs.readFileSync(generatedPath, 'utf8');
 

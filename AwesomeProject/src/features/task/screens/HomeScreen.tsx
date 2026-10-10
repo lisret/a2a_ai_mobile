@@ -360,12 +360,7 @@ export const HomeScreen: React.FC = () => {
           mood={mascotMood}
           gltfUri={gltfUri}
           onGltfFailed={handleGltfFailed}
-        />
-        <TouchableOpacity
-          style={styles.avatarHit}
-          activeOpacity={0.92}
           onPress={handleAvatarPress}
-          accessibilityLabel="和 NoNo 说话"
         />
       </View>
 
@@ -546,13 +541,7 @@ const styles = StyleSheet.create({
     position: 'relative',
     paddingBottom: 96,
   },
-  avatarHit: {
-    position: 'absolute',
-    left: '28%',
-    right: '28%',
-    top: '28%',
-    bottom: '30%',
-  },
+
   bottomDock: {
     paddingHorizontal: 16,
     paddingVertical: 12,

@@ -73,7 +73,7 @@ test('routes final ASR text into CompanionFacade and applies active avatar URI',
       'file:///avatar/model.glb',
     ),
   );
-  fireEvent.press(screen.getByLabelText('和 NoNo 说话'));
+  fireEvent(screen.getByLabelText('和 NoNo 说话'), 'accessibilityTap');
   await waitFor(() => expect(speechRouter.startUtterance).toHaveBeenCalled());
   const onEvent = speechRouter.startUtterance.mock.calls[0][0];
   await act(async () => {
@@ -95,7 +95,7 @@ test('denied microphone never starts ASR nor fabricates a transcript', async () 
       'file:///avatar/model.glb',
     ),
   );
-  fireEvent.press(screen.getByLabelText('和 NoNo 说话'));
+  fireEvent(screen.getByLabelText('和 NoNo 说话'), 'accessibilityTap');
   await waitFor(() => expect(permissions.request).toHaveBeenCalled());
   expect(speechRouter.startUtterance).not.toHaveBeenCalled();
   expect(companion.submitTranscript).not.toHaveBeenCalled();
@@ -110,7 +110,7 @@ test('partial ASR events only update the dock, never submit', async () => {
     </AppFacadesProvider>,
   );
   await waitFor(() => expect(screen.getByLabelText('和 NoNo 说话')).toBeTruthy());
-  fireEvent.press(screen.getByLabelText('和 NoNo 说话'));
+  fireEvent(screen.getByLabelText('和 NoNo 说话'), 'accessibilityTap');
   await waitFor(() => expect(speechRouter.startUtterance).toHaveBeenCalled());
   const onEvent = speechRouter.startUtterance.mock.calls[0][0];
   await act(async () => {
@@ -128,7 +128,7 @@ test('empty final transcript does not submit', async () => {
     </AppFacadesProvider>,
   );
   await waitFor(() => expect(screen.getByLabelText('和 NoNo 说话')).toBeTruthy());
-  fireEvent.press(screen.getByLabelText('和 NoNo 说话'));
+  fireEvent(screen.getByLabelText('和 NoNo 说话'), 'accessibilityTap');
   await waitFor(() => expect(speechRouter.startUtterance).toHaveBeenCalled());
   const onEvent = speechRouter.startUtterance.mock.calls[0][0];
   await act(async () => {
@@ -180,7 +180,7 @@ test('iOS keeps builtin, shows the Android-only notice, and never touches Androi
   );
   await waitFor(() => expect(screen.getByLabelText('和 NoNo 说话')).toBeTruthy());
   expect(screen.getByTestId('nono-avatar-3d').props.gltfUri).toBeNull();
-  fireEvent.press(screen.getByLabelText('和 NoNo 说话'));
+  fireEvent(screen.getByLabelText('和 NoNo 说话'), 'accessibilityTap');
   await waitFor(() =>
     expect(screen.getByText('当前版本听写仅支持 Android')).toBeTruthy(),
   );

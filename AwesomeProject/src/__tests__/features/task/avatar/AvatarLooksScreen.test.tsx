@@ -37,7 +37,8 @@ jest.mock('@features/task/components/NonoAvatar3D', () => {
   const React = require('react');
   const {View} = require('react-native');
   return {
-    NonoAvatar3D: () => React.createElement(View, {testID: 'avatar-3d-preview'}),
+    NonoAvatar3D: () =>
+      React.createElement(View, {testID: 'avatar-3d-preview'}),
   };
 });
 
@@ -63,7 +64,10 @@ jest.mock('@shared/components/PageLayout', () => {
 
 describe('AvatarLooksScreen', () => {
   beforeEach(() => {
-    Object.defineProperty(Platform, 'OS', {value: 'android', configurable: true});
+    Object.defineProperty(Platform, 'OS', {
+      value: 'android',
+      configurable: true,
+    });
   });
 
   it('puts the looks row under companion in Settings', () => {
@@ -86,20 +90,16 @@ describe('AvatarLooksScreen', () => {
     const screen = render(<AvatarLooksScreen />);
 
     expect(screen.getByTestId('avatar-look-preview')).toBeTruthy();
-    expect(screen.getByText('当前 · 默认角色')).toBeTruthy();
+    expect(screen.getByText('当前 · NoNo')).toBeTruthy();
 
-    expect(
-      screen.queryByTestId('look-download-builtin'),
-    ).toBeNull();
+    expect(screen.queryByTestId('look-download-builtin')).toBeNull();
     expect(screen.getByTestId('look-current-builtin')).toBeTruthy();
 
     fireEvent.press(screen.getByTestId('look-download-box'));
     expect(screen.getByText('下载「测试盒」？')).toBeTruthy();
     expect(screen.getAllByText(/2 KB/).length).toBeGreaterThan(0);
     expect(screen.getByText(/Wi-Fi/)).toBeTruthy();
-    expect(screen.getByTestId('look-status-box').props.children).toBe(
-      '未下载',
-    );
+    expect(screen.getByTestId('look-status-box').props.children).toBe('未下载');
 
     fireEvent.press(screen.getByText('取消'));
     expect(screen.queryByText('下载「测试盒」？')).toBeNull();

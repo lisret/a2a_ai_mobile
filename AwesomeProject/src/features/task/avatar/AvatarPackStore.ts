@@ -25,7 +25,7 @@ function buildManifest(pin: (typeof AVATAR_PINS)[number]): AvatarManifestV1 {
 
 export function listAvatarLooks(): AvatarLookItem[] {
   return [
-    {id: BUILTIN_AVATAR_ID, title: '默认角色', installed: true},
+    {id: BUILTIN_AVATAR_ID, title: 'NoNo', installed: true},
     ...AVATAR_PINS.map(pin => ({id: pin.id, title: pin.title, installed: false})),
   ];
 }

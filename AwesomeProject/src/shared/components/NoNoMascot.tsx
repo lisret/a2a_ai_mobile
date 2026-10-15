@@ -1,7 +1,27 @@
 import React from 'react';
 import {View, StyleSheet} from 'react-native';
 
-export type NoNoMood = 'idle' | 'thinking' | 'success' | 'error' | 'confirm' | 'listen';
+export type NoNoMood =
+  | 'idle'
+  | 'thinking'
+  | 'success'
+  | 'error'
+  | 'confirm'
+  | 'listen'
+  | 'wave'
+  | 'happy'
+  | 'sleepy'
+  | 'curious'
+  | 'wink'
+  | 'surprised'
+  | 'shy'
+  | 'laugh'
+  | 'stretch'
+  | 'peek'
+  | 'unfold'
+  | 'fold'
+  | 'spin'
+  | 'dance';
 
 interface NoNoMascotProps {
   size?: number;
@@ -76,7 +96,11 @@ export const NoNoMascot: React.FC<NoNoMascotProps> = ({
       <View
         style={[
           styles.statusLight,
-          {width: size * 0.18, backgroundColor: eyeColor, shadowColor: eyeColor},
+          {
+            width: size * 0.18,
+            backgroundColor: eyeColor,
+            shadowColor: eyeColor,
+          },
         ]}
       />
     </View>

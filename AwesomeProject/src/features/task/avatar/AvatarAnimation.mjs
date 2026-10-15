@@ -17,11 +17,28 @@ export function createAvatarAnimation(
     'wave',
     'happy',
     'curious',
+    'wink',
+    'surprised',
+    'shy',
+    'laugh',
+    'stretch',
+    'peek',
+    'spin',
+    'dance',
   ]);
   let current = null;
   let currentMood = null;
   let requestedMood = null;
   let disposed = false;
+  let breathTime = 0;
+  const eyeMaterials = new Map();
+  if (root.getObjectByName('NoNoDetached')) {
+    root.traverse(object => {
+      if (/^Eye(Left|Right)$/.test(object.name) && object.material?.color) {
+        eyeMaterials.set(object.material, object.material.color.clone());
+      }
+    });
+  }
   function play(name) {
     const resolved = actions.has(name) ? name : fallback;
     const next = actions.get(resolved);
@@ -56,7 +73,15 @@ export function createAvatarAnimation(
       play(reducedMotion ? fallback : mood);
     },
     update(delta) {
-      if (!disposed && !reducedMotion && delta > 0) mixer.update(delta);
+      if (!disposed && !reducedMotion && delta > 0) {
+        mixer.update(delta);
+        breathTime += delta;
+        const brightness =
+          0.94 + 0.06 * Math.sin((breathTime * Math.PI * 2) / 4.8);
+        eyeMaterials.forEach((color, material) =>
+          material.color.copy(color).multiplyScalar(brightness),
+        );
+      }
     },
     get currentMood() {
       return currentMood;
@@ -68,6 +93,8 @@ export function createAvatarAnimation(
       if (disposed) return;
       disposed = true;
       mixer.removeEventListener('finished', finished);
+      eyeMaterials.forEach((color, material) => material.color.copy(color));
+      eyeMaterials.clear();
       mixer.stopAllAction();
       mixer.uncacheRoot(root);
       current = null;

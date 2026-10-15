@@ -161,7 +161,7 @@ export default defineConfig({
           'AvatarAnimation.mjs',
           'AvatarAsset.mjs',
           'AvatarOrbit.mjs',
-          'nono-companion.glb',
+          'nono-detached.glb',
         ]) {
           fs.copyFileSync(
             path.join(src, 'features/task/avatar', name),

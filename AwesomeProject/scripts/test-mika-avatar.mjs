@@ -227,7 +227,7 @@ test('model URL is idempotent; stale model loads are disposed and cannot replace
   h.api.useBuiltin();
   h.pending[2].success(h.asset());
   assert.equal(selected.disposed, true);
-  assert.equal(h.host.dataset.model, 'nono-companion');
+  assert.equal(h.host.dataset.model, 'nono-detached');
 });
 test('hidden document stops frame scheduling; late pagehide load cannot revive disposed model', async () => {
   const h = await sceneHarness();

@@ -76,14 +76,16 @@
   </style>
   <main>
     <header>
-      <h1>NoNo <small>骨骼动画预览</small></h1>
+      <h1>NoNo <small>动作预览</small></h1>
       <a href="/?platform=android&page=Home">回到 App 预览</a>
     </header>
     <iframe
       id="avatar"
       src="/nono-avatar/avatar.html"
-      title="NoNo骨骼动画"></iframe>
+      title="NoNo动作预览"></iframe>
     <nav aria-label="动作">
+      <button data-mood="spin" aria-pressed="false">转一圈</button>
+      <button data-mood="dance" aria-pressed="false">开心舞</button>
       <button data-mood="idle" aria-pressed="true">待机</button
       ><button data-mood="listen" aria-pressed="false">倾听</button
       ><button data-mood="thinking" aria-pressed="false">思考</button
@@ -94,6 +96,14 @@
       <button data-mood="happy" aria-pressed="false">开心</button>
       <button data-mood="sleepy" aria-pressed="false">困倦</button>
       <button data-mood="curious" aria-pressed="false">好奇</button>
+      <button data-mood="wink" aria-pressed="false">眨单眼</button>
+      <button data-mood="surprised" aria-pressed="false">惊讶</button>
+      <button data-mood="shy" aria-pressed="false">害羞</button>
+      <button data-mood="laugh" aria-pressed="false">大笑</button>
+      <button data-mood="stretch" aria-pressed="false">伸懒腰</button>
+      <button data-mood="peek" aria-pressed="false">探头</button>
+      <button data-mood="unfold" aria-pressed="false">展开 95° / 80°</button>
+      <button data-mood="fold" aria-pressed="false">收拢</button>
     </nav>
     <label
       >旋转角度
@@ -112,7 +122,9 @@
       <button id="reset">回到正面</button>
     </nav>
     <footer>
-      拖动模型可 360° 旋转，上下拖动调整视角；双击回正。短动作结束后回到待机。
+      拖动模型可 360°
+      旋转，上下拖动调整视角；双击回正。转身与表情、折翼一起联动，结束后回到原观看方向和呼吸待机；默认上翼
+      95°、下翼 80°，表情和动作结束后恢复默认展开。
     </footer>
   </main>
   <script>
@@ -122,8 +134,7 @@
         (button.onclick = () => {
           const api = frame.contentWindow.NonoAvatar;
           if (!api) return;
-          api.setMood('idle');
-          api.setMood(button.dataset.mood);
+          api.playMood(button.dataset.mood);
           document
             .querySelectorAll('[data-mood]')
             .forEach(b => b.setAttribute('aria-pressed', String(b === button)));

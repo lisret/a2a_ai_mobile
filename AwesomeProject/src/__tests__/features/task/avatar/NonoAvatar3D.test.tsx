@@ -77,3 +77,33 @@ test('canvas tap reaches chat through WebView without a blocking touch overlay',
     screen.getByTestId('nono-avatar-3d').props.onTouchMove,
   ).toBeUndefined();
 });
+
+test('explicit reaction presses replay without reloading the model', () => {
+  const fail = jest.fn();
+  const screen = render(
+    <NonoAvatar3D
+      mood="wink"
+      reactionKey={1}
+      gltfUri={null}
+      onGltfFailed={fail}
+    />,
+  );
+  mockInject.mockClear();
+  screen.rerender(
+    <NonoAvatar3D
+      mood="wink"
+      reactionKey={2}
+      gltfUri={null}
+      onGltfFailed={fail}
+    />,
+  );
+  expect(mockInject.mock.calls.map(([s]) => s).join('')).toContain(
+    'playMood("wink")',
+  );
+  expect(mockInject.mock.calls.map(([s]) => s).join('')).not.toContain(
+    'useBuiltin',
+  );
+  expect(mockInject.mock.calls.map(([s]) => s).join('')).not.toContain(
+    'loadGltf',
+  );
+});

@@ -37,8 +37,8 @@ jest.mock('@features/task/components/NonoAvatar3D', () => {
   const React = require('react');
   const {View} = require('react-native');
   return {
-    NonoAvatar3D: () =>
-      React.createElement(View, {testID: 'avatar-3d-preview'}),
+    NonoAvatar3D: (props: any) =>
+      React.createElement(View, {...props, testID: 'avatar-3d-preview'}),
   };
 });
 
@@ -68,6 +68,27 @@ describe('AvatarLooksScreen', () => {
       value: 'android',
       configurable: true,
     });
+  });
+
+  it('plays reactions in the real avatar host and permits repeating the same gesture', () => {
+    const screen = render(<AvatarLooksScreen />);
+    expect(screen.getByTestId('avatar-3d-preview').props.mood).toBe('idle');
+    fireEvent.press(screen.getByTestId('avatar-reaction-wink'));
+    expect(screen.getByTestId('avatar-3d-preview').props.mood).toBe('wink');
+    const first = screen.getByTestId('avatar-3d-preview').props.reactionKey;
+    fireEvent.press(screen.getByTestId('avatar-reaction-wink'));
+    expect(screen.getByTestId('avatar-3d-preview').props.reactionKey).toBe(
+      first + 1,
+    );
+    fireEvent.press(screen.getByTestId('avatar-reaction-spin'));
+    expect(screen.getByTestId('avatar-3d-preview').props.mood).toBe('spin');
+    fireEvent.press(screen.getByTestId('avatar-reaction-dance'));
+    expect(screen.getByTestId('avatar-3d-preview').props.mood).toBe('dance');
+    fireEvent.press(screen.getByTestId('avatar-reaction-unfold'));
+    expect(screen.getByTestId('avatar-3d-preview').props.mood).toBe('unfold');
+    fireEvent.press(screen.getByTestId('avatar-reaction-idle'));
+    expect(screen.getByTestId('avatar-3d-preview').props.mood).toBe('idle');
+    screen.unmount();
   });
 
   it('puts the looks row under companion in Settings', () => {

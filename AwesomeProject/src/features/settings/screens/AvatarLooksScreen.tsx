@@ -10,6 +10,7 @@ import {
 import {PageLayout} from '@shared/components/PageLayout';
 import {ConfirmModal} from '@shared/components/ConfirmModal';
 import {COLORS} from '@shared/constants';
+import {type NoNoMood} from '@shared/components/NoNoMascot';
 import {NonoAvatar3D} from '@features/task/components/NonoAvatar3D';
 import {AVATAR_PINS} from '@features/task/avatar/AvatarArtifactPins';
 import {
@@ -22,6 +23,23 @@ import {
   type AvatarLookItem,
 } from '@features/task/avatar/AvatarPackStore';
 import {localPack} from '@features/task/avatar/LocalPack';
+
+const REACTIONS: {mood: NoNoMood; label: string}[] = [
+  {mood: 'spin', label: '转一圈'},
+  {mood: 'dance', label: '开心舞'},
+  {mood: 'happy', label: '开心摇摆'},
+  {mood: 'wave', label: '招招手'},
+  {mood: 'wink', label: '眨单眼'},
+  {mood: 'surprised', label: '惊讶'},
+  {mood: 'shy', label: '害羞'},
+  {mood: 'laugh', label: '大笑'},
+  {mood: 'stretch', label: '伸懒腰'},
+  {mood: 'peek', label: '探头'},
+  {mood: 'sleepy', label: '困倦'},
+  {mood: 'unfold', label: '展开折翼'},
+  {mood: 'fold', label: '收拢折翼'},
+  {mood: 'idle', label: '呼吸待机'},
+];
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) {
@@ -81,6 +99,10 @@ export const AvatarLooksScreen: React.FC = () => {
   const [progress, setProgress] = useState(0);
   const [gltfUri, setGltfUri] = useState<string | null>(null);
   const [networkType, setNetworkType] = useState('Wi-Fi');
+  const [reaction, setReaction] = useState<{mood: NoNoMood; key: number}>({
+    mood: 'idle',
+    key: 0,
+  });
 
   const refresh = useCallback(async () => {
     const catalog = androidOnly
@@ -120,7 +142,19 @@ export const AvatarLooksScreen: React.FC = () => {
       </Text>
       <View style={styles.preview} testID="avatar-look-preview">
         <NonoAvatar3D
-          mood="idle"
+          mood={activeId === 'builtin' ? reaction.mood : 'idle'}
+          reactionKey={activeId === 'builtin' ? reaction.key : 0}
+          onPress={
+            activeId === 'builtin'
+              ? () =>
+                  setReaction(previous => ({
+                    mood: 'wink',
+                    key: previous.key + 1,
+                  }))
+              : undefined
+          }
+          pressLabel="逗逗 NoNo"
+          pressHint="轻点眨眼，拖动模型旋转"
           layout="preview"
           gltfUri={gltfUri}
           onGltfFailed={() => {
@@ -137,6 +171,32 @@ export const AvatarLooksScreen: React.FC = () => {
         </Text>
       </View>
       <ScrollView contentContainerStyle={styles.content}>
+        {activeId === 'builtin' ? (
+          <View style={styles.reactions}>
+            <Text style={styles.headingTitle}>逗逗 NoNo</Text>
+            <Text style={styles.headingHint}>
+              轻点角色眨眼，拖动看看侧面。默认上翼 95°、下翼 80°。
+            </Text>
+            <View style={styles.reactionButtons}>
+              {REACTIONS.map(item => (
+                <TouchableOpacity
+                  key={item.mood}
+                  accessibilityRole="button"
+                  accessibilityLabel={item.label}
+                  testID={`avatar-reaction-${item.mood}`}
+                  style={styles.reactionButton}
+                  onPress={() =>
+                    setReaction(previous => ({
+                      mood: item.mood,
+                      key: previous.key + 1,
+                    }))
+                  }>
+                  <Text style={styles.reactionText}>{item.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        ) : null}
         <View style={styles.heading}>
           <Text style={styles.headingTitle}>可切换角色</Text>
           <Text style={styles.headingHint}>已下载可直接用</Text>
@@ -221,7 +281,9 @@ export const AvatarLooksScreen: React.FC = () => {
         title={pending ? `下载「${pending.title}」？` : ''}
         message={
           pending
-            ? `约 ${formatBytes(pendingBytes)}，当前网络 ${networkType}。确认后下载到本机并校验。失败仍用默认角色。`
+            ? `约 ${formatBytes(
+                pendingBytes,
+              )}，当前网络 ${networkType}。确认后下载到本机并校验。失败仍用默认角色。`
             : ''
         }
         confirmText="确认下载"
@@ -249,6 +311,15 @@ export const AvatarLooksScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
+  reactions: {gap: 10, marginBottom: 18},
+  reactionButtons: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
+  reactionButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    borderRadius: 20,
+    backgroundColor: '#eeefea',
+  },
+  reactionText: {fontSize: 13, color: '#34332e'},
   content: {
     paddingHorizontal: 18,
     paddingBottom: 40,

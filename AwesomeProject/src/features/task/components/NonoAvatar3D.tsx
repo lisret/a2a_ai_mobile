@@ -15,6 +15,9 @@ interface NonoAvatar3DProps {
   gltfUri: string | null;
   onGltfFailed(): void;
   onPress?(): void;
+  reactionKey?: number;
+  pressLabel?: string;
+  pressHint?: string;
   layout?: 'stage' | 'preview';
   style?: StyleProp<ViewStyle>;
   width?: number;
@@ -31,6 +34,9 @@ export const NonoAvatar3D: React.FC<NonoAvatar3DProps> = ({
   gltfUri,
   onGltfFailed,
   onPress,
+  reactionKey = 0,
+  pressLabel = '和 NoNo 说话',
+  pressHint = '轻点聊天，拖动模型旋转',
   layout = 'stage',
   style,
   width,
@@ -50,9 +56,9 @@ export const NonoAvatar3D: React.FC<NonoAvatar3DProps> = ({
   };
   const injectMood = () => {
     webRef.current?.injectJavaScript(
-      `window.NonoAvatar&&window.NonoAvatar.setMood(${JSON.stringify(
-        mood,
-      )});true;`,
+      `window.NonoAvatar&&window.NonoAvatar.${
+        reactionKey ? 'playMood' : 'setMood'
+      }(${JSON.stringify(mood)});true;`,
     );
   };
   const injectLayout = () => {
@@ -72,7 +78,7 @@ export const NonoAvatar3D: React.FC<NonoAvatar3DProps> = ({
   };
   // Model selection is independent of interaction state: a mood change never reloads GLB.
   useEffect(injectModel, [gltfUri]);
-  useEffect(injectMood, [mood]);
+  useEffect(injectMood, [mood, reactionKey]);
   useEffect(injectLayout, [layout]);
 
   const boxStyle =
@@ -89,8 +95,8 @@ export const NonoAvatar3D: React.FC<NonoAvatar3DProps> = ({
       collapsable={false}
       accessible={Boolean(onPress)}
       accessibilityRole={onPress ? 'button' : undefined}
-      accessibilityLabel={onPress ? '和 NoNo 说话' : undefined}
-      accessibilityHint={onPress ? '轻点聊天，拖动模型旋转' : undefined}
+      accessibilityLabel={onPress ? pressLabel : undefined}
+      accessibilityHint={onPress ? pressHint : undefined}
       onAccessibilityTap={onPress}>
       {rendererFailed ? (
         <TouchableOpacity

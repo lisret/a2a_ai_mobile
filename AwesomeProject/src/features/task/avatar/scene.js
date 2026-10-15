@@ -212,6 +212,16 @@ import {loadAvatarAsset} from './AvatarAsset.mjs';
       happy: 0x8df4e2,
       sleepy: 0x9aa6ff,
       curious: 0xb7fff4,
+      wink: 0x8df4e2,
+      surprised: 0xb7fff4,
+      shy: 0xffd4b8,
+      laugh: 0x8df4e2,
+      stretch: 0x8df4e2,
+      peek: 0xb7fff4,
+      unfold: 0x8df4e2,
+      fold: 0x8df4e2,
+      spin: 0x8df4e2,
+      dance: 0x8df4e2,
     };
 
     function burst(elapsed, duration, cycles) {
@@ -313,7 +323,7 @@ import {loadAvatarAsset} from './AvatarAsset.mjs';
     var animation = null;
     var requestedUrl = null;
     var loadVersion = 0;
-    var defaultUrl = new URL('./nono-companion.glb', import.meta.url).href;
+    var defaultUrl = new URL('./nono-detached.glb', import.meta.url).href;
     var legacyParts = [
       body,
       leftCheek,
@@ -399,6 +409,11 @@ import {loadAvatarAsset} from './AvatarAsset.mjs';
           });
           // Center all packs and use a consistent height. Keep placement outside the animated root.
           var box = new THREE.Box3().setFromObject(packedRoot);
+          var builtin = packedRoot.getObjectByName('NoNoDetached');
+          if (fileUrl === defaultUrl && builtin?.userData.framingBounds) {
+            box.min.fromArray(builtin.userData.framingBounds.min);
+            box.max.fromArray(builtin.userData.framingBounds.max);
+          }
           var size = box.getSize(new THREE.Vector3());
           var center = box.getCenter(new THREE.Vector3());
           var height = Math.max(size.y, 0.001);
@@ -422,7 +437,7 @@ import {loadAvatarAsset} from './AvatarAsset.mjs';
           });
           shadow.position.y = (-size.y * scale) / 2 - 0.025;
           host.dataset.model =
-            fileUrl === defaultUrl ? 'nono-companion' : 'custom';
+            fileUrl === defaultUrl ? 'nono-detached' : 'custom';
           host.dataset.clips = gltf.animations
             .map(function (clip) {
               return clip.name;
@@ -477,6 +492,11 @@ import {loadAvatarAsset} from './AvatarAsset.mjs';
         applySkin(next);
       },
       setMood: applyMood,
+      playMood: function (next) {
+        // Explicit interactions can replay the same gesture; ordinary app state stays idempotent.
+        applyMood('idle');
+        applyMood(next);
+      },
       setRotation: orbit.setRotation,
       resetRotation: orbit.reset,
       setAutoRotate: orbit.setAutoRotate,

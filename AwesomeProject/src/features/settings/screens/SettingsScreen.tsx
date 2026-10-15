@@ -16,12 +16,13 @@ import type { RootStackParamList } from '@shared/types/navigation';
 import { settingsService } from '../services/SettingsService';
 import { searchBoxPositionService } from '../services/SearchBoxPositionService';
 import { PageLayout } from '@shared/components/PageLayout';
-import { AppMark } from '@shared/components/AppMark';
 import { COLORS } from '@shared/constants';
 import { AppIcon, IconNames } from '@shared/components/Icon';
-import { modelService } from '@features/model/services/ModelService';
-import { getActiveAvatarLook } from '@features/task/avatar/avatarLooksDemo';
-import type { AIModel } from '@shared/types/Model';
+import { useAppFacades } from '../../../application/facades/AppFacadesContext';
+import {
+  getActiveAvatarId,
+  listAvatarLooks,
+} from '@features/task/avatar/AvatarPackStore';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -34,8 +35,22 @@ export const SettingsScreen: React.FC = () => {
   const [searchBoxPosition, setSearchBoxPosition] = useState('');
   const [searchBoxModalVisible, setSearchBoxModalVisible] = useState(false);
   const [searchBoxInputValue, setSearchBoxInputValue] = useState('');
-  const [companion, setCompanion] = useState<AIModel | null>(null);
+  const [companion, setCompanion] = useState<{
+    name: string;
+    provider: string;
+  } | null>(null);
   const [lookTitle, setLookTitle] = useState('默认角色');
+  const {modelConfig} = useAppFacades();
+
+  const loadCompanion = React.useCallback(async () => {
+    const list = await modelConfig.getListViewState('companion');
+    const selected = list.items.find(item => item.selected) ?? list.items[0];
+    setCompanion(
+      selected
+        ? {name: selected.displayName, provider: selected.providerLabel}
+        : null,
+    );
+  }, [modelConfig]);
 
   useEffect(() => {
     loadSettings();
@@ -43,9 +58,12 @@ export const SettingsScreen: React.FC = () => {
 
   useFocusEffect(
     React.useCallback(() => {
-      modelService.getSelectedModel('companion').then(setCompanion);
-      setLookTitle(getActiveAvatarLook().title);
-    }, []),
+      void loadCompanion();
+      void getActiveAvatarId().then(id => {
+        const look = listAvatarLooks().find(item => item.id === id);
+        setLookTitle(look?.title ?? '默认角色');
+      });
+    }, [loadCompanion]),
   );
 
   const loadSettings = async () => {
@@ -55,7 +73,7 @@ export const SettingsScreen: React.FC = () => {
       
       const position = await searchBoxPositionService.getSearchBoxPosition();
       setSearchBoxPosition(position || '');
-      setCompanion(await modelService.getSelectedModel('companion'));
+      await loadCompanion();
     } catch (error) {
       console.error('加载设置失败:', error);
     }
@@ -100,8 +118,7 @@ export const SettingsScreen: React.FC = () => {
   return (
     <PageLayout
       title="设置"
-      kicker="这台应用"
-      headerAccessory={<AppMark size={48} />}
+      showHeader={false}
       backgroundColor={COLORS.background.default}>
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
         <View style={styles.sectionHeading}>
@@ -410,4 +427,3 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
 });
-

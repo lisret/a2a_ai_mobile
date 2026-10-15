@@ -13,6 +13,8 @@ import com.facebook.react.bridge.ReactContext
 import com.facebook.react.bridge.WritableMap
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.awesomeproject.core.MainApplication
+import com.awesomeproject.lanmcp.LanMcpLocalTask
+import com.awesomeproject.lanmcp.DeviceControlOwnership
 
 /**
  * 任务执行前台服务
@@ -24,7 +26,14 @@ class TaskExecutionService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val CHANNEL_ID = "task_execution_channel"
         private const val CHANNEL_NAME = "任务执行"
+        // V1 任务事件通道：取消请求事件名（与 JS TaskUiEventNames 保持一致）
+        private const val CANCEL_REQUEST_EVENT = "NonoTaskCancelRequestedV1"
     }
+
+    // 本次运行的不可变会话标识；start 时写入，cancel PendingIntent 与
+    // sendCancelTaskEvent 都精确使用它，绝不广播通配取消。
+    private var currentTaskId: String? = null
+    private var currentSessionRevision: Double = -1.0
 
     override fun onCreate() {
         super.onCreate()
@@ -34,16 +43,59 @@ class TaskExecutionService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // 处理停止服务的请求（中断任务）
-        if (intent?.action == "STOP_SERVICE" || intent?.action == "CANCEL_TASK") {
-            Log.d(TAG, "收到中断任务请求")
-            // 发送事件到 JS，通知任务中断
-            sendCancelTaskEvent()
-            stopSelf()
+        if (intent?.action == "CANCEL_TASK") {
+            val cancelTaskId = intent.getStringExtra("taskId")
+            val cancelSessionRevision = intent.getDoubleExtra("sessionRevision", -1.0)
+            // Android stopService ignores extras. All stop/cancel requests are delivered
+            // here and matched on the main thread before touching the active service.
+            if (currentTaskId == null) {
+                stopSelf(startId)
+                return START_NOT_STICKY
+            }
+            if (cancelTaskId != currentTaskId || cancelSessionRevision != currentSessionRevision) {
+                Log.d(TAG, "忽略过期任务的停止请求")
+                return START_NOT_STICKY
+            }
+            sendCancelTaskEvent(cancelTaskId, cancelSessionRevision)
+            stopSelf(startId)
             return START_NOT_STICKY
         }
 
         Log.d(TAG, "任务执行服务已启动")
         val statusText = intent?.getStringExtra("statusText") ?: "任务执行中..."
+        val incomingTaskId = intent?.getStringExtra("taskId")
+        val incomingSessionRevision =
+            if (intent?.hasExtra("sessionRevision") == true) {
+                intent.getDoubleExtra("sessionRevision", currentSessionRevision)
+            } else {
+                currentSessionRevision
+            }
+        // 同一 identity 的重复 startService 只是“更新通知”（ServiceManager.updateTaskExecutionService
+        // 走的就是这条路），必须放行，否则会误取消正在运行的任务。
+        val isSameTaskIdentity = incomingTaskId != null &&
+            incomingTaskId == currentTaskId &&
+            incomingSessionRevision == currentSessionRevision
+
+        if (intent?.action == "UPDATE_SERVICE" && !isSameTaskIdentity) {
+            if (currentTaskId == null) stopSelf(startId)
+            return START_NOT_STICKY
+        }
+
+        // 局域网 MCP 服务正在控制设备时，拒绝启动“新的”本地任务，避免两个控制器同时驱动 UI。
+        // 复用既有的精确 identity 取消事件让 JS 侧任务中止，不新增对外 API。
+        if (DeviceControlOwnership.remoteActive() && !isSameTaskIdentity) {
+            Log.w(TAG, "局域网 MCP 服务正在控制设备，拒绝启动新的本地任务")
+            sendCancelTaskEvent(incomingTaskId, incomingSessionRevision)
+            // 只有本次请求是该服务唯一用途时才停止自己：若本服务正在为另一个任务服务，
+            // stopSelf(startId) 会误停那个正在运行的任务（前台通知也已就绪，不会有 5 秒限制问题）。
+            if (currentTaskId == null) {
+                stopSelf(startId)
+            }
+            return START_NOT_STICKY
+        }
+
+        currentTaskId = incomingTaskId ?: currentTaskId
+        currentSessionRevision = incomingSessionRevision
         
         try {
             // 【关键】必须即时创建并显示通知
@@ -90,7 +142,10 @@ class TaskExecutionService : Service() {
             // 其他异常
             Log.e(TAG, "启动前台服务时发生未知错误", e)
         }
-        
+
+        // 即使系统通知失败，本地任务仍可能执行；保守地保留占用标记直到服务销毁。
+        LanMcpLocalTask.setRunning(true)
+
         return START_STICKY // 服务被杀死后自动重启
     }
 
@@ -99,6 +154,8 @@ class TaskExecutionService : Service() {
     }
 
     override fun onDestroy() {
+        // 本地任务结束：立即释放“设备占用”标记，局域网 MCP 恢复可控制。
+        LanMcpLocalTask.setRunning(false)
         super.onDestroy()
         Log.d(TAG, "任务执行服务已销毁")
     }
@@ -139,9 +196,14 @@ class TaskExecutionService : Service() {
      * 5. 点击通知不打开应用 - 避免打断后台任务执行
      */
     private fun createNotification(statusText: String): Notification {
-        // 中断任务的 Intent
+        // 中断任务的 Intent（携带本次运行的精确 identity）
+        val identityExtras = android.os.Bundle().apply {
+            currentTaskId?.let { putString("taskId", it) }
+            putDouble("sessionRevision", currentSessionRevision)
+        }
         val cancelIntent = Intent(this, TaskExecutionService::class.java).apply {
             action = "CANCEL_TASK"
+            putExtras(identityExtras)
         }
         val cancelPendingIntent = PendingIntent.getService(
             this,
@@ -185,36 +247,40 @@ class TaskExecutionService : Service() {
     }
 
     /**
-     * 发送任务中断事件到 JS
+     * 发送任务中断事件到 JS。
+     * 只针对精确的 {taskId, sessionRevision}，缺少任一 identity 时拒绝广播，
+     * 避免误取消其它会话。
      */
-    private fun sendCancelTaskEvent() {
+    private fun sendCancelTaskEvent(taskId: String?, sessionRevision: Double) {
+        if (taskId.isNullOrEmpty() || sessionRevision <= 0.0 || sessionRevision % 1.0 != 0.0) {
+            Log.w(TAG, "缺少精确任务 identity，拒绝发送取消事件")
+            return
+        }
         try {
             // 获取 ReactContext（通过 Application）
             val application = applicationContext as? MainApplication
             val reactContext = application?.reactNativeHost?.reactInstanceManager?.currentReactContext as? ReactContext
-            
-            reactContext?.let { context ->
+
+            val emitTo: (ReactContext) -> Unit = { context ->
                 val params: WritableMap = Arguments.createMap()
-                params.putString("action", "cancelTask")
-                
+                params.putString("taskId", taskId)
+                params.putDouble("sessionRevision", sessionRevision)
+
                 context
                     .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-                    .emit("TaskCancelRequested", params)
-                
+                    .emit(CANCEL_REQUEST_EVENT, params)
+            }
+
+            reactContext?.let { context ->
+                emitTo(context)
                 Log.d(TAG, "已发送任务中断事件到 JS")
             } ?: run {
                 // 如果无法获取 ReactContext，尝试通过 reactHost
                 try {
                     val reactHost = application?.reactHost
-                    val reactContext = reactHost?.currentReactContext as? ReactContext
-                    reactContext?.let { context ->
-                        val params: WritableMap = Arguments.createMap()
-                        params.putString("action", "cancelTask")
-                        
-                        context
-                            .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-                            .emit("TaskCancelRequested", params)
-                        
+                    val hostReactContext = reactHost?.currentReactContext as? ReactContext
+                    hostReactContext?.let { context ->
+                        emitTo(context)
                         Log.d(TAG, "已发送任务中断事件到 JS（通过 reactHost）")
                     } ?: Log.w(TAG, "无法获取 ReactContext，无法发送事件")
                 } catch (e: Exception) {
@@ -226,4 +292,3 @@ class TaskExecutionService : Service() {
         }
     }
 }
-

@@ -23,6 +23,15 @@ Thumbs.db
 *.tmp
 *.log
 
+# Realtime camera prototype runtime data
+tools/realtime_camera/.venv/
+tools/realtime_camera/.venv-fastvlm/
+tools/realtime_camera/.runtime/
+tools/realtime_camera/.pytest_cache/
+tools/realtime_camera/.ruff_cache/
+tools/realtime_camera/.coverage
+tools/realtime_camera/**/__pycache__/
+
 # Sensitive data (do NOT commit)
 test.json
 1.md

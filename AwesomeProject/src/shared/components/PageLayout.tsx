@@ -14,12 +14,14 @@ import {
   Platform,
 } from 'react-native';
 import {useNavigation} from '@react-navigation/native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {AppIcon, IconNames} from './Icon';
 import {PageTransitionWrapper} from './PageTransitionWrapper';
 import {COLORS, FONT_WEIGHTS, SPACING} from '../constants';
 
 export interface PageLayoutProps {
   title: string;
+  showHeader?: boolean;
   kicker?: string;
   headerAccessory?: ReactNode;
   showBackButton?: boolean;
@@ -34,6 +36,7 @@ export interface PageLayoutProps {
 
 export const PageLayout: React.FC<PageLayoutProps> = ({
   title,
+  showHeader = true,
   kicker,
   headerAccessory,
   showBackButton = false,
@@ -45,6 +48,7 @@ export const PageLayout: React.FC<PageLayoutProps> = ({
   contentStyle,
 }) => {
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
 
   const handleBackPress = () => {
     if (onBackPress) {
@@ -55,7 +59,12 @@ export const PageLayout: React.FC<PageLayoutProps> = ({
   };
 
   return (
-    <View style={[styles.container, {backgroundColor}]}>
+    <View
+      style={[
+        styles.container,
+        {backgroundColor},
+        !showHeader && {paddingTop: (safeArea ? insets.top : 0) + 8},
+      ]}>
       {safeArea && Platform.OS === 'ios' && (
         <StatusBar barStyle="dark-content" />
       )}
@@ -67,7 +76,7 @@ export const PageLayout: React.FC<PageLayoutProps> = ({
         />
       )}
 
-      {showBackButton ? (
+      {!showHeader ? null : showBackButton ? (
         <View style={styles.subpageHeader}>
           <TouchableOpacity
             style={styles.roundButton}

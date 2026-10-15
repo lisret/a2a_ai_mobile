@@ -1,300 +1,487 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
-  Modal,
-  FlatList,
+  TextInput,
   StyleSheet,
+  Switch,
 } from 'react-native';
-import { API_PROVIDERS, type APIProvider } from '@shared/constants/apiProviders';
-import { AppIcon, IconNames } from '@shared/components/Icon';
-import { COLORS } from '@shared/constants';
+import {COLORS} from '@shared/constants';
+import type {
+  ProviderAuthV1,
+  ProviderProtocolV1,
+} from '@core/engine/operateRuntime/model/ModelProviderContracts';
+import type {
+  CustomProviderConfigViewState,
+  ProviderPresetId,
+  ProviderPresetViewState,
+} from '../../../application/facades/UiRuntimeContracts';
 
-interface ApiProviderSelectorProps {
-  selectedProviderId: string | null;
-  onSelectProvider: (provider: APIProvider) => void;
-  customApiUrl: string;
-  onCustomUrlChange: (url: string) => void;
+export interface ApiProviderSelectorProps {
+  mode: 'preset' | 'custom';
+  presets: readonly ProviderPresetViewState[];
+  selectedPresetId?: ProviderPresetId;
+  onSelectPreset: (id: ProviderPresetId) => void;
+  onSelectCustom: () => void;
+  custom?: CustomProviderConfigViewState;
+  onCustomChange: (next: CustomProviderConfigViewState) => void;
+}
+
+const PROTOCOLS: readonly ProviderProtocolV1[] = [
+  'openai_chat_completions',
+  'openai_responses',
+  'anthropic_messages',
+  'gemini_generate_content',
+  'custom_http_json',
+];
+
+const PROTOCOL_LABELS: Record<ProviderProtocolV1, string> = {
+  openai_chat_completions: 'OpenAI Chat',
+  openai_responses: 'OpenAI Responses',
+  anthropic_messages: 'Anthropic',
+  gemini_generate_content: 'Gemini',
+  custom_http_json: '自定义 JSON',
+};
+
+type AuthKind = ProviderAuthV1['kind'];
+const AUTH_KINDS: readonly AuthKind[] = ['none', 'bearer', 'header', 'query'];
+const AUTH_LABELS: Record<AuthKind, string> = {
+  none: '无',
+  bearer: 'Bearer',
+  header: '自定义 Header',
+  query: 'Query 参数',
+};
+
+function nextAuth(kind: AuthKind, current: ProviderAuthV1): ProviderAuthV1 {
+  switch (kind) {
+    case 'none':
+      return {kind: 'none'};
+    case 'bearer':
+      return {kind: 'bearer'};
+    case 'header':
+      return current.kind === 'header'
+        ? current
+        : {kind: 'header', headerName: 'Authorization', prefix: 'Bearer '};
+    case 'query':
+      return current.kind === 'query' ? current : {kind: 'query', queryName: 'key'};
+  }
 }
 
 export const ApiProviderSelector: React.FC<ApiProviderSelectorProps> = ({
-  selectedProviderId,
-  onSelectProvider,
-  customApiUrl,
-  onCustomUrlChange,
+  mode,
+  presets,
+  selectedPresetId,
+  onSelectPreset,
+  onSelectCustom,
+  custom,
+  onCustomChange,
 }) => {
-  const [modalVisible, setModalVisible] = useState(false);
-  const [inputMode, setInputMode] = useState<'select' | 'custom'>(
-    selectedProviderId === 'custom' || !selectedProviderId ? 'custom' : 'select'
-  );
-
-  const selectedProvider = selectedProviderId
-    ? API_PROVIDERS.find(p => p.id === selectedProviderId)
-    : null;
-
-  const handleSelectProvider = (provider: APIProvider) => {
-    if (provider.id === 'custom') {
-      setInputMode('custom');
-      onSelectProvider(provider);
-    } else {
-      setInputMode('select');
-      onSelectProvider(provider);
-      onCustomUrlChange(provider.baseUrl);
+  const patchCustom = (patch: Partial<CustomProviderConfigViewState>) => {
+    if (!custom) {
+      return;
     }
-    setModalVisible(false);
+    onCustomChange({...custom, ...patch});
   };
 
-  const handleSwitchToCustom = () => {
-    setInputMode('custom');
-    const customProvider = API_PROVIDERS.find(p => p.id === 'custom');
-    if (customProvider) {
-      onSelectProvider(customProvider);
-      // 切换到手动输入时清空API地址
-      onCustomUrlChange('');
+  const patchCapability = (
+    key: 'vision' | 'toolCalls' | 'reasoning',
+    value: boolean,
+  ) => {
+    if (!custom) {
+      return;
     }
+    onCustomChange({
+      ...custom,
+      declaredCapabilities: {
+        ...custom.declaredCapabilities,
+        capabilities: {
+          ...custom.declaredCapabilities.capabilities,
+          [key]: value,
+        },
+      },
+    });
   };
 
-  const handleSwitchToSelect = () => {
-    setInputMode('select');
-    const defaultProvider = API_PROVIDERS[0];
-    onSelectProvider(defaultProvider);
-    onCustomUrlChange(defaultProvider.baseUrl);
-  };
+  const auth = custom?.auth ?? {kind: 'bearer'};
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.label}>API提供商</Text>
-        <View style={styles.switchContainer}>
-          <TouchableOpacity
-            style={[
-              styles.switchButton,
-              inputMode === 'select' && styles.switchButtonActive,
-            ]}
-            onPress={handleSwitchToSelect}>
-            <Text
-              style={[
-                styles.switchButtonText,
-                inputMode === 'select' && styles.switchButtonTextActive,
-              ]}>
-              选择
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.switchButton,
-              inputMode === 'custom' && styles.switchButtonActive,
-            ]}
-            onPress={handleSwitchToCustom}>
-            <Text
-              style={[
-                styles.switchButtonText,
-                inputMode === 'custom' && styles.switchButtonTextActive,
-              ]}>
-              手动输入
-            </Text>
-          </TouchableOpacity>
-        </View>
+      <View style={styles.tabRow}>
+        <TouchableOpacity
+          testID="provider-mode-preset"
+          style={[styles.tab, mode === 'preset' && styles.tabActive]}
+          onPress={() =>
+            selectedPresetId
+              ? onSelectPreset(selectedPresetId)
+              : onSelectPreset(presets[0]?.id ?? 'openai')
+          }>
+          <Text style={[styles.tabText, mode === 'preset' && styles.tabTextActive]}>
+            热门厂商
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          testID="provider-mode-custom"
+          style={[styles.tab, mode === 'custom' && styles.tabActive]}
+          onPress={onSelectCustom}>
+          <Text style={[styles.tabText, mode === 'custom' && styles.tabTextActive]}>
+            完全自定义
+          </Text>
+        </TouchableOpacity>
       </View>
 
-      {inputMode === 'select' ? (
-        <TouchableOpacity
-          style={styles.selector}
-          onPress={() => setModalVisible(true)}>
-          <Text style={styles.selectorText}>
-            {selectedProvider?.name || '请选择API提供商'}
-          </Text>
-          <AppIcon name={IconNames.chevronDown} size={12} color={COLORS.text.secondary} />
-        </TouchableOpacity>
-      ) : (
-        <View style={styles.customHintContainer}>
-          <Text style={styles.customHint}>
-            请在下方手动输入完整的API地址
-          </Text>
+      {mode === 'preset' ? (
+        <View style={styles.presetList}>
+          {presets.map(preset => (
+            <TouchableOpacity
+              key={preset.id}
+              testID={`preset-row-${preset.id}`}
+              style={[
+                styles.presetRow,
+                selectedPresetId === preset.id && styles.presetRowActive,
+              ]}
+              onPress={() => onSelectPreset(preset.id)}>
+              <Text style={styles.presetLabel}>{preset.label}</Text>
+              {preset.maturity === 'compatibility' ? (
+                <Text style={styles.presetHint}>兼容</Text>
+              ) : null}
+            </TouchableOpacity>
+          ))}
         </View>
-      )}
+      ) : custom ? (
+        <View style={styles.customForm}>
+          <Field label="服务商名称">
+            <TextInput
+              testID="custom-provider-label"
+              style={styles.input}
+              value={custom.providerLabel}
+              onChangeText={text => patchCustom({providerLabel: text})}
+              placeholder="例如：My LLM"
+              placeholderTextColor={COLORS.text.disabled}
+            />
+          </Field>
+          <Field label="服务地址 (Base URL)">
+            <TextInput
+              testID="custom-base-url"
+              style={styles.input}
+              value={custom.baseUrl}
+              onChangeText={text => patchCustom({baseUrl: text})}
+              placeholder="https://…"
+              autoCapitalize="none"
+              placeholderTextColor={COLORS.text.disabled}
+            />
+          </Field>
 
-      <Modal
-        visible={modalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setModalVisible(false)}>
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setModalVisible(false)}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>选择API提供商</Text>
-              <TouchableOpacity 
-                style={styles.modalCloseButton}
-                onPress={() => setModalVisible(false)}>
-                <AppIcon name={IconNames.close} size={18} color={COLORS.text.secondary} />
-              </TouchableOpacity>
-            </View>
-            <FlatList
-              data={API_PROVIDERS}
-              keyExtractor={item => item.id}
-              renderItem={({ item }) => (
+          <Field label="协议">
+            <View style={styles.chipWrap}>
+              {PROTOCOLS.map(protocol => (
                 <TouchableOpacity
+                  key={protocol}
+                  testID={`custom-protocol-${protocol}`}
                   style={[
-                    styles.providerItem,
-                    selectedProviderId === item.id && styles.providerItemSelected,
+                    styles.chip,
+                    custom.protocol === protocol && styles.chipActive,
                   ]}
-                  onPress={() => handleSelectProvider(item)}>
-                  <View style={styles.providerInfo}>
-                    <Text style={styles.providerName}>{item.name}</Text>
-                    {item.description && (
-                      <Text style={styles.providerDescription}>
-                        {item.description}
-                      </Text>
-                    )}
-                    {item.baseUrl && (
-                      <Text style={styles.providerUrl} numberOfLines={1}>
-                        {item.baseUrl}
-                      </Text>
-                    )}
-                  </View>
-                  {selectedProviderId === item.id && (
-                    <AppIcon name={IconNames.check} size={20} color={COLORS.primary} />
-                  )}
+                  onPress={() => patchCustom({protocol})}>
+                  <Text
+                    style={[
+                      styles.chipText,
+                      custom.protocol === protocol && styles.chipTextActive,
+                    ]}>
+                    {PROTOCOL_LABELS[protocol]}
+                  </Text>
                 </TouchableOpacity>
-              )}
+              ))}
+            </View>
+          </Field>
+
+          <Field label="鉴权方式">
+            <View style={styles.chipWrap}>
+              {AUTH_KINDS.map(kind => (
+                <TouchableOpacity
+                  key={kind}
+                  testID={`custom-auth-${kind}`}
+                  style={[styles.chip, auth.kind === kind && styles.chipActive]}
+                  onPress={() => patchCustom({auth: nextAuth(kind, auth)})}>
+                  <Text
+                    style={[
+                      styles.chipText,
+                      auth.kind === kind && styles.chipTextActive,
+                    ]}>
+                    {AUTH_LABELS[kind]}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </Field>
+
+          {auth.kind === 'header' ? (
+            <>
+              <Field label="Header 名称">
+                <TextInput
+                  testID="custom-auth-header-name"
+                  style={styles.input}
+                  value={auth.headerName}
+                  onChangeText={text =>
+                    patchCustom({auth: {kind: 'header', headerName: text, prefix: auth.prefix}})
+                  }
+                  autoCapitalize="none"
+                />
+              </Field>
+              <Field label="Header 前缀">
+                <View style={styles.chipWrap}>
+                  {(['', 'Bearer ', 'Token ', 'Basic '] as const).map(prefix => (
+                    <TouchableOpacity
+                      key={prefix || 'none'}
+                      testID={`custom-auth-prefix-${prefix.trim() || 'none'}`}
+                      style={[styles.chip, auth.prefix === prefix && styles.chipActive]}
+                      onPress={() =>
+                        patchCustom({
+                          auth: {kind: 'header', headerName: auth.headerName, prefix},
+                        })
+                      }>
+                      <Text
+                        style={[
+                          styles.chipText,
+                          auth.prefix === prefix && styles.chipTextActive,
+                        ]}>
+                        {prefix.trim() || '无前缀'}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </Field>
+            </>
+          ) : null}
+
+          {auth.kind === 'query' ? (
+            <Field label="Query 参数名">
+              <TextInput
+                testID="custom-auth-query-name"
+                style={styles.input}
+                value={auth.queryName}
+                onChangeText={text => patchCustom({auth: {kind: 'query', queryName: text}})}
+                autoCapitalize="none"
+              />
+            </Field>
+          ) : null}
+
+          <Field label="对话路径 (chatPath)">
+            <TextInput
+              testID="custom-chat-path"
+              style={styles.input}
+              value={custom.chatPath}
+              onChangeText={text => patchCustom({chatPath: text})}
+              autoCapitalize="none"
+              placeholder="/v1/chat/completions"
+              placeholderTextColor={COLORS.text.disabled}
+            />
+          </Field>
+
+          <View style={styles.toggleRow}>
+            <Text style={styles.toggleLabel}>提供模型目录接口</Text>
+            <Switch
+              testID="custom-has-model-list"
+              value={custom.modelListPath !== null}
+              onValueChange={value =>
+                patchCustom({modelListPath: value ? '/v1/models' : null})
+              }
             />
           </View>
-        </TouchableOpacity>
-      </Modal>
+          {custom.modelListPath !== null ? (
+            <Field label="模型目录路径 (modelListPath)">
+              <TextInput
+                testID="custom-model-list-path"
+                style={styles.input}
+                value={custom.modelListPath}
+                onChangeText={text => patchCustom({modelListPath: text})}
+                autoCapitalize="none"
+              />
+            </Field>
+          ) : null}
+
+          <View style={styles.toggleRow}>
+            <Text style={styles.toggleLabel}>支持图片输入</Text>
+            <Switch
+              testID="custom-cap-image-input"
+              value={custom.declaredCapabilities.inputModalities.includes('image')}
+              onValueChange={value =>
+                patchCustom({
+                  declaredCapabilities: {
+                    ...custom.declaredCapabilities,
+                    inputModalities: value ? ['text', 'image'] : ['text'],
+                    capabilities: {
+                      ...custom.declaredCapabilities.capabilities,
+                      vision: value ? true : custom.declaredCapabilities.capabilities.vision,
+                    },
+                  },
+                })
+              }
+            />
+          </View>
+          <View style={styles.toggleRow}>
+            <Text style={styles.toggleLabel}>支持视觉</Text>
+            <Switch
+              testID="custom-cap-vision"
+              value={custom.declaredCapabilities.capabilities.vision === true}
+              onValueChange={value => patchCapability('vision', value)}
+            />
+          </View>
+          <View style={styles.toggleRow}>
+            <Text style={styles.toggleLabel}>支持工具调用</Text>
+            <Switch
+              testID="custom-cap-tool-calls"
+              value={custom.declaredCapabilities.capabilities.toolCalls === true}
+              onValueChange={value => patchCapability('toolCalls', value)}
+            />
+          </View>
+          <View style={styles.toggleRow}>
+            <Text style={styles.toggleLabel}>支持推理</Text>
+            <Switch
+              testID="custom-cap-reasoning"
+              value={custom.declaredCapabilities.capabilities.reasoning === true}
+              onValueChange={value => patchCapability('reasoning', value)}
+            />
+          </View>
+
+          <Text style={styles.unverified}>
+            能力为用户声明、未验证；仅在实际请求时才会生效。
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 };
 
+const Field: React.FC<{label: string; children: React.ReactNode}> = ({
+  label,
+  children,
+}) => (
+  <View style={styles.field}>
+    <Text style={styles.fieldLabel}>{label}</Text>
+    {children}
+  </View>
+);
+
 const styles = StyleSheet.create({
   container: {
     marginBottom: 16,
+    gap: 10,
   },
-  header: {
+  tabRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    gap: 6,
+    padding: 4,
+    borderRadius: 14,
+    backgroundColor: '#f1f0f7',
+  },
+  tab: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: 10,
     alignItems: 'center',
-    marginBottom: 8,
+    justifyContent: 'center',
   },
-  label: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#374151',
+  tabActive: {
+    backgroundColor: COLORS.violet,
   },
-  switchContainer: {
-    flexDirection: 'row',
-    backgroundColor: '#f3f4f6',
-    borderRadius: 6,
-    padding: 2,
-  },
-  switchButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 4,
-  },
-  switchButtonActive: {
-    backgroundColor: '#2563eb',
-  },
-  switchButtonText: {
+  tabText: {
     fontSize: 12,
-    color: '#6b7280',
-    fontWeight: '500',
+    fontWeight: '700',
+    color: '#5d6070',
   },
-  switchButtonTextActive: {
+  tabTextActive: {
     color: '#ffffff',
   },
-  selector: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 12,
-    borderRadius: 8,
+  presetList: {
+    gap: 6,
+  },
+  presetRow: {
+    minHeight: 44,
+    paddingHorizontal: 14,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#d1d5db',
+    borderColor: COLORS.border.medium,
     backgroundColor: '#ffffff',
-  },
-  selectorText: {
-    fontSize: 16,
-    color: '#111827',
-    flex: 1,
-  },
-  customHintContainer: {
-    marginTop: 4,
-    padding: 8,
-    backgroundColor: '#f9fafb',
-    borderRadius: 6,
-  },
-  customHint: {
-    fontSize: 12,
-    color: '#6b7280',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(19,20,34,0.28)',
-    justifyContent: 'flex-end',
-    padding: 14,
-  },
-  modalContent: {
-    backgroundColor: 'rgba(255,255,255,0.96)',
-    borderRadius: 26,
-    width: '100%',
-    maxHeight: '80%',
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.92)',
-  },
-  modalHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e5e7eb',
+    justifyContent: 'space-between',
   },
-  modalTitle: {
-    fontSize: 18,
+  presetRowActive: {
+    borderColor: COLORS.violet,
+    backgroundColor: '#f0eefe',
+  },
+  presetLabel: {
+    fontSize: 14,
     fontWeight: '600',
-    color: '#111827',
+    color: COLORS.text.primary,
   },
-  modalCloseButton: {
-    width: 36,
-    height: 36,
-    justifyContent: 'center',
-    alignItems: 'center',
+  presetHint: {
+    fontSize: 10,
+    color: COLORS.text.secondary,
   },
-  providerItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f3f4f6',
+  customForm: {
+    gap: 10,
   },
-  providerItemSelected: {
-    backgroundColor: '#f0f7ff',
+  field: {
+    gap: 6,
   },
-  providerInfo: {
-    flex: 1,
-    marginRight: 12,
+  fieldLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#525461',
   },
-  providerName: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: '#111827',
-    marginBottom: 4,
-  },
-  providerDescription: {
-    fontSize: 13,
-    color: '#6b7280',
-    marginBottom: 4,
-  },
-  providerUrl: {
+  input: {
+    minHeight: 44,
+    paddingHorizontal: 13,
+    borderWidth: 1,
+    borderColor: COLORS.border.medium,
+    borderRadius: 12,
+    backgroundColor: '#ffffff',
     fontSize: 12,
-    color: '#9ca3af',
-    fontFamily: 'monospace',
+    color: COLORS.text.primary,
+  },
+  chipWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  chip: {
+    minHeight: 32,
+    paddingHorizontal: 11,
+    borderRadius: 10,
+    backgroundColor: '#f1f0f7',
+    justifyContent: 'center',
+  },
+  chipActive: {
+    backgroundColor: COLORS.violet,
+  },
+  chipText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#5d6070',
+  },
+  chipTextActive: {
+    color: '#ffffff',
+  },
+  toggleRow: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  toggleLabel: {
+    fontSize: 12,
+    color: COLORS.text.primary,
+  },
+  unverified: {
+    marginTop: 4,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: '#fff4e6',
+    color: '#8a5a1a',
+    fontSize: 11,
+    lineHeight: 15,
   },
 });
-

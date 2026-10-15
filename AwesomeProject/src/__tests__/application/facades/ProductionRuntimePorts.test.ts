@@ -1,0 +1,254 @@
+import * as deviceControl from '../../../core/ability/accessibility/LocalDeviceControlLease';
+import type {
+  RuntimeConfigEnvelopeV1,
+  RuntimeConfigRepository,
+  RuntimeRouteConfigV1,
+} from '../../../core/engine/operateRuntime/contracts/RuntimeConfigContracts';
+import {
+  RuntimeActivityPort,
+  RuntimeCompanionPort,
+  RuntimeErrandPort,
+  RuntimeOperatePort,
+  RuntimePrivacyPort,
+  RuntimeVisualAgentToolsPort,
+  TaskUiEventBus,
+} from '../../../application/facades/RuntimeApplicationPorts';
+
+function emptyRoute(): RuntimeRouteConfigV1 {
+  return {
+    capabilities: {phoneOperate: true, errands: false},
+    privacy: {memoryEnabled: true, memoryLocation: 'device', memoryProfileId: null},
+    modelAPI: {
+      agentConfig: {
+        version: 2,
+        activeMode: 'cloud_direct',
+        modeDrafts: {cloudDirect: {}, cloudSplit: {}, localVisionCloudPlanner: {localModelId: 'minicpm-v-4.6-q4'}},
+        maxSteps: 20,
+      },
+      profiles: [],
+      bindings: [],
+    },
+    visualAgent: {enabled: false, activeProfileId: null, profiles: []},
+  };
+}
+
+function repoWith(active: RuntimeRouteConfigV1): RuntimeConfigRepository {
+  let envelope: RuntimeConfigEnvelopeV1 = {
+    schemaVersion: 1,
+    revision: 1,
+    active,
+    draft: active,
+  };
+  return {
+    load: jest.fn(async () => envelope),
+    mutateDraft: jest.fn(),
+    activateDraft: jest.fn(),
+    compareAndActivate: jest.fn(async (_rev, mutation) => {
+      envelope = {
+        ...envelope,
+        active: mutation(envelope.active),
+        revision: envelope.revision + 1,
+      };
+      return envelope;
+    }),
+    putProfile: jest.fn(),
+    putBinding: jest.fn(),
+    removeProfile: jest.fn(),
+  } as unknown as RuntimeConfigRepository;
+}
+
+describe('production application ports', () => {
+  const storage: Record<string, string> = {};
+
+  beforeEach(() => {
+    for (const key of Object.keys(storage)) {
+      delete storage[key];
+    }
+    const AsyncStorage = require('@react-native-async-storage/async-storage');
+    AsyncStorage.getItem.mockImplementation(async (key: string) => storage[key] ?? null);
+    AsyncStorage.setItem.mockImplementation(async (key: string, value: string) => {
+      storage[key] = value;
+    });
+    AsyncStorage.removeItem.mockImplementation(async (key: string) => {
+      delete storage[key];
+    });
+  });
+
+  it('refuses a local task before config or planning when remote control owns the device', async () => {
+    const acquire = jest.spyOn(deviceControl, 'acquireLocalDeviceControl').mockResolvedValue(null);
+    try {
+      const repo = repoWith(emptyRoute());
+      const port = new RuntimeOperatePort(repo, new TaskUiEventBus(), {} as never, {} as never);
+      await expect(port.start('打开设置')).resolves.toMatchObject({kind: 'blocked', blocker: {code: 'device_control_busy'}});
+      expect(repo.load).not.toHaveBeenCalled();
+    } finally { acquire.mockRestore(); }
+  });
+
+  it('releases device ownership when session setup is blocked', async () => {
+    const release = jest.fn().mockResolvedValue(undefined);
+    const acquire = jest.spyOn(deviceControl, 'acquireLocalDeviceControl').mockResolvedValue(release);
+    try {
+      const port = new RuntimeOperatePort(repoWith(emptyRoute()), new TaskUiEventBus(), {resolveExecutionTarget: jest.fn()} as never, {} as never);
+      await expect(port.start('打开设置')).resolves.toMatchObject({kind: 'blocked'});
+      expect(release).toHaveBeenCalledTimes(1);
+    } finally { acquire.mockRestore(); }
+  });
+
+  it('releases device ownership on unexpected config failure', async () => {
+    const release = jest.fn().mockResolvedValue(undefined);
+    const acquire = jest.spyOn(deviceControl, 'acquireLocalDeviceControl').mockResolvedValue(release);
+    try {
+      const repo = repoWith(emptyRoute());
+      (repo.load as jest.Mock).mockRejectedValue(new Error('storage unavailable'));
+      const port = new RuntimeOperatePort(repo, new TaskUiEventBus(), {} as never, {} as never);
+      await expect(port.start('打开设置')).rejects.toThrow('storage unavailable');
+      expect(release).toHaveBeenCalledTimes(1);
+    } finally { acquire.mockRestore(); }
+  });
+
+  it('companion getState does not throw when no companion model is configured', async () => {
+    const port = new RuntimeCompanionPort(repoWith(emptyRoute()));
+    await expect(port.getState()).resolves.toMatchObject({
+      phase: 'error',
+      errorMessage: '请先配置陪伴模型',
+    });
+  });
+
+  it('companion submitTranscript returns a turn without forcing operate', async () => {
+    const port = new RuntimeCompanionPort(repoWith(emptyRoute()));
+    const turn = await port.submitTranscript('你好');
+    expect(turn.transcript).toBe('你好');
+    expect(turn.intent).not.toBeUndefined();
+    expect(['companion', 'operate', 'preference', 'errand', 'ambiguous']).toContain(
+      turn.intent,
+    );
+  });
+
+  it('operate getCurrent stays idle and start fail-closes instead of throwing', async () => {
+    const events = new TaskUiEventBus();
+    const port = new RuntimeOperatePort(
+      repoWith(emptyRoute()),
+      events,
+      {
+        resolveCatalog: jest.fn(),
+        resolveExecutionTarget: jest.fn(),
+        resolveTransport: jest.fn(),
+        listPresets: jest.fn(),
+      } as never,
+      {getCurrent: jest.fn().mockResolvedValue({state: 'failed'})} as never,
+    );
+    await expect(port.getCurrent()).resolves.toMatchObject({phase: 'idle', steps: []});
+    const started = await port.start('打开设置');
+    expect(started.kind === 'blocked' || started.kind === 'started').toBe(true);
+    if (started.kind === 'blocked') {
+      expect(started.blocker.message.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('capability reads return ready ViewStates instead of port_not_wired', async () => {
+    const repo = repoWith(emptyRoute());
+    const visual = new RuntimeVisualAgentToolsPort(repo);
+    const errands = new RuntimeErrandPort(repo);
+    const privacy = new RuntimePrivacyPort(repo);
+    const activity = new RuntimeActivityPort(repo, errands);
+    await expect(visual.read()).resolves.toMatchObject({status: 'ready'});
+    await expect(errands.read()).resolves.toMatchObject({status: 'ready', enabled: false});
+    await expect(privacy.read()).resolves.toMatchObject({
+      status: 'ready',
+      memoryEnabled: true,
+    });
+    await expect(activity.read()).resolves.toMatchObject({status: 'ready'});
+  });
+
+  it('operate fail keeps task identity so Home can leave RUNNING', async () => {
+    const events = new TaskUiEventBus();
+    const received: Array<{type: string; taskId: string}> = [];
+    events.subscribe(event => {
+      received.push({type: event.type, taskId: event.taskId});
+    });
+    const port = new RuntimeOperatePort(
+      repoWith(emptyRoute()),
+      events,
+      {
+        resolveCatalog: jest.fn(),
+        resolveExecutionTarget: jest.fn(),
+        resolveTransport: jest.fn(),
+        listPresets: jest.fn(),
+      } as never,
+      {getCurrent: jest.fn().mockResolvedValue({state: 'failed'})} as never,
+    );
+    (port as unknown as {current: object; fail: (code: string, message: string) => void}).current =
+      {phase: 'running', taskId: 'task-1', sessionRevision: 3, steps: []};
+    (port as unknown as {fail: (code: string, message: string) => void}).fail(
+      'claim_failed',
+      '无法开始这次操作',
+    );
+    await expect(port.getCurrent()).resolves.toMatchObject({
+      phase: 'failed',
+      taskId: 'task-1',
+      sessionRevision: 3,
+    });
+    expect(received).toEqual([{type: 'failed', taskId: 'task-1'}]);
+  });
+
+  it('visual save with keep preserves the existing secretRef', async () => {
+    const route: RuntimeRouteConfigV1 = {
+      ...emptyRoute(),
+      visualAgent: {
+        enabled: true,
+        activeProfileId: 'vap-1',
+        profiles: [
+          {
+            schemaVersion: 1,
+            profileId: 'vap-1',
+            toolId: 'openclaw',
+            enabled: true,
+            connector: {
+              kind: 'connector_bridge',
+              bridgeUrl: 'http://127.0.0.1:18789',
+              bindingId: 'bind-1',
+              secretRef: 'visual:vap-1',
+            },
+            requestedCapabilities: {
+              imageInput: true,
+              structuredAction: true,
+              stream: false,
+              cancel: false,
+              approval: false,
+              resume: false,
+              steer: false,
+              preferences: false,
+            },
+          },
+        ],
+      },
+    };
+    const repo = repoWith(route);
+    const visual = new RuntimeVisualAgentToolsPort(repo);
+    await visual.saveProfile(
+      {
+        profileId: 'vap-1',
+        toolId: 'openclaw',
+        enabled: true,
+        bridgeUrl: 'http://127.0.0.1:18789',
+        bindingId: 'bind-1',
+        credential: {action: 'keep'},
+        requestedCapabilities: {
+          imageInput: true,
+          structuredAction: true,
+          stream: false,
+          cancel: false,
+          approval: false,
+          resume: false,
+          steer: false,
+          preferences: false,
+        },
+      },
+      1,
+    );
+    const envelope = await repo.load();
+    expect(envelope.active.visualAgent.profiles[0]?.connector.secretRef).toBe(
+      'visual:vap-1',
+    );
+  });
+});

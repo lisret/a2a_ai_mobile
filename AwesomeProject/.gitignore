@@ -67,3 +67,9 @@ yarn-error.log
 
 # Local NoNo 3D avatar copied at build time
 android/app/src/main/assets/nono-avatar/
+
+# Offline ASR models + Sherpa AAR filled by scripts/pin-asr-artifacts.js at build time.
+# Repo only tracks AsrArtifactPins.ts + the pin script; run the script before building
+# (copyNonoAsrAssets copies build/asr-pins/builtin/ into assets). Never ship the upgrade pack in the APK.
+android/app/src/main/assets/nono-asr/
+android/app/libs/*.aar

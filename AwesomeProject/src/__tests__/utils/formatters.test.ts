@@ -2,7 +2,7 @@
  * formatters 工具函数单元测试
  */
 
-import { formatTime, truncateText } from '../../utils/formatters';
+import {formatTime, truncateText} from '@shared/utils/formatters';
 
 describe('formatters', () => {
   describe('formatTime', () => {
@@ -58,7 +58,7 @@ describe('formatters', () => {
       const truncated = truncateText(text, 10);
       expect(truncated.length).toBe(13); // 10 + '...'
       expect(truncated).toContain('...');
-      expect(truncated.substring(0, 10)).toBe('这是一个非常长的文本，应该被');
+      expect(truncated.substring(0, 10)).toBe('这是一个非常长的文本');
     });
 
     it('应该处理空字符串', () => {
@@ -71,4 +71,3 @@ describe('formatters', () => {
     });
   });
 });
-

@@ -1,5 +1,6 @@
 package com.awesomeproject.bridge
 
+import com.awesomeproject.localmodel.UnavailableLocalModelOperations
 import com.facebook.react.ReactPackage
 import com.facebook.react.bridge.NativeModule
 import com.facebook.react.bridge.ReactApplicationContext
@@ -13,6 +14,7 @@ import com.facebook.react.uimanager.ViewManager
  *   - [AccessibilityActionModule] — 高级无障碍动作（输入、应用启动）
  *   - [ADBModule] — ADB shell 命令执行（降级通道）
  *   - [FloatingWindowModule] — 悬浮窗创建与生命周期管理
+ *   - [LanMcpModule] — 局域网 MCP 服务（用户显式启动的前台服务 + Bearer 鉴权的本地 HTTP/MCP 端点）
  *
  * 在 [com.awesomeproject.core.MainApplication.getPackages] 中注册。
  *
@@ -25,7 +27,12 @@ class AccessibilityPackage : ReactPackage {
             AccessibilityModule(reactContext),
             AccessibilityActionModule(reactContext),
             ADBModule(reactContext),
-            FloatingWindowModule(reactContext)
+            FloatingWindowModule(reactContext),
+            SecureCredentialModule(reactContext),
+            LocalModelEligibilityModule(reactContext, UnavailableLocalModelOperations()),
+            LocalPackModule(reactContext),
+            SherpaAsrModule(reactContext),
+            LanMcpModule(reactContext)
         )
     }
 

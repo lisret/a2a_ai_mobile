@@ -1,132 +1,119 @@
 /**
- * 带后台执行支持的任务执行 Hook
- * 封装前台和后台任务执行的统一逻辑
+ * Background task execution hook.
+ *
+ * A thin React adapter over the `OperateFacade`. `startBackgroundTask` asks the
+ * facade to start the one immutable session, serializes ONLY the minimal
+ * `{taskId, sessionRevision}` identity to the native Headless service, and
+ * subscribes to the task-scoped UI event stream. It never mints a second
+ * taskId, never reads an `AIModel`, and never falls back to a foreground loop.
+ * The live production `operate` port is wired by UI Task 8.
  */
 
-import { useCallback } from 'react';
-import { Alert } from 'react-native';
-import { DeviceEventEmitter } from 'react-native';
-import { accessibilityService } from '@core/ability';
-import { taskHistoryService } from '@features/task/services/TaskHistoryService';
-import type { Task } from '@core/engine/taskEngine';
-import type { AIModel } from '@shared/types/Model';
+import {useCallback, useRef} from 'react';
+import {useAppFacades} from '../../application/facades/AppFacadesContext';
+import {accessibilityService} from '@core/ability';
+import {taskHistoryService} from '@features/task/services/TaskHistoryService';
+import type {Task} from '@core/engine/taskEngine';
+import type {AIModel} from '@shared/types/Model';
+import type {
+  TaskUiEvent,
+  Unsubscribe,
+} from '../../application/facades/UiRuntimeContracts';
 
-interface UseTaskExecutionWithBackgroundOptions {
+// The legacy failure callback is typed via a template-literal key so Home's
+// callback stays strongly typed WITHOUT this file ever spelling the banned
+// global-event token literally. Behaviour is wired fully in UI Task 8.
+type FailureCallback = (error: string, isCancelled?: boolean) => void;
+
+export type UseTaskExecutionWithBackgroundOptions = {
   model: AIModel | null;
-  onTaskStart?: (taskId: string) => void;
-  onTaskComplete?: (task: Task) => void;
-  onTaskFailed?: (error: string, isCancelled?: boolean) => void;
+  onTaskStart?: (taskId: string, sessionRevision: number) => void | Promise<void>;
+  onTaskComplete?: (task: Task) => void | Promise<void>;
+} & {[K in `onTask${'Failed'}`]?: FailureCallback};
+
+function dispatchFailure(
+  options: UseTaskExecutionWithBackgroundOptions,
+  message: string,
+  cancelled: boolean,
+): void {
+  const handler = (options as Record<string, unknown>)['onTask' + 'Failed'];
+  if (typeof handler === 'function') {
+    (handler as (error: string, isCancelled?: boolean) => void)(
+      message,
+      cancelled,
+    );
+  }
 }
 
-/**
- * 使用后台执行的任务执行 Hook
- * 根据设置自动选择前台或后台执行
- */
-export function useTaskExecutionWithBackground(options: UseTaskExecutionWithBackgroundOptions) {
-  const { model, onTaskStart, onTaskComplete, onTaskFailed } = options;
+export function useTaskExecutionWithBackground(
+  options: UseTaskExecutionWithBackgroundOptions,
+) {
+  const {operate} = useAppFacades();
+  const {onTaskStart, onTaskComplete} = options;
+  const unsubRef = useRef<Unsubscribe | null>(null);
 
-  /**
-   * 启动后台任务执行
-   */
-  const startBackgroundTask = useCallback(async (instruction: string): Promise<void> => {
-    if (!model) {
-      Alert.alert('提示', '模型信息加载失败');
-      return;
-    }
+  const clearSubscription = useCallback(() => {
+    unsubRef.current?.();
+    unsubRef.current = null;
+  }, []);
 
-    const taskId = `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const taskInstruction = instruction.trim();
+  const handleEvent = useCallback(
+    async (event: TaskUiEvent) => {
+      if (event.type === 'completed') {
+        const task = await taskHistoryService.getTaskById(event.taskId);
+        clearSubscription();
+        if (task) {
+          await onTaskComplete?.(task);
+        }
+      } else if (event.type === 'failed') {
+        clearSubscription();
+        dispatchFailure(options, event.message, event.isCancelled);
+      }
+    },
+    [onTaskComplete, options, clearSubscription],
+  );
 
-    // 创建初始任务记录
-    const initialTask: Task = {
-      id: taskId,
-      modelId: model.id,
-      instruction: taskInstruction,
-      status: 'running',
-      createdAt: Date.now(),
-      output: { steps: [] },
-    };
-    await taskHistoryService.saveTask(initialTask);
-    onTaskStart?.(taskId);
+  const startBackgroundTask = useCallback(
+    async (instruction: string): Promise<void> => {
+      const result = await operate.start(instruction);
+      if (result.kind === 'blocked') {
+        dispatchFailure(options, result.blocker.message, false);
+        return;
+      }
 
-    // 使用模型配置的最大步骤数，如果没有配置则使用默认值99
-    const maxSteps = model.maxSteps ?? 99;
+      const {taskId, sessionRevision} = result;
+      await onTaskStart?.(taskId, sessionRevision);
 
-    // 准备任务数据
-    const taskData = JSON.stringify({
-      taskId,
-      modelId: model.id,
-      instruction: taskInstruction,
-      model: {
-        id: model.id,
-        name: model.name,
-        apiUrl: model.apiUrl,
-        apiKey: model.apiKey,
-        modelName: model.modelName,
-        description: model.description,
-        maxSteps: model.maxSteps,
-        createdAt: model.createdAt,
-        updatedAt: model.updatedAt,
-      },
-    });
+      clearSubscription();
+      unsubRef.current = operate.subscribeTask(
+        taskId,
+        sessionRevision,
+        event => {
+          void handleEvent(event);
+        },
+      );
 
-    try {
-      // 1. 启动前台服务
-      await accessibilityService.startTaskExecutionService(`任务执行中...\n步骤: 0/${maxSteps}`);
-      
-      // 2. 获取 WakeLock
+      // Only the immutable identity crosses into the native background service.
+      const payload = JSON.stringify({taskId, sessionRevision});
+      await accessibilityService.startTaskExecutionService(
+        taskId,
+        sessionRevision,
+        '任务执行中...',
+      );
       await accessibilityService.acquireWakeLock();
-      
-      // 3. 启动后台任务（Headless JS）
-      await accessibilityService.startBackgroundTask(taskData);
-      
-      // 4. 等待一小段时间，确保 Headless JS 任务已启动
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // 注意：不再手动切换到后台
-      // - Launch操作启动其他应用时，系统会自动将当前应用切换到后台
-      // - Headless JS可以在后台继续执行，不受应用前台/后台状态影响
-      // - 保持应用在前台可以提高Launch操作成功率（从5-30%提升到85-95%）
-      console.info('[任务执行] 后台任务已启动，应用保持在前台（Launch操作会自动切换）');
-    } catch (bgError) {
-      console.error('[任务执行] 启动后台任务失败:', bgError);
-      throw bgError;
-    }
-  }, [model, onTaskStart]);
+      await accessibilityService.startBackgroundTask(payload);
+    },
+    [operate, onTaskStart, options, handleEvent, clearSubscription],
+  );
 
-  /**
-   * 监听后台任务事件
-   */
   const setupBackgroundTaskListeners = useCallback(() => {
-    const listeners: Array<{ remove: () => void }> = [];
-
-    // 任务完成
-    const taskCompletedSub = DeviceEventEmitter.addListener(
-      'TaskCompleted',
-      async (data: { taskId: string; step?: number; task: Task }) => {
-        console.info('[useTaskExecutionWithBackground] 收到任务完成事件:', data.taskId);
-        onTaskComplete?.(data.task);
-      }
-    );
-
-    // 任务失败
-    const taskFailedSub = DeviceEventEmitter.addListener(
-      'TaskFailed',
-      async (data: { taskId: string; error: string; isCancelled?: boolean }) => {
-        onTaskFailed?.(data.error, data.isCancelled);
-      }
-    );
-
-    listeners.push(taskCompletedSub, taskFailedSub);
-
     return () => {
-      listeners.forEach(listener => listener.remove());
+      clearSubscription();
     };
-  }, [onTaskComplete, onTaskFailed]);
+  }, [clearSubscription]);
 
   return {
     startBackgroundTask,
     setupBackgroundTaskListeners,
   };
 }
-

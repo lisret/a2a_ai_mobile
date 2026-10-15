@@ -1,39 +1,29 @@
 import React from 'react';
 import {View, Text, TouchableOpacity, StyleSheet} from 'react-native';
 import {COLORS} from '@shared/constants';
-import type {AIModel} from '@shared/types/Model';
+import type {ModelConfigListItemViewState} from '../../../application/facades/UiRuntimeContracts';
 
 interface ModelItemProps {
-  model: AIModel;
-  isActive: boolean;
+  item: ModelConfigListItemViewState;
   onPress?: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }
 
 export const ModelItem: React.FC<ModelItemProps> = ({
-  model,
-  isActive,
+  item,
   onPress,
   onEdit,
   onDelete,
 }) => {
-  const getProviderName = (provider: string) => {
-    if (provider === 'openai') return 'OpenAI';
-    if (provider === 'zhipu') return '智谱 AI';
-    if (provider === 'modelscope') return '魔搭';
-    if (provider === 'huggingface') return 'HuggingFace';
-    return '自定义';
-  };
-
+  const isActive = item.selected;
   return (
     <View style={[styles.container, isActive && styles.containerActive]}>
       <View style={styles.topline}>
         <TouchableOpacity style={styles.copy} onPress={onPress} activeOpacity={0.8}>
-          <Text style={styles.name}>{model.name}</Text>
+          <Text style={styles.name}>{item.displayName}</Text>
           <Text style={styles.meta}>
-            {getProviderName(model.provider || 'custom')} ·{' '}
-            {model.modelName || model.apiUrl}
+            {item.providerLabel} · {item.modelId}
           </Text>
         </TouchableOpacity>
         {isActive ? (

@@ -2,6 +2,8 @@
  * Jest 测试环境设置
  */
 
+/* eslint-env jest */
+
 // Mock AsyncStorage
 jest.mock('@react-native-async-storage/async-storage', () => ({
   getItem: jest.fn(),
@@ -14,20 +16,24 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
   multiRemove: jest.fn(),
 }));
 
-// Mock React Native 模块
-jest.mock('react-native', () => {
-  const RN = jest.requireActual('react-native');
-  RN.DeviceEventEmitter = {
-    addListener: jest.fn(() => ({ remove: jest.fn() })),
-    removeListener: jest.fn(),
-    emit: jest.fn(),
+const {NativeModules} = require('react-native');
+NativeModules.AccessibilityModule = {};
+NativeModules.AccessibilityActionModule = {};
+NativeModules.ADBModule = {};
+NativeModules.LocalPackModule = {};
+NativeModules.SherpaAsrModule = {};
+
+jest.mock('@react-navigation/native', () => {
+  const React = require('react');
+  const actual = jest.requireActual('@react-navigation/native');
+  return {
+    ...actual,
+    useFocusEffect: (effect) => React.useEffect(effect, []),
   };
-  RN.NativeModules = {
-    ...RN.NativeModules,
-    AccessibilityModule: {},
-    ADBModule: {},
-    AccessibilityActionModule: {},
-  };
-  return RN;
 });
 
+jest.mock('react-native-vector-icons/FontAwesome', () => 'Icon');
+
+// react-native-webview ships ESM that Jest's transformIgnorePatterns does not
+// transform; stub it as a host component so screens embedding the avatar render.
+jest.mock('react-native-webview', () => 'WebView');

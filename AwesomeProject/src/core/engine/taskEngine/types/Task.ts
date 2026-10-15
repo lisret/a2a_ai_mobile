@@ -67,6 +67,16 @@ export interface Task {
 }
 
 /**
+ * 持久化任务的第 2 版存储形态（预留给会话感知的持久化路径）。
+ * 当前 TaskHistoryService 仍以 `Task` 形态读写；schemaVersion/sessionRevision
+ * 供后续任务（如会话关联）在迁移到该形态时使用。
+ */
+export interface PersistedTaskV2 extends Task {
+  readonly schemaVersion: 2;
+  readonly sessionRevision: number;
+}
+
+/**
  * Open-AutoGLM API 请求格式
  * 参考：Open-AutoGLM 框架 ModelConfig
  */

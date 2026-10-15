@@ -16,6 +16,17 @@
         background: #f8f7f3;
         overflow: hidden;
       }
+      canvas {
+        touch-action: none;
+        cursor: grab;
+      }
+      canvas:active {
+        cursor: grabbing;
+      }
+      canvas:focus-visible {
+        outline: 2px solid #369c9c;
+        outline-offset: -3px;
+      }
       body {
         -webkit-user-select: none;
         user-select: none;
@@ -24,9 +35,11 @@
   </head>
   <body>
     <div id="host" data-layout="stage">
-      <canvas id="avatar-canvas"></canvas>
+      <canvas
+        id="avatar-canvas"
+        tabindex="0"
+        aria-label="NoNo，拖动或使用方向键旋转，按 Home 回到正面"></canvas>
     </div>
-    <script src="three.min.js"></script>
-    <script src="scene.js"></script>
+    <script type="module" src="scene.js"></script>
   </body>
 </html>

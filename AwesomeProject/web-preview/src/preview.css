@@ -1,0 +1,241 @@
+@font-face {
+  font-family: FontAwesome;
+  src: url('/fonts/FontAwesome.ttf') format('truetype');
+  font-display: block;
+}
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: #272936;
+  background: #ecece8;
+  font-synthesis: none;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+button,
+select,
+textarea,
+input {
+  font: inherit;
+}
+button,
+select {
+  cursor: pointer;
+}
+.preview-workspace {
+  min-height: 100vh;
+  padding: 24px 32px;
+}
+.workspace-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 1160px;
+  margin: 0 auto 24px;
+}
+.eyebrow {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  color: #77798a;
+}
+h1 {
+  font-size: 22px;
+  letter-spacing: -0.7px;
+  margin: 6px 0 0;
+}
+.live-badge {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: #5a665c;
+  background: #e0e8df;
+  border-radius: 30px;
+  padding: 7px 12px;
+}
+.live-badge i {
+  width: 6px;
+  height: 6px;
+  background: #648169;
+  border-radius: 50%;
+}
+.workspace-body {
+  max-width: 1160px;
+  display: grid;
+  grid-template-columns: 264px 1fr;
+  gap: 48px;
+  margin: auto;
+  align-items: start;
+}
+.controls {
+  background: #f7f7f3;
+  border: 1px solid #fff9;
+  border-radius: 20px;
+  padding: 20px;
+}
+.controls section + section {
+  margin-top: 17px;
+}
+.controls label {
+  display: block;
+  font-size: 12px;
+  font-weight: 650;
+  margin-bottom: 7px;
+  color: #474955;
+}
+.controls select,
+.controls textarea {
+  display: block;
+  width: 100%;
+  background: #fff;
+  border: 1px solid #dcdedb;
+  border-radius: 9px;
+  padding: 9px 10px;
+  color: #343644;
+  font-size: 12px;
+  outline-color: #8178f5;
+}
+.controls textarea {
+  resize: vertical;
+  line-height: 1.6;
+}
+.controls p {
+  font-size: 11px;
+  color: #787b84;
+  line-height: 1.7;
+  margin: 7px 0 0;
+}
+.controls .check {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 400;
+  margin-top: 8px;
+  color: #777b83;
+}
+.source-card {
+  padding-top: 16px;
+  border-top: 1px solid #e4e5df;
+}
+.source-card code {
+  display: block;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+  line-height: 1.65;
+  color: #67608b;
+}
+.controls .boundary-note {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e4e5df;
+}
+.stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+}
+.canvas-meta {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  max-width: 470px;
+  font-size: 11px;
+  color: #747782;
+  margin-bottom: 12px;
+}
+.phone-slot {
+  position: relative;
+  flex-shrink: 0;
+}
+.phone-viewport {
+  position: absolute;
+  inset: 0;
+  transform-origin: top left;
+  border-radius: 30px;
+  overflow: hidden;
+  background: #f8f7f3;
+  box-shadow: 0 0 0 6px #20222c, 0 25px 65px #24263524;
+}
+#app-canvas {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+#phone-overlays {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 100;
+}
+.system-status {
+  position: absolute;
+  top: 7px;
+  left: 22px;
+  right: 22px;
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  font-weight: 650;
+  pointer-events: none;
+  z-index: 5;
+}
+.home-indicator {
+  position: absolute;
+  height: 4px;
+  width: 125px;
+  bottom: 8px;
+  left: calc(50% - 62.5px);
+  border-radius: 3px;
+  background: #242632;
+  pointer-events: none;
+  z-index: 5;
+}
+.canvas-caption {
+  font-size: 10px;
+  color: #8a8c95;
+  margin: 16px 0 0;
+}
+.preview-error {
+  padding: 50px 24px;
+  line-height: 1.8;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.preview-error button {
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 8px;
+  background: #8178f5;
+  color: white;
+}
+@media (max-width: 680px) {
+  .preview-workspace {
+    padding: 18px;
+  }
+  .workspace-body {
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 24px;
+  }
+  .stage {
+    width: 100%;
+  }
+  .controls {
+    width: 100%;
+  }
+  .workspace-header {
+    margin-bottom: 20px;
+  }
+  h1 {
+    font-size: 18px;
+  }
+}

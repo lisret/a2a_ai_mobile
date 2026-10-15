@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.util.Log
+import com.awesomeproject.service.TaskServiceLifecycle
 import com.awesomeproject.service.TaskExecutionService
 import com.awesomeproject.service.TaskExecutionHeadlessService
 
@@ -16,9 +17,12 @@ class ServiceManager(private val context: Context) {
     /**
      * 启动任务执行前台服务
      */
-    fun startTaskExecutionService(statusText: String): Boolean {
-        return try {
+    fun startTaskExecutionService(taskId: String, sessionRevision: Double, statusText: String): Boolean =
+        TaskServiceLifecycle.start(taskId, sessionRevision) {
+        try {
             val intent = Intent(context, TaskExecutionService::class.java).apply {
+                putExtra("taskId", taskId)
+                putExtra("sessionRevision", sessionRevision)
                 putExtra("statusText", statusText)
             }
             
@@ -54,9 +58,12 @@ class ServiceManager(private val context: Context) {
     /**
      * 更新任务执行前台服务通知
      */
-    fun updateTaskExecutionService(statusText: String): Boolean {
+    fun updateTaskExecutionService(taskId: String, sessionRevision: Double, statusText: String): Boolean {
         return try {
             val intent = Intent(context, TaskExecutionService::class.java).apply {
+                action = "UPDATE_SERVICE"
+                putExtra("taskId", taskId)
+                putExtra("sessionRevision", sessionRevision)
                 putExtra("statusText", statusText)
             }
             context.startService(intent)
@@ -68,13 +75,16 @@ class ServiceManager(private val context: Context) {
     }
 
     /**
-     * 停止任务执行前台服务
+     * 停止任务执行前台服务。
+     * 携带本次会话的精确 identity（{taskId, sessionRevision}），与 start/cancel
+     * 使用相同的 identity 字段，避免误停其它会话。
      */
-    fun stopTaskExecutionService(): Boolean {
-        return try {
-            val intent = Intent(context, TaskExecutionService::class.java)
-            context.stopService(intent)
-            Log.d("ServiceManager", "任务执行前台服务已停止")
+    fun stopTaskExecutionService(taskId: String, sessionRevision: Double): Boolean =
+        TaskServiceLifecycle.stop(taskId, sessionRevision) {
+        try {
+            // stopService is allowed in the background and also cancels pending starts.
+            // The lifecycle monitor prevents a newer start between identity check and stop.
+            context.stopService(Intent(context, TaskExecutionService::class.java))
             true
         } catch (e: Exception) {
             Log.e("ServiceManager", "停止前台服务失败", e)

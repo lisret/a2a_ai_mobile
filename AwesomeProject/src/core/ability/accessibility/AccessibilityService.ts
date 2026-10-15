@@ -143,20 +143,34 @@ class AccessibilityService {
     return await AccessibilityModule.requestNotificationPermission();
   }
 
-  async startTaskExecutionService(statusText: string): Promise<void> {
+  async startTaskExecutionService(
+    taskId: string,
+    sessionRevision: number,
+    statusText: string,
+  ): Promise<void> {
     if (!AccessibilityModule) throw new Error('当前平台不支持此操作');
-    await AccessibilityModule.startTaskExecutionService(statusText);
+    await AccessibilityModule.startTaskExecutionService(taskId, sessionRevision, statusText);
   }
 
-  async updateTaskExecutionService(statusText: string): Promise<void> {
+  async updateTaskExecutionService(
+    taskId: string,
+    sessionRevision: number,
+    statusText: string,
+  ): Promise<void> {
     if (!AccessibilityModule) return;
-    try { await AccessibilityModule.updateTaskExecutionService(statusText); }
+    try { await AccessibilityModule.updateTaskExecutionService(taskId, sessionRevision, statusText); }
     catch (error) { console.warn('更新前台服务失败:', error); }
   }
 
-  async stopTaskExecutionService(): Promise<void> {
+  // Stop targets the exact running session identity `{taskId, sessionRevision}`;
+  // Android/iOS use these fields to scope the stop (iOS to the exact notification
+  // identifier), never a wildcard sweep.
+  async stopTaskExecutionService(
+    taskId: string,
+    sessionRevision: number,
+  ): Promise<void> {
     if (!AccessibilityModule) return;
-    try { await AccessibilityModule.stopTaskExecutionService(); }
+    try { await AccessibilityModule.stopTaskExecutionService(taskId, sessionRevision); }
     catch (error) { console.warn('停止前台服务失败:', error); }
   }
 

@@ -2,15 +2,17 @@
  * useTaskHistory Hook 单元测试
  */
 
-import { renderHook, act, waitFor } from '@testing-library/react';
-import { useTaskHistory } from '../../features/task/hooks/useTaskHistory';
-import { taskHistoryService } from '../../features/task/services/TaskHistoryService';
-import type { Task } from '../../core/engine/taskEngine';
+import {renderHook, act, waitFor} from '@testing-library/react-native';
+import {useTaskHistory} from '../../features/task/hooks/useTaskHistory';
+import {taskHistoryService} from '../../features/task/services/TaskHistoryService';
+import type {Task} from '../../core/engine/taskEngine';
 
 // Mock 服务
 jest.mock('../../features/task/services/TaskHistoryService');
 
-const mockTaskHistoryService = taskHistoryService as jest.Mocked<typeof taskHistoryService>;
+const mockTaskHistoryService = taskHistoryService as jest.Mocked<
+  typeof taskHistoryService
+>;
 
 describe('useTaskHistory', () => {
   const mockModelId = 'model_123';
@@ -21,7 +23,7 @@ describe('useTaskHistory', () => {
       instruction: '测试任务1',
       status: 'success',
       createdAt: Date.now() - 1000,
-      output: { steps: [] },
+      output: {steps: []},
     },
     {
       id: 'task_2',
@@ -29,7 +31,7 @@ describe('useTaskHistory', () => {
       instruction: '测试任务2',
       status: 'failed',
       createdAt: Date.now() - 2000,
-      output: { steps: [] },
+      output: {steps: []},
     },
   ];
 
@@ -40,20 +42,22 @@ describe('useTaskHistory', () => {
   });
 
   it('应该加载任务列表', async () => {
-    const { result } = renderHook(() =>
-      useTaskHistory({ modelId: mockModelId, autoSelectLatest: false })
+    const {result} = renderHook(() =>
+      useTaskHistory({modelId: mockModelId, autoSelectLatest: false}),
     );
 
     await waitFor(() => {
       expect(result.current.tasks).toHaveLength(2);
     });
 
-    expect(mockTaskHistoryService.getTasksByModelId).toHaveBeenCalledWith(mockModelId);
+    expect(mockTaskHistoryService.getTasksByModelId).toHaveBeenCalledWith(
+      mockModelId,
+    );
   });
 
   it('应该自动选择最新任务', async () => {
-    const { result } = renderHook(() =>
-      useTaskHistory({ modelId: mockModelId, autoSelectLatest: true })
+    const {result} = renderHook(() =>
+      useTaskHistory({modelId: mockModelId, autoSelectLatest: true}),
     );
 
     await waitFor(() => {
@@ -64,8 +68,8 @@ describe('useTaskHistory', () => {
   });
 
   it('应该支持手动选择任务', async () => {
-    const { result } = renderHook(() =>
-      useTaskHistory({ modelId: mockModelId, autoSelectLatest: false })
+    const {result} = renderHook(() =>
+      useTaskHistory({modelId: mockModelId, autoSelectLatest: false}),
     );
 
     await waitFor(() => {
@@ -80,8 +84,8 @@ describe('useTaskHistory', () => {
   });
 
   it('应该支持删除任务', async () => {
-    const { result } = renderHook(() =>
-      useTaskHistory({ modelId: mockModelId, autoSelectLatest: false })
+    const {result} = renderHook(() =>
+      useTaskHistory({modelId: mockModelId, autoSelectLatest: false}),
     );
 
     await waitFor(() => {
@@ -104,22 +108,25 @@ describe('useTaskHistory', () => {
   });
 
   it('应该支持刷新任务列表', async () => {
-    const { result } = renderHook(() =>
-      useTaskHistory({ modelId: mockModelId, autoSelectLatest: false })
+    const {result} = renderHook(() =>
+      useTaskHistory({modelId: mockModelId, autoSelectLatest: false}),
     );
 
     await waitFor(() => {
       expect(result.current.tasks).toHaveLength(2);
     });
 
-    const newTasks = [...mockTasks, {
-      id: 'task_3',
-      modelId: mockModelId,
-      instruction: '测试任务3',
-      status: 'running',
-      createdAt: Date.now(),
-      output: { steps: [] },
-    }];
+    const newTasks = [
+      ...mockTasks,
+      {
+        id: 'task_3',
+        modelId: mockModelId,
+        instruction: '测试任务3',
+        status: 'running' as const,
+        createdAt: Date.now(),
+        output: {steps: []},
+      },
+    ];
 
     mockTaskHistoryService.getTasksByModelId.mockResolvedValue(newTasks);
 
@@ -131,4 +138,3 @@ describe('useTaskHistory', () => {
     expect(result.current.refreshing).toBe(false);
   });
 });
-

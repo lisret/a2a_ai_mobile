@@ -1,9 +1,9 @@
 import fs from 'fs';
 import path from 'path';
 import React from 'react';
+import {Platform} from 'react-native';
 import {fireEvent, render} from '@testing-library/react-native';
 import {AvatarLooksScreen} from '../../../../features/settings/screens/AvatarLooksScreen';
-import {resetAvatarLooksDemo} from '../../../../features/task/avatar/avatarLooksDemo';
 
 jest.mock('@react-navigation/native', () => {
   const actual = jest.requireActual('@react-navigation/native');
@@ -14,11 +14,31 @@ jest.mock('@react-navigation/native', () => {
   };
 });
 
+jest.mock('../../../../features/task/avatar/AvatarPackStore', () => {
+  const actual = jest.requireActual(
+    '../../../../features/task/avatar/AvatarPackStore',
+  );
+  return {
+    ...actual,
+    installPinnedAvatar: jest.fn(() => new Promise(() => {})),
+    getActiveAvatarId: jest.fn().mockResolvedValue('builtin'),
+    resolveAvatarGltfUri: jest.fn().mockResolvedValue(null),
+  };
+});
+
+jest.mock('../../../../features/task/avatar/LocalPack', () => ({
+  localPack: {
+    listFiles: jest.fn().mockResolvedValue([]),
+    getNetworkType: jest.fn().mockResolvedValue('wifi'),
+  },
+}));
+
 jest.mock('@features/task/components/NonoAvatar3D', () => {
   const React = require('react');
   const {View} = require('react-native');
   return {
-    NonoAvatar3D: () => React.createElement(View, {testID: 'avatar-3d-preview'}),
+    NonoAvatar3D: (props: any) =>
+      React.createElement(View, {...props, testID: 'avatar-3d-preview'}),
   };
 });
 
@@ -44,7 +64,31 @@ jest.mock('@shared/components/PageLayout', () => {
 
 describe('AvatarLooksScreen', () => {
   beforeEach(() => {
-    resetAvatarLooksDemo();
+    Object.defineProperty(Platform, 'OS', {
+      value: 'android',
+      configurable: true,
+    });
+  });
+
+  it('plays reactions in the real avatar host and permits repeating the same gesture', () => {
+    const screen = render(<AvatarLooksScreen />);
+    expect(screen.getByTestId('avatar-3d-preview').props.mood).toBe('idle');
+    fireEvent.press(screen.getByTestId('avatar-reaction-wink'));
+    expect(screen.getByTestId('avatar-3d-preview').props.mood).toBe('wink');
+    const first = screen.getByTestId('avatar-3d-preview').props.reactionKey;
+    fireEvent.press(screen.getByTestId('avatar-reaction-wink'));
+    expect(screen.getByTestId('avatar-3d-preview').props.reactionKey).toBe(
+      first + 1,
+    );
+    fireEvent.press(screen.getByTestId('avatar-reaction-spin'));
+    expect(screen.getByTestId('avatar-3d-preview').props.mood).toBe('spin');
+    fireEvent.press(screen.getByTestId('avatar-reaction-dance'));
+    expect(screen.getByTestId('avatar-3d-preview').props.mood).toBe('dance');
+    fireEvent.press(screen.getByTestId('avatar-reaction-unfold'));
+    expect(screen.getByTestId('avatar-3d-preview').props.mood).toBe('unfold');
+    fireEvent.press(screen.getByTestId('avatar-reaction-idle'));
+    expect(screen.getByTestId('avatar-3d-preview').props.mood).toBe('idle');
+    screen.unmount();
   });
 
   it('puts the looks row under companion in Settings', () => {
@@ -67,26 +111,22 @@ describe('AvatarLooksScreen', () => {
     const screen = render(<AvatarLooksScreen />);
 
     expect(screen.getByTestId('avatar-look-preview')).toBeTruthy();
-    expect(screen.getByText('当前 · 默认角色')).toBeTruthy();
+    expect(screen.getByText('当前 · NoNo')).toBeTruthy();
 
-    expect(
-      screen.queryByTestId('look-download-builtin'),
-    ).toBeNull();
+    expect(screen.queryByTestId('look-download-builtin')).toBeNull();
     expect(screen.getByTestId('look-current-builtin')).toBeTruthy();
 
-    fireEvent.press(screen.getByTestId('look-download-look-box'));
+    fireEvent.press(screen.getByTestId('look-download-box'));
     expect(screen.getByText('下载「测试盒」？')).toBeTruthy();
     expect(screen.getAllByText(/2 KB/).length).toBeGreaterThan(0);
     expect(screen.getByText(/Wi-Fi/)).toBeTruthy();
-    expect(screen.getByTestId('look-status-look-box').props.children).toBe(
-      '未下载',
-    );
+    expect(screen.getByTestId('look-status-box').props.children).toBe('未下载');
 
     fireEvent.press(screen.getByText('取消'));
     expect(screen.queryByText('下载「测试盒」？')).toBeNull();
-    expect(screen.getByTestId('look-download-look-box')).toBeTruthy();
+    expect(screen.getByTestId('look-download-box')).toBeTruthy();
 
-    fireEvent.press(screen.getByTestId('look-download-look-box'));
+    fireEvent.press(screen.getByTestId('look-download-box'));
     fireEvent.press(screen.getByText('确认下载'));
     expect(screen.getByText('下载中')).toBeTruthy();
     expect(screen.queryByText('下载「测试盒」？')).toBeNull();

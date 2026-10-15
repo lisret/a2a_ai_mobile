@@ -18,22 +18,27 @@
 import React, {useEffect} from 'react';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
 import {AppNavigator} from './src/navigation/AppNavigator';
+import {AppFacadesProvider} from './src/application/facades/AppFacadesContext';
+import {appFacades} from './src/application/facades/createAppFacades';
 import {debugLogService} from './src/features/debug/services/DebugLogService';
 
 function App(): React.JSX.Element {
   useEffect(() => {
-    debugLogService
-      .initialize()
-      .catch(error => {
-        // 调试日志初始化失败不影响主功能，仅记录原始错误
-        // Debug log init failure is non-fatal — log and continue
-        console.error('[App] 调试日志服务初始化失败 | DebugLogService init failed:', error);
-      });
+    debugLogService.initialize().catch(error => {
+      // 调试日志初始化失败不影响主功能，仅记录原始错误
+      // Debug log init failure is non-fatal — log and continue
+      console.error(
+        '[App] 调试日志服务初始化失败 | DebugLogService init failed:',
+        error,
+      );
+    });
   }, []);
 
   return (
     <SafeAreaProvider>
-      <AppNavigator />
+      <AppFacadesProvider value={appFacades}>
+        <AppNavigator />
+      </AppFacadesProvider>
     </SafeAreaProvider>
   );
 }

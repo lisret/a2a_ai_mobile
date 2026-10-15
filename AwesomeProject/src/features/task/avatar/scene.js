@@ -15,6 +15,8 @@ import {loadAvatarAsset} from './AvatarAsset.mjs';
     var reducedMotion = window.matchMedia(
       '(prefers-reduced-motion: reduce)',
     ).matches;
+    var hostActive = true;
+    var petTemperament = null;
     var orbit = createAvatarOrbit(canvas, {
       reducedMotion: reducedMotion,
       onTap: function () {
@@ -23,6 +25,33 @@ import {loadAvatarAsset} from './AvatarAsset.mjs';
             JSON.stringify({type: 'avatar-press'}),
           );
       },
+    });
+    function petInteraction(held) {
+      if (animation) animation.setInteractionHeld(held);
+      if (held && window.ReactNativeWebView)
+        window.ReactNativeWebView.postMessage(
+          JSON.stringify({type: 'avatar-interaction'}),
+        );
+      visibilityChanged();
+    }
+    canvas.addEventListener('pointerdown', function () {
+      petInteraction(true);
+    });
+    canvas.addEventListener('pointerup', function () {
+      petInteraction(false);
+    });
+    canvas.addEventListener('pointercancel', function () {
+      petInteraction(false);
+    });
+    canvas.addEventListener('lostpointercapture', function () {
+      petInteraction(false);
+    });
+    canvas.addEventListener('pointermove', function () {
+      visibilityChanged();
+    });
+    canvas.addEventListener('keydown', function () {
+      if (animation) animation.interact();
+      visibilityChanged();
     });
     var renderer = new THREE.WebGLRenderer({
       canvas: canvas,
@@ -253,7 +282,7 @@ import {loadAvatarAsset} from './AvatarAsset.mjs';
       var delta =
         lastFrame === null ? 0 : Math.min((now - lastFrame) / 1000, 0.05);
       lastFrame = now;
-      orbit.update(delta);
+      if (!reducedMotion) orbit.update(delta);
       var t = now * 0.001;
       var phase = (now - moodStarted) * 0.001;
       look.x += (targetLook.x - look.x) * 0.08;
@@ -316,7 +345,10 @@ import {loadAvatarAsset} from './AvatarAsset.mjs';
         if (animation) animation.update(delta);
       }
       renderer.render(scene, camera);
-      frameId = requestAnimationFrame(tick);
+      frameId =
+        hostActive && !document.hidden && !reducedMotion
+          ? requestAnimationFrame(tick)
+          : null;
     }
 
     var packedRoot = null;
@@ -426,9 +458,27 @@ import {loadAvatarAsset} from './AvatarAsset.mjs';
             THREE,
             packedRoot,
             gltf.animations,
-            {reducedMotion: reducedMotion},
+            {
+              reducedMotion: reducedMotion,
+              autonomous: fileUrl === defaultUrl,
+              onIntentRequest: function (context) {
+                if (
+                  hostActive &&
+                  !document.hidden &&
+                  !reducedMotion &&
+                  window.ReactNativeWebView
+                )
+                  window.ReactNativeWebView.postMessage(
+                    JSON.stringify({
+                      type: 'avatar-intent-request',
+                      context: context,
+                    }),
+                  );
+              },
+            },
           );
           animation.setMood(mood);
+          if (petTemperament) animation.setTemperament(petTemperament);
           packedRoot = new THREE.Group();
           packedRoot.add(placement);
           root.add(packedRoot);
@@ -443,6 +493,7 @@ import {loadAvatarAsset} from './AvatarAsset.mjs';
               return clip.name;
             })
             .join(',');
+          visibilityChanged();
         },
         function () {
           if (version !== loadVersion) return;
@@ -457,7 +508,7 @@ import {loadAvatarAsset} from './AvatarAsset.mjs';
       );
     }
     function visibilityChanged() {
-      if (document.hidden) {
+      if (document.hidden || !hostActive) {
         cancelAnimationFrame(frameId);
         frameId = null;
         lastFrame = null;
@@ -484,6 +535,21 @@ import {loadAvatarAsset} from './AvatarAsset.mjs';
     });
 
     window.NonoAvatar = {
+      setActive: function (active) {
+        hostActive = Boolean(active);
+        if (!hostActive && animation) animation.setInteractionHeld(false);
+        visibilityChanged();
+      },
+      setReducedMotion: function (value) {
+        reducedMotion = Boolean(value);
+        if (animation) animation.setReducedMotion(reducedMotion);
+        visibilityChanged();
+      },
+      setPetTemperament: function (value) {
+        if (!['calm', 'curious', 'playful', 'sleepy'].includes(value)) return;
+        petTemperament = value;
+        if (animation) animation.setTemperament(value);
+      },
       setLayout: function (next) {
         layout = next;
         resize();
@@ -493,6 +559,7 @@ import {loadAvatarAsset} from './AvatarAsset.mjs';
       },
       setMood: applyMood,
       playMood: function (next) {
+        if (animation) animation.interact();
         // Explicit interactions can replay the same gesture; ordinary app state stays idempotent.
         applyMood('idle');
         applyMood(next);
@@ -516,7 +583,7 @@ import {loadAvatarAsset} from './AvatarAsset.mjs';
 
     resize();
     useBuiltin();
-    frameId = requestAnimationFrame(tick);
+    visibilityChanged();
     if (window.ReactNativeWebView)
       window.ReactNativeWebView.postMessage(
         JSON.stringify({type: 'avatar-ready'}),

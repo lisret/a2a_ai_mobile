@@ -672,7 +672,7 @@ function createProductionRuntimePorts(): AppFacadePorts {
   const eligibility = new NativeLocalModelEligibilityChecker();
   const operateEvents = new TaskUiEventBus();
   const operate = new RuntimeOperatePort(repo, operateEvents, registry, eligibility);
-  const companion = new RuntimeCompanionPort(repo);
+  const companion = new RuntimeCompanionPort(repo, registry);
   const visualAgentTools = new RuntimeVisualAgentToolsPort(repo, credentials);
   const errands = new RuntimeErrandPort(repo);
   const privacy = new RuntimePrivacyPort(repo);

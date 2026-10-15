@@ -1,4 +1,4 @@
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   Platform,
   StyleSheet,
@@ -8,10 +8,16 @@ import {
   type ViewStyle,
 } from 'react-native';
 import WebView from 'react-native-webview';
+import {
+  useAvatarPresence,
+  type RequestPetIntent,
+} from '../avatar/useAvatarPresence';
 import {NoNoMascot, type NoNoMood} from '@shared/components/NoNoMascot';
 
 interface NonoAvatar3DProps {
   mood: NoNoMood;
+  active?: boolean;
+  requestPetIntent?: RequestPetIntent;
   gltfUri: string | null;
   onGltfFailed(): void;
   onPress?(): void;
@@ -35,6 +41,8 @@ export const NonoAvatar3D: React.FC<NonoAvatar3DProps> = ({
   onGltfFailed,
   onPress,
   reactionKey = 0,
+  active = true,
+  requestPetIntent,
   pressLabel = '和 NoNo 说话',
   pressHint = '轻点聊天，拖动模型旋转',
   layout = 'stage',
@@ -45,6 +53,26 @@ export const NonoAvatar3D: React.FC<NonoAvatar3DProps> = ({
   const webRef = useRef<WebView>(null);
   const [rendererFailed, setRendererFailed] = useState(false);
 
+  const applyIntent = useCallback((value: string) => {
+    webRef.current?.injectJavaScript(
+      `window.NonoAvatar&&window.NonoAvatar.setPetTemperament(${JSON.stringify(
+        value,
+      )});true;`,
+    );
+  }, []);
+  const presence = useAvatarPresence({
+    active: active && !rendererFailed,
+    gltfUri,
+    mood,
+    reactionKey,
+    requestPetIntent,
+    applyIntent,
+  });
+  const injectPresence = () => {
+    webRef.current?.injectJavaScript(
+      `if(window.NonoAvatar){window.NonoAvatar.setReducedMotion(${presence.reducedMotion});window.NonoAvatar.setActive(${presence.active});}true;`,
+    );
+  };
   const injectModel = () => {
     webRef.current?.injectJavaScript(
       gltfUri
@@ -72,6 +100,7 @@ export const NonoAvatar3D: React.FC<NonoAvatar3DProps> = ({
     webRef.current?.injectJavaScript(
       `if(window.NonoAvatarFailed&&window.ReactNativeWebView){window.ReactNativeWebView.postMessage(JSON.stringify({type:'avatar-render-failed'}));}true;`,
     );
+    injectPresence();
     injectLayout();
     injectMood();
     injectModel();
@@ -80,6 +109,7 @@ export const NonoAvatar3D: React.FC<NonoAvatar3DProps> = ({
   useEffect(injectModel, [gltfUri]);
   useEffect(injectMood, [mood, reactionKey]);
   useEffect(injectLayout, [layout]);
+  useEffect(injectPresence, [presence.active, presence.reducedMotion]);
 
   const boxStyle =
     width && height
@@ -97,7 +127,10 @@ export const NonoAvatar3D: React.FC<NonoAvatar3DProps> = ({
       accessibilityRole={onPress ? 'button' : undefined}
       accessibilityLabel={onPress ? pressLabel : undefined}
       accessibilityHint={onPress ? pressHint : undefined}
-      onAccessibilityTap={onPress}>
+      onAccessibilityTap={() => {
+        presence.cancel();
+        onPress?.();
+      }}>
       {rendererFailed ? (
         <TouchableOpacity
           testID="avatar-render-fallback"
@@ -129,7 +162,12 @@ export const NonoAvatar3D: React.FC<NonoAvatar3DProps> = ({
           onMessage={event => {
             try {
               const payload = JSON.parse(String(event.nativeEvent.data));
-              if (payload?.type === 'avatar-press') {
+              if (payload?.type === 'avatar-intent-request') {
+                presence.request(payload.context);
+              } else if (payload?.type === 'avatar-interaction') {
+                presence.cancel();
+              } else if (payload?.type === 'avatar-press') {
+                presence.cancel();
                 onPress?.();
               } else if (payload?.type === 'avatar-render-failed') {
                 setRendererFailed(true);

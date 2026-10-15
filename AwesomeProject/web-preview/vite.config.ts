@@ -159,6 +159,7 @@ export default defineConfig({
           'scene.js',
           'GLTFLoader.js',
           'AvatarAnimation.mjs',
+          'AvatarPet.mjs',
           'AvatarAsset.mjs',
           'AvatarOrbit.mjs',
           'nono-detached.glb',

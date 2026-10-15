@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   StyleSheet,
 } from 'react-native';
+import {useIsFocused} from '@react-navigation/native';
 import {PageLayout} from '@shared/components/PageLayout';
 import {ConfirmModal} from '@shared/components/ConfirmModal';
 import {COLORS} from '@shared/constants';
@@ -87,6 +88,7 @@ function lookStatus(
 }
 
 export const AvatarLooksScreen: React.FC = () => {
+  const focused = useIsFocused();
   const androidOnly = Platform.OS !== 'android';
   const [items, setItems] = useState(() =>
     androidOnly
@@ -142,6 +144,7 @@ export const AvatarLooksScreen: React.FC = () => {
       </Text>
       <View style={styles.preview} testID="avatar-look-preview">
         <NonoAvatar3D
+          active={focused}
           mood={activeId === 'builtin' ? reaction.mood : 'idle'}
           reactionKey={activeId === 'builtin' ? reaction.key : 0}
           onPress={
@@ -175,7 +178,7 @@ export const AvatarLooksScreen: React.FC = () => {
           <View style={styles.reactions}>
             <Text style={styles.headingTitle}>逗逗 NoNo</Text>
             <Text style={styles.headingHint}>
-              轻点角色眨眼，拖动看看侧面。默认上翼 95°、下翼 80°。
+              轻点角色眨眼，拖动看看侧面。待机时它会轻轻呼吸，偶尔自己活动一下。
             </Text>
             <View style={styles.reactionButtons}>
               {REACTIONS.map(item => (

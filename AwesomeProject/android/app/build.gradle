@@ -134,7 +134,7 @@ android {
 
 tasks.register('copyNonoAvatarAssets', Copy) {
     from("${rootProject.projectDir}/../src/features/task/avatar") {
-        include 'avatar.html', 'scene.js', 'GLTFLoader.js', 'AvatarAnimation.mjs', 'AvatarAsset.mjs', 'AvatarOrbit.mjs', 'nono-detached.glb'
+        include 'avatar.html', 'scene.js', 'GLTFLoader.js', 'AvatarAnimation.mjs', 'AvatarPet.mjs', 'AvatarAsset.mjs', 'AvatarOrbit.mjs', 'nono-detached.glb'
     }
     from("${rootProject.projectDir}/../node_modules/three/build") {
         include 'three.module.js'

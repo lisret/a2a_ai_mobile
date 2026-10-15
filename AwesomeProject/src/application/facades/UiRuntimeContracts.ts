@@ -1,3 +1,4 @@
+import type {PetIntent, PetIntentContext} from './PetIntent';
 import type {AgentModeId, ModelListKey} from '../../shared/types/Model';
 import type {
   ProviderAuthV1,
@@ -376,6 +377,7 @@ export interface CompanionFacade {
   submitTranscript(text: string): Promise<CompanionTurnViewState>;
   confirmProposal(turnId: string): Promise<void>;
   dismissTurn(turnId: string): Promise<void>;
+  suggestPetIntent?(context: PetIntentContext, signal: AbortSignal): Promise<PetIntent | null>;
 }
 
 export interface PhoneOperateFacade {
@@ -455,6 +457,7 @@ export interface CompanionApplicationPort {
   submitTranscript(text: string): Promise<CompanionTurnViewState>;
   confirmProposal(turnId: string): Promise<void>;
   dismissTurn(turnId: string): Promise<void>;
+  suggestPetIntent?(context: PetIntentContext, signal: AbortSignal): Promise<PetIntent | null>;
 }
 
 export interface PhoneOperateApplicationPort {

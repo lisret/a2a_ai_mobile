@@ -16,7 +16,12 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
   multiRemove: jest.fn(),
 }));
 
-const {NativeModules} = require('react-native');
+const {NativeModules, AccessibilityInfo, AppState} = require('react-native');
+AccessibilityInfo.addEventListener.mockImplementation(() => ({
+  remove: jest.fn(),
+}));
+AccessibilityInfo.isReduceMotionEnabled.mockResolvedValue(false);
+AppState.addEventListener.mockImplementation(() => ({remove: jest.fn()}));
 NativeModules.AccessibilityModule = {};
 NativeModules.AccessibilityActionModule = {};
 NativeModules.ADBModule = {};
@@ -28,7 +33,8 @@ jest.mock('@react-navigation/native', () => {
   const actual = jest.requireActual('@react-navigation/native');
   return {
     ...actual,
-    useFocusEffect: (effect) => React.useEffect(effect, []),
+    useIsFocused: () => true,
+    useFocusEffect: effect => React.useEffect(effect, []),
   };
 });
 

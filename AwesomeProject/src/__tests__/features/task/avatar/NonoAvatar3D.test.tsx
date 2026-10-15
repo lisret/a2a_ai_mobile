@@ -1,5 +1,6 @@
 import React from 'react';
-import {fireEvent, render} from '@testing-library/react-native';
+import {AccessibilityInfo, AppState} from 'react-native';
+import {act, fireEvent, render} from '@testing-library/react-native';
 import {NonoAvatar3D} from '../../../../features/task/components/NonoAvatar3D';
 const mockInject = jest.fn();
 jest.mock('react-native-webview', () => {
@@ -106,4 +107,218 @@ test('explicit reaction presses replay without reloading the model', () => {
   expect(mockInject.mock.calls.map(([s]) => s).join('')).not.toContain(
     'loadGltf',
   );
+});
+
+test('offscreen hosts stop rendering and cannot request pet AI', () => {
+  const requestPetIntent = jest.fn();
+  const screen = render(
+    <NonoAvatar3D
+      mood="idle"
+      gltfUri={null}
+      active={false}
+      requestPetIntent={requestPetIntent}
+      onGltfFailed={jest.fn()}
+    />,
+  );
+  expect(mockInject.mock.calls.map(([s]) => s).join('')).toContain(
+    'setActive(false)',
+  );
+  fireEvent(screen.getByTestId('avatar-webview'), 'message', {
+    nativeEvent: {
+      data: JSON.stringify({
+        type: 'avatar-intent-request',
+        context: {temperament: 'calm', idleSeconds: 20, lastAction: null},
+      }),
+    },
+  });
+  expect(requestPetIntent).not.toHaveBeenCalled();
+});
+
+test('pet requests are throttled and an interaction cancels/invalidates the late AI response', async () => {
+  let resolve: (v: any) => void = () => {};
+  const requestPetIntent = jest.fn(
+    (_context: any, _signal: AbortSignal) =>
+      new Promise<any>(r => {
+        resolve = r;
+      }),
+  );
+  const screen = render(
+    <NonoAvatar3D
+      mood="idle"
+      gltfUri={null}
+      requestPetIntent={requestPetIntent}
+      onGltfFailed={jest.fn()}
+    />,
+  );
+  const message = (type: string) =>
+    fireEvent(screen.getByTestId('avatar-webview'), 'message', {
+      nativeEvent: {
+        data: JSON.stringify({
+          type,
+          context: {temperament: 'calm', idleSeconds: 20, lastAction: null},
+        }),
+      },
+    });
+  await act(async () => {
+    message('avatar-intent-request');
+    message('avatar-intent-request');
+  });
+  expect(requestPetIntent).toHaveBeenCalledTimes(1);
+  message('avatar-interaction');
+  expect(requestPetIntent.mock.calls[0][1].aborted).toBe(true);
+  mockInject.mockClear();
+  await act(async () => resolve({temperament: 'playful'}));
+  expect(mockInject.mock.calls.map(([s]) => s).join('')).not.toContain(
+    'setPetTemperament',
+  );
+});
+
+test('valid AI intent reaches the visible builtin model', async () => {
+  const requestPetIntent = jest
+    .fn()
+    .mockResolvedValue({temperament: 'curious'});
+  const screen = render(
+    <NonoAvatar3D
+      mood="idle"
+      gltfUri={null}
+      requestPetIntent={requestPetIntent}
+      onGltfFailed={jest.fn()}
+    />,
+  );
+  await act(async () =>
+    fireEvent(screen.getByTestId('avatar-webview'), 'message', {
+      nativeEvent: {
+        data: JSON.stringify({
+          type: 'avatar-intent-request',
+          context: {temperament: 'calm', idleSeconds: 20, lastAction: null},
+        }),
+      },
+    }),
+  );
+  expect(mockInject.mock.calls.map(([s]) => s).join('')).toContain(
+    'setPetTemperament("curious")',
+  );
+});
+
+const petMessage = (screen: ReturnType<typeof render>) =>
+  fireEvent(screen.getByTestId('avatar-webview'), 'message', {
+    nativeEvent: {
+      data: JSON.stringify({
+        type: 'avatar-intent-request',
+        context: {temperament: 'calm', idleSeconds: 20, lastAction: null},
+      }),
+    },
+  });
+
+test.each(['background', 'manual', 'model', 'reduced', 'timeout', 'unmount'])(
+  '%s cancels AI and rejects late answers',
+  async reason => {
+    jest.useFakeTimers();
+    let resolve: (value: any) => void = () => {};
+    const requestPetIntent = jest.fn(
+      (_context: any, _signal: AbortSignal) =>
+        new Promise<any>(r => {
+          resolve = r;
+        }),
+    );
+    const props = {
+      mood: 'idle' as const,
+      gltfUri: null,
+      requestPetIntent,
+      onGltfFailed: jest.fn(),
+    };
+    const screen = render(<NonoAvatar3D {...props} />);
+    await act(async () => {
+      petMessage(screen);
+    });
+    expect(requestPetIntent).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      if (reason === 'background')
+        (AppState.addEventListener as jest.Mock).mock.calls.at(-1)[1](
+          'background',
+        );
+      if (reason === 'manual')
+        screen.rerender(<NonoAvatar3D {...props} mood="listen" />);
+      if (reason === 'model')
+        screen.rerender(
+          <NonoAvatar3D {...props} gltfUri="file:///other.glb" />,
+        );
+      if (reason === 'reduced')
+        (AccessibilityInfo.addEventListener as jest.Mock).mock.calls.at(-1)[1](
+          true,
+        );
+      if (reason === 'timeout') jest.advanceTimersByTime(10001);
+      if (reason === 'unmount') screen.unmount();
+    });
+    expect(requestPetIntent.mock.calls[0][1].aborted).toBe(true);
+    mockInject.mockClear();
+    await act(async () => {
+      resolve({temperament: 'playful'});
+    });
+    expect(
+      mockInject.mock.calls.map(([script]) => script).join(''),
+    ).not.toContain('setPetTemperament');
+    screen.unmount();
+    jest.useRealTimers();
+  },
+);
+
+test('malformed AI output is ignored and completed requests stay throttled', async () => {
+  const requestPetIntent = jest
+    .fn()
+    .mockResolvedValue({temperament: 'curious);alert(1)'});
+  const screen = render(
+    <NonoAvatar3D
+      mood="idle"
+      gltfUri={null}
+      requestPetIntent={requestPetIntent}
+      onGltfFailed={jest.fn()}
+    />,
+  );
+  mockInject.mockClear();
+  await act(async () => {
+    petMessage(screen);
+  });
+  await act(async () => {
+    petMessage(screen);
+  });
+  expect(requestPetIntent).toHaveBeenCalledTimes(1);
+  expect(
+    mockInject.mock.calls.map(([script]) => script).join(''),
+  ).not.toContain('setPetTemperament');
+});
+
+test.each([
+  'listen',
+  'thinking',
+  'success',
+  'error',
+  'confirm',
+  'surprised',
+  'shy',
+  'laugh',
+  'fold',
+  'unfold',
+])('AI still accepts local state after %s', async lastAction => {
+  const requestPetIntent = jest.fn().mockResolvedValue(null);
+  const screen = render(
+    <NonoAvatar3D
+      mood="idle"
+      gltfUri={null}
+      requestPetIntent={requestPetIntent}
+      onGltfFailed={jest.fn()}
+    />,
+  );
+  await act(async () =>
+    fireEvent(screen.getByTestId('avatar-webview'), 'message', {
+      nativeEvent: {
+        data: JSON.stringify({
+          type: 'avatar-intent-request',
+          context: {temperament: 'calm', idleSeconds: 20, lastAction},
+        }),
+      },
+    }),
+  );
+  expect(requestPetIntent).toHaveBeenCalledTimes(1);
+  expect(requestPetIntent.mock.calls[0][0].lastAction).toBe(lastAction);
 });

@@ -8,7 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {useFocusEffect} from '@react-navigation/native';
+import {useFocusEffect, useIsFocused} from '@react-navigation/native';
 import {COLORS} from '@shared/constants';
 import {ConfirmModal} from '@shared/components/ConfirmModal';
 import {showCustomAlert} from '@shared/utils/alert';
@@ -46,10 +46,17 @@ const isTerminalPhase = (phase: OperateTaskViewState['phase']): boolean =>
 
 export const HomeScreen: React.FC = () => {
   const {companion, operate} = useAppFacades();
-
-  const [companionState, setCompanionState] = useState<CompanionViewState | null>(
-    null,
+  const focused = useIsFocused();
+  const requestPetIntent = useCallback<
+    import('../avatar/useAvatarPresence').RequestPetIntent
+  >(
+    (context, signal) =>
+      companion.suggestPetIntent?.(context, signal) ?? Promise.resolve(null),
+    [companion],
   );
+
+  const [companionState, setCompanionState] =
+    useState<CompanionViewState | null>(null);
   const [operateState, setOperateState] =
     useState<OperateTaskViewState>(IDLE_OPERATE);
   const [stopConfirmVisible, setStopConfirmVisible] = useState(false);
@@ -176,9 +183,7 @@ export const HomeScreen: React.FC = () => {
 
   const dismissTurn = useCallback(
     (turnId: string) => {
-      setCompanionState(prev =>
-        prev ? {...prev, turn: undefined} : prev,
-      );
+      setCompanionState(prev => (prev ? {...prev, turn: undefined} : prev));
       void companion.dismissTurn(turnId);
     },
     [companion],
@@ -358,6 +363,8 @@ export const HomeScreen: React.FC = () => {
       <View style={styles.avatarWrap}>
         <NonoAvatar3D
           mood={mascotMood}
+          active={focused}
+          requestPetIntent={requestPetIntent}
           gltfUri={gltfUri}
           onGltfFailed={handleGltfFailed}
           onPress={handleAvatarPress}
@@ -448,7 +455,8 @@ const styles = StyleSheet.create({
   },
   console: {
     paddingHorizontal: 18,
-    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 16 : 64,
+    paddingTop:
+      Platform.OS === 'android' ? (StatusBar.currentHeight || 24) + 16 : 64,
     paddingBottom: 120,
   },
   runKickerTop: {

@@ -408,3 +408,21 @@ test('sleeping eyes remain visible horizontal light bars above the curved displa
   }
   mixer.stopAllAction();
 });
+
+test('host focus and reduced motion stop frames; focus resumes without duplicate loops', async () => {
+  const h = await sceneHarness();
+  h.api.setActive(false);
+  assert.equal(h.frames.size, 0);
+  h.api.setActive(true);
+  h.api.setActive(true);
+  assert.equal(h.frames.size, 1);
+  h.api.setReducedMotion(true);
+  // A single still frame is allowed to update the static pose.
+  const [id, frame] = [...h.frames][0];
+  h.frames.delete(id);
+  frame(1000);
+  assert.equal(h.frames.size, 0);
+  h.api.setReducedMotion(false);
+  assert.equal(h.frames.size, 1);
+  h.events.pagehide();
+});

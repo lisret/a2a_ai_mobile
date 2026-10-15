@@ -1,3 +1,8 @@
+import {
+  requestPetIntent,
+  type PetIntent,
+  type PetIntentContext,
+} from './PetIntent';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {acquireLocalDeviceControl} from '../../core/ability/accessibility/LocalDeviceControlLease';
 import {accessibilityService} from '../../core/ability/accessibility/AccessibilityService';
@@ -82,7 +87,7 @@ function classifyTranscript(text: string): CompanionTurnViewState['intent'] {
 }
 
 export class RuntimeCompanionPort implements CompanionApplicationPort {
-  constructor(private readonly repo: RuntimeConfigRepository) {}
+  constructor(private readonly repo: RuntimeConfigRepository, private readonly registry?: ModelProviderRegistry) {}
 
   async getState(): Promise<CompanionViewState> {
     const envelope = await this.repo.load();
@@ -158,6 +163,24 @@ export class RuntimeCompanionPort implements CompanionApplicationPort {
 
   async dismissTurn(turnId: string): Promise<void> {
     pendingTurns.delete(turnId);
+  }
+  /**
+   * Pet-idle temperament lookup over the currently bound `role=companion`
+   * profile. Read-only: it never creates a turn, proposal or persisted state,
+   * and it resolves `null` whenever the registry is absent or the request fails.
+   */
+  async suggestPetIntent(
+    context: PetIntentContext,
+    signal: AbortSignal,
+  ): Promise<PetIntent | null> {
+    if (!this.registry) {
+      return null;
+    }
+    return requestPetIntent(
+      {repo: this.repo, registry: this.registry},
+      context,
+      signal,
+    );
   }
 }
 
